@@ -1,16 +1,33 @@
 import express from 'express';
 import cors from 'cors';
 import router from './routes/files.routes.js';
+import multer from 'multer';
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/api/v1', router);
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    return res.status(400).json({
+      message: err.message,
+    });
+  }
 
-app.get("/", (req, res) => {
+  if (err) {
+    return res.status(400).json({
+      message: err.message,
+    });
+  }
+
+  next();
+});
+
+app.get('/', (req, res) => {
     res.status(200).json({
         success: true,
-        message: "Sovereign AI Workbench Backend Running 🚀"
+        message: "Welcome to the File Upload API"
     });
 });
+
 
 export default app;
