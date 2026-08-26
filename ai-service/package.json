@@ -12,6 +12,8 @@
   "type": "module",
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
+    "@qdrant/js-client-rest": "^1.19.0",
+    "dotenv": "^17.4.2",
     "pdfjs-dist": "^6.2.108"
   }
 }
