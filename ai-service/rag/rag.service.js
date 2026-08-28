@@ -1,6 +1,6 @@
-import {generateEmbedding} from "../embeddings/embedding.service.js";
-import {searchSimilarChunks} from "../vectorstore/qdrant.service.js";
-import {generateAnswer} from "../llm/llm.service.js";
+import { generateEmbedding } from "../embeddings/embedding.service.js";
+import { searchSimilarChunks } from "../retrieval/retrieval.service.js";
+import { generateAnswer } from "../llm/llm.service.js";
 
 const DEFAULT_CANDIDATE_LIMIT = 10;
 const DEFAULT_CONTEXT_LIMIT = 5;
@@ -8,8 +8,8 @@ const DEFAULT_SCORE_THRESHOLD = 0.5;
 
 const NO_CONTEXT_MESSAGE =
     "I could not find relevant information in the uploaded documents.";
-    
-export function buildContext(chunks) {  
+
+export function buildContext(chunks) {
     return chunks
         .map((chunk, index) => {
             return `SOURCE ${index + 1}:
@@ -42,7 +42,6 @@ QUESTION:
 ${question}`;
 }
 
-
 export async function answerQuestion(question, options = {}) {
     // Validate question
     if (typeof question !== "string") {
@@ -67,13 +66,14 @@ export async function answerQuestion(question, options = {}) {
         question.trim()
     );
 
-    // Retrieve candidates from Qdrant
+    // Retrieve candidate chunks
     const chunks = await searchSimilarChunks(
         queryEmbedding,
         candidateLimit
+        ,options.documentId
     );
 
-    // Validate retrieval result
+    // No retrieval results
     if (!Array.isArray(chunks) || chunks.length === 0) {
         return {
             answer: NO_CONTEXT_MESSAGE,
@@ -81,7 +81,7 @@ export async function answerQuestion(question, options = {}) {
         };
     }
 
-    // Filter invalid and low-score chunks
+    // Filter invalid and low-relevance chunks
     const relevantChunks = chunks
         .filter((chunk) => {
             return (
@@ -92,13 +92,10 @@ export async function answerQuestion(question, options = {}) {
                 chunk.score >= scoreThreshold
             );
         })
-        // Qdrant normally returns results by relevance,
-        // but explicitly sort to make the behavior deterministic.
         .sort((a, b) => b.score - a.score)
-        // Only send the best chunks to the LLM.
         .slice(0, contextLimit);
 
-    // No relevant context
+    // No sufficiently relevant context
     if (relevantChunks.length === 0) {
         return {
             answer: NO_CONTEXT_MESSAGE,
@@ -106,7 +103,7 @@ export async function answerQuestion(question, options = {}) {
         };
     }
 
-    // Build context
+    // Build context for LLM
     const context = buildContext(relevantChunks);
 
     // Build grounded prompt
@@ -115,15 +112,16 @@ export async function answerQuestion(question, options = {}) {
         context
     );
 
-    // Generate answer through LLM gateway
+    // Generate answer using local LLM
     const answer = await generateAnswer(
         prompt,
         options.model
     );
 
-    // Sources come directly from Qdrant
+    // Build page-aware citations
     const sources = relevantChunks.map((chunk) => ({
         documentId: chunk.documentId,
+        page: chunk.page,
         chunkIndex: chunk.chunkIndex,
         score: chunk.score,
     }));
