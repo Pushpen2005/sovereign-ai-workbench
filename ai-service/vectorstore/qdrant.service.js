@@ -118,20 +118,20 @@ export async function upsertChunks(chunks) {
             }
 
             if (
-                typeof chunk.startOffset !== "number" ||
-                chunk.startOffset < 0
+                typeof chunk.pageStartOffset !== "number" ||
+                chunk.pageStartOffset < 0
             ) {
                 throw new Error(
-                    "Chunk startOffset must be a non-negative number"
+                    "Chunk pageStartOffset must be a non-negative number"
                 );
             }
 
             if (
-                typeof chunk.endOffset !== "number" ||
-                chunk.endOffset < chunk.startOffset
+                typeof chunk.pageEndOffset !== "number" ||
+                chunk.pageEndOffset < chunk.pageStartOffset
             ) {
                 throw new Error(
-                    "Chunk endOffset is invalid"
+                    "Chunk pageEndOffset is invalid"
                 );
             }
 
@@ -154,13 +154,14 @@ export async function upsertChunks(chunks) {
                 ),
                 vector: chunk.vector,
                 payload: {
-                    documentId: chunk.documentId,
-                    text: chunk.text,
-                    chunkIndex: chunk.chunkIndex,
-                    startOffset: chunk.startOffset,
-                    endOffset: chunk.endOffset,
-                },
-            };;
+    documentId: chunk.documentId,
+    page: chunk.page,
+    text: chunk.text,
+    chunkIndex: chunk.chunkIndex,
+    pageStartOffset: chunk.pageStartOffset,
+    pageEndOffset: chunk.pageEndOffset,
+},
+            };
         });
 
         await qdrant.upsert(COLLECTION_NAME, {
