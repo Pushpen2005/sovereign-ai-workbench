@@ -1,6 +1,6 @@
-import { generateEmbedding } from "../embeddings/embedding.service.js";
-import { searchSimilarChunks } from "../vectorstore/qdrant.service.js";
-import { generateAnswer } from "../llm/llm.service.js";
+import {generateEmbedding} from "../embeddings/embedding.service.js";
+import {searchSimilarChunks} from "../vectorstore/qdrant.service.js";
+import {generateAnswer} from "../llm/llm.service.js";
 
 const DEFAULT_CANDIDATE_LIMIT = 10;
 const DEFAULT_CONTEXT_LIMIT = 5;
@@ -8,8 +8,8 @@ const DEFAULT_SCORE_THRESHOLD = 0.5;
 
 const NO_CONTEXT_MESSAGE =
     "I could not find relevant information in the uploaded documents.";
-
-export function buildContext(chunks) {
+    
+export function buildContext(chunks) {  
     return chunks
         .map((chunk, index) => {
             return `SOURCE ${index + 1}:
@@ -41,6 +41,7 @@ ${context}
 QUESTION:
 ${question}`;
 }
+
 
 export async function answerQuestion(question, options = {}) {
     // Validate question
