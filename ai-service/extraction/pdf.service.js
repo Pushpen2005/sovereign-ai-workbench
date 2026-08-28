@@ -25,7 +25,7 @@ export async function extractPdfText(filePath) {
         });
 
         const pdf = await loadingTask.promise;
-
+        const pages = [];
         const pageTexts = [];
 
         for (let pageNumber  = 1; pageNumber <= pdf.numPages; pageNumber++) {
@@ -36,13 +36,17 @@ export async function extractPdfText(filePath) {
                 .map((item) => item.str)
                 .join(" ")
                 .trim();
-
+            pages.push({
+    page: pageNumber,
+    text: pageText,
+});
             pageTexts.push(pageText);
         }
 
         return {
             text: pageTexts.join("\n\n"),
             pageCount: pdf.numPages,
+            pages,
         };
     }
     catch (error) {
