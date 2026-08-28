@@ -2,61 +2,92 @@ const CHUNK_SIZE = 1000;
 const CHUNK_OVERLAP = 200;
 
 /**
- * Split extracted PDF text into overlapping chunks.
+ * Split extracted PDF pages into overlapping chunks.
  *
- * @param {string} text - Extracted PDF text
+ * Chunking is performed independently for each page.
+ * chunkIndex remains global across the document.
+ *
+ * @param {Array<{
+ *   page: number,
+ *   text: string
+ * }>} pages - Page-aware extracted PDF text
+ *
  * @param {string} documentId - Unique ID of the source document
+ *
  * @returns {Array<{
  *   documentId: string,
+ *   page: number,
  *   chunkIndex: number,
  *   text: string,
- *   startOffset: number,
- *   endOffset: number
+ *   pageStartOffset: number,
+ *   pageEndOffset: number
  * }>}
  */
-function chunkText(text, documentId) {
-    if (typeof text !== "string") {
-        throw new TypeError("Text must be a string");
+function chunkText(pages, documentId) {
+    if (!Array.isArray(pages)) {
+        throw new TypeError("Pages must be an array");
     }
 
-    if (text.trim().length === 0) {
-        throw new Error("Text cannot be empty");
+    if (pages.length === 0) {
+        throw new Error("Pages cannot be empty");
     }
 
     if (
         typeof documentId !== "string" ||
         documentId.trim().length === 0
     ) {
-        throw new TypeError("documentId must be a non-empty string");
+        throw new TypeError(
+            "documentId must be a non-empty string"
+        );
     }
 
     const chunks = [];
+
     const step = CHUNK_SIZE - CHUNK_OVERLAP;
 
+    // IMPORTANT:
+    // Keep this outside the page loop.
+    // This makes chunkIndex global across the document.
     let chunkIndex = 0;
 
-    for (
-        let start = 0;
-        start < text.length;
-        start += step
-    ) {
-        const end = Math.min(
-            start + CHUNK_SIZE,
-            text.length
-        );
+    for (const pageData of pages) {
+        if (!pageData || typeof pageData.text !== "string") {
+            continue;
+        }
 
-        chunks.push({
-            documentId,
-            chunkIndex,
-            text: text.slice(start, end),
-            startOffset: start,
-            endOffset: end,
-        });
+        const page = pageData.page;
+        const text = pageData.text;
 
-        chunkIndex++;
+        // Skip empty pages
+        if (text.trim().length === 0) {
+            continue;
+        }
 
-        if (end === text.length) {
-            break;
+        // Chunk this page independently
+        for (
+            let start = 0;
+            start < text.length;
+            start += step
+        ) {
+            const end = Math.min(
+                start + CHUNK_SIZE,
+                text.length
+            );
+
+            chunks.push({
+                documentId,
+                page,
+                chunkIndex,
+                text: text.slice(start, end),
+                pageStartOffset: start,
+                pageEndOffset: end,
+            });
+
+            chunkIndex++;
+
+            if (end === text.length) {
+                break;
+            }
         }
     }
 
