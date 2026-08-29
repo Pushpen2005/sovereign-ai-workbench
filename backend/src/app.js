@@ -29,5 +29,9 @@ app.get('/', (req, res) => {
     });
 });
 
-
+app.get('/api/v1/health', (req, res) => {
+    res.status(200).json({
+        status: "ok"
+    });
+});
 export default app;
