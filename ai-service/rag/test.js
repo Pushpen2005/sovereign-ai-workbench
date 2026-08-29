@@ -13,10 +13,10 @@ import {
 import { answerQuestion } from "./rag.service.js";
 
 const PDF_PATH =
-    "../backend/src/uploads/09fbc5d1-5f2d-489d-abcc-e4fbf521c4ce.pdf";
+    "../backend/src/uploads/1af78bd3-35a4-499e-a4e8-8b504c299096.pdf";
 
 const QUESTION =
-    "What is the revenue of Reliance Industries?";
+    "tell me about hack heritage";
 
 async function runRagTest() {
     console.log("=== PR #11 E2E RAG TEST ===\n");
