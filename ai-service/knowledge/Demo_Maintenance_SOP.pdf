@@ -1,0 +1,66 @@
+%PDF-1.4
+4 0 obj
+<< /Length 561 >>
+stream
+BT /F1 11 Tf 50 750 Td (DEMO MAINTENANCE SOP) Tj T*
+() Tj T*
+(Document ID: SOP-MAINT-001) Tj T*
+(Version: 1.0) Tj T*
+() Tj T*
+(1. Bearing Temperature Monitoring) Tj T*
+() Tj T*
+(Normal bearing operating temperature is up to 80 degrees C.) Tj T*
+() Tj T*
+(If bearing temperature exceeds 80 degrees C:) Tj T*
+(  1. Record the observed temperature.) Tj T*
+(  2. Inspect the bearing assembly.) Tj T*
+(  3. Check lubrication condition.) Tj T*
+(  4. Check for abnormal vibration.) Tj T*
+(  5. Do not return equipment to service until inspection is complete.) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+6 0 obj
+<< /Length 458 >>
+stream
+BT /F1 11 Tf 50 750 Td (2. Abnormal Vibration) Tj T*
+() Tj T*
+(If abnormal vibration is observed:) Tj T*
+(  1. Record the observation.) Tj T*
+(  2. Inspect the rotating assembly.) Tj T*
+(  3. Check bearing condition.) Tj T*
+(  4. Check alignment where applicable.) Tj T*
+() Tj T*
+(3. Maintenance Evidence) Tj T*
+() Tj T*
+(All observations must be recorded with the equipment identifier,) Tj T*
+(observed value where applicable, and inspection date.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000001543 00000 n 
+0000001480 00000 n 
+0000000621 00000 n 
+0000000009 00000 n 
+0000001305 00000 n 
+0000000796 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1592
+%%EOF

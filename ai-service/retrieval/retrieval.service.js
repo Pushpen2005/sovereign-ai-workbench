@@ -11,18 +11,22 @@ const qdrant = new QdrantClient({
 /**
  * Search Qdrant for chunks similar to a query vector.
  *
- * If documentId is provided, retrieval is restricted
- * to that document only.
+ * Optional filters:
+ * - documentId
+ * - documentType
  *
  * @param {number[]} queryVector
  * @param {number} limit
  * @param {string} [documentId]
+ * @param {object} [filters]
+ * @param {string} [filters.documentType]
  * @returns {Promise<Array>}
  */
 export async function searchSimilarChunks(
     queryVector,
     limit = 5,
-    documentId
+    documentId,
+    filters = {}
 ) {
     // Validate query vector
     if (!Array.isArray(queryVector)) {
@@ -48,7 +52,7 @@ export async function searchSimilarChunks(
         );
     }
 
-    // Validate documentId when provided
+    // Validate documentId
     if (
         documentId !== undefined &&
         (
@@ -61,46 +65,107 @@ export async function searchSimilarChunks(
         );
     }
 
+    // Validate filters
+    if (
+        !filters ||
+        typeof filters !== "object" ||
+        Array.isArray(filters)
+    ) {
+        throw new TypeError(
+            "filters must be an object"
+        );
+    }
+
+    if (
+        filters.documentType !== undefined &&
+        (
+            typeof filters.documentType !== "string" ||
+            filters.documentType.trim().length === 0
+        )
+    ) {
+        throw new Error(
+            "filters.documentType must be a non-empty string"
+        );
+    }
+
     try {
+        const must = [];
+
+        // Filter by documentId when provided
+        if (documentId !== undefined) {
+            must.push({
+                key: "documentId",
+                match: {
+                    value: documentId.trim(),
+                },
+            });
+        }
+
+        // Filter by documentType when provided
+        if (filters.documentType !== undefined) {
+            must.push({
+                key: "documentType",
+                match: {
+                    value: filters.documentType.trim(),
+                },
+            });
+        }
+
         const searchRequest = {
             query: queryVector,
             limit,
             with_payload: true,
         };
 
-        // Restrict retrieval to a specific document
-        if (documentId !== undefined) {
+        // Apply filters only when at least one exists
+        if (must.length > 0) {
             searchRequest.filter = {
-                must: [
-                    {
-                        key: "documentId",
-                        match: {
-                            value: documentId.trim(),
-                        },
-                    },
-                ],
+                must,
             };
         }
 
         const response = await qdrant.query(
-    COLLECTION_NAME,
-    searchRequest
-);
+            COLLECTION_NAME,
+            searchRequest
+        );
 
-const results = response.points ?? [];
+        const results = response.points ?? [];
 
-console.log("=== RAW QDRANT RESULTS ===");
-console.dir(results, { depth: null });
+        console.log(
+            "=== RAW QDRANT RESULTS ==="
+        );
 
-return results.map((result) => ({
-    score: result.score,
-    documentId: result.payload?.documentId,
-    page: result.payload?.page,
-    text: result.payload?.text,
-    chunkIndex: result.payload?.chunkIndex,
-    pageStartOffset: result.payload?.pageStartOffset,
-    pageEndOffset: result.payload?.pageEndOffset,
-}));
+        console.dir(results, {
+            depth: null,
+        });
+
+        return results.map((result) => ({
+            score: result.score,
+
+            documentId:
+                result.payload?.documentId,
+
+            filename:
+                result.payload?.filename,
+
+            documentType:
+                result.payload?.documentType,
+
+            page:
+                result.payload?.page,
+
+            text:
+                result.payload?.text,
+
+            chunkIndex:
+                result.payload?.chunkIndex,
+
+            pageStartOffset:
+                result.payload?.pageStartOffset,
+
+            pageEndOffset:
+                result.payload?.pageEndOffset,
+        }));
     } catch (error) {
         console.error(
             "Failed to search Qdrant:",
@@ -109,7 +174,9 @@ return results.map((result) => ({
 
         throw new Error(
             `Qdrant similarity search failed: ${error.message}`,
-            { cause: error }
+            {
+                cause: error,
+            }
         );
     }
 }

@@ -154,13 +154,15 @@ export async function upsertChunks(chunks) {
                 ),
                 vector: chunk.vector,
                 payload: {
-    documentId: chunk.documentId,
-    page: chunk.page,
-    text: chunk.text,
-    chunkIndex: chunk.chunkIndex,
-    pageStartOffset: chunk.pageStartOffset,
-    pageEndOffset: chunk.pageEndOffset,
-},
+                    documentId: chunk.documentId,
+                    filename: chunk.filename,
+                    documentType: chunk.documentType,
+                    page: chunk.page,
+                    text: chunk.text,
+                    chunkIndex: chunk.chunkIndex,
+                    pageStartOffset: chunk.pageStartOffset,
+                    pageEndOffset: chunk.pageEndOffset,
+                },
             };
         });
 
