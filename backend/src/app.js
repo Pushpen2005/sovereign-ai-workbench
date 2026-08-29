@@ -2,10 +2,13 @@ import express from 'express';
 import cors from 'cors';
 import router from './routes/files.routes.js';
 import multer from 'multer';
+import inspectionRouter from "./routes/inspection.routes.js";
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/api/v1', router);
+app.use("/api/v1/inspection", inspectionRouter);
 app.use((err, req, res, next) => {
   if (err instanceof multer.MulterError) {
     return res.status(400).json({
