@@ -29,19 +29,22 @@ async function generateAnswer(prompt, model) {
         }
     }
 
+    const ollamaUrl = process.env.OLLAMA_URL || OLLAMA_URL;
+    const ollamaModel = process.env.OLLAMA_MODEL || OLLAMA_MODEL;
+
     // Validate environment configuration
-    if (!OLLAMA_URL) {
+    if (!ollamaUrl) {
         throw new LLMError("OLLAMA_URL is not configured");
     }
 
-    if (!OLLAMA_MODEL) {
+    if (!ollamaModel) {
         throw new LLMError("OLLAMA_MODEL is not configured");
     }
 
-    const selectedModel = model?.trim() || OLLAMA_MODEL;
+    const selectedModel = model?.trim() || ollamaModel;
 
     try {
-        const response = await fetch(`${OLLAMA_URL}/api/generate`, {
+        const response = await fetch(`${ollamaUrl}/api/generate`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
