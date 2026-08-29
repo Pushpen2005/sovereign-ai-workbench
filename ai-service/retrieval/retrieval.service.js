@@ -83,27 +83,24 @@ export async function searchSimilarChunks(
         }
 
         const response = await qdrant.query(
-            COLLECTION_NAME,
-            searchRequest
-        );
+    COLLECTION_NAME,
+    searchRequest
+);
 
-        const results = response.points ?? [];
+const results = response.points ?? [];
 
-        return results.map((result) => ({
-            score: result.score,
-            documentId:
-                result.payload?.documentId,
-            page:
-                result.payload?.page,
-            text:
-                result.payload?.text,
-            chunkIndex:
-                result.payload?.chunkIndex,
-            pageStartOffset:
-                result.payload?.pageStartOffset,
-            pageEndOffset:
-                result.payload?.pageEndOffset,
-        }));
+console.log("=== RAW QDRANT RESULTS ===");
+console.dir(results, { depth: null });
+
+return results.map((result) => ({
+    score: result.score,
+    documentId: result.payload?.documentId,
+    page: result.payload?.page,
+    text: result.payload?.text,
+    chunkIndex: result.payload?.chunkIndex,
+    pageStartOffset: result.payload?.pageStartOffset,
+    pageEndOffset: result.payload?.pageEndOffset,
+}));
     } catch (error) {
         console.error(
             "Failed to search Qdrant:",
