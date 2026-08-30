@@ -11,9 +11,12 @@
  *              → state updated with real backend response
  */
 
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useDocumentState, useDocumentActions } from '../state/documentState.jsx';
-import { uploadDocument as uploadDocumentApi } from '../api/documents.api.js';
+import {
+  uploadDocument as uploadDocumentApi,
+  fetchDocuments as fetchDocumentsApi,
+} from '../api/documents.api.js';
 
 // Max file size the UI will warn about (backend is authoritative)
 const MAX_FILE_SIZE_MB = 50;
@@ -23,8 +26,27 @@ export function useDocuments() {
   const actions = useDocumentActions();
 
   /**
+   * Fetch documents from PostgreSQL backend and update state.
+   */
+  const loadDocuments = useCallback(async () => {
+    try {
+      const res = await fetchDocumentsApi();
+      if (res && res.success && Array.isArray(res.documents)) {
+        actions.setDocuments(res.documents);
+      }
+    } catch (err) {
+      console.warn('Could not fetch persisted documents from backend:', err?.message);
+    }
+  }, [actions]);
+
+  // Load documents on initial mount (and on browser refresh)
+  useEffect(() => {
+    loadDocuments();
+  }, [loadDocuments]);
+
+  /**
    * Validate and upload a PDF file to the backend.
-   * Calls the real POST /api/v1/inspection/ingest endpoint.
+   * Calls POST /api/v1/documents.
    *
    * @param {File} file
    * @returns {Promise<void>}
@@ -52,24 +74,27 @@ export function useDocuments() {
       actions.uploadStart({ name: file.name, sizeMb: +sizeMb.toFixed(2) });
 
       try {
-        // Single call: upload + extract + chunk + embed + upsert to Qdrant
+        // Ingest into Qdrant + PostgreSQL
         const result = await uploadDocumentApi(file);
 
-        // Backend returns: { success, documentId, filename, chunksStored }
+        // Backend returns: { success, documentId, filename, originalFilename, chunksStored }
         actions.uploadSuccess(result);
+
+        // Refetch to sync full database state
+        await loadDocuments();
       } catch (err) {
         // Never expose raw stack traces; show human-readable message
         const message = err?.message || 'Upload failed. Please try again.';
         actions.uploadError(message);
       }
     },
-    [actions],
+    [actions, loadDocuments],
   );
 
   const clearError = useCallback(() => actions.uploadReset(), [actions]);
 
   return {
-    // Document list (mock + newly indexed real documents)
+    // Document list (loaded from PostgreSQL backend)
     documents: state.documents,
 
     // Selection
@@ -88,5 +113,7 @@ export function useDocuments() {
     // Actions
     uploadDocument,
     clearError,
+    refreshDocuments: loadDocuments,
   };
 }
+
