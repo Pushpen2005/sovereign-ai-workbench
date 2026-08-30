@@ -15,11 +15,14 @@
  */
 
 import React, { useRef, useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../../components/layout/PageHeader.jsx';
 import { Button } from '../../components/ui/Button.jsx';
 import { StatusBadge } from '../../components/ui/Badge.jsx';
 import { EmptyState } from '../../components/ui/FeedbackStates.jsx';
 import { useDocuments } from '../../hooks/useDocuments.js';
+import { useWorkflow } from '../../hooks/useWorkflow.js';
+import { triggerDocxDownload } from '../../api/inspection.api.js';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -218,7 +221,13 @@ function UploadPanel({ uploadState, uploadError, pendingFile, lastUploaded, onUp
 
 // ─── Documents Table ──────────────────────────────────────────────────────────
 
-function DocumentsTable({ documents }) {
+function DocumentsTable({
+  documents,
+  onAiSearch,
+  onAnalyzeInspection,
+  activeAnalyzingDocId,
+  isWorkflowRunning,
+}) {
   return (
     <div className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
       <div className="overflow-x-auto">
@@ -245,32 +254,65 @@ function DocumentsTable({ documents }) {
                 </td>
               </tr>
             ) : (
-              documents.map((doc) => (
-                <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-3 font-medium text-slate-900">
-                    <div className="flex items-center gap-2">
-                      <span className="text-slate-400 flex-shrink-0" aria-hidden="true">📄</span>
-                      <span className="truncate max-w-[160px]" title={doc.filename}>{doc.filename}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 hidden sm:table-cell">{doc.type || '—'}</td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={doc.status} />
-                  </td>
-                  <td className="px-4 py-3 text-slate-600 hidden lg:table-cell">
-                    {doc.chunksStored != null ? doc.chunksStored.toLocaleString() : doc.pages != null ? `~${doc.pages}p` : '—'}
-                  </td>
-                  <td className="px-4 py-3 text-slate-400 font-mono text-xs hidden xl:table-cell">
-                    <span title={doc.documentId || doc.id}>{truncateId(doc.documentId || doc.id)}</span>
-                  </td>
-                  <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{formatDate(doc.uploadedAt)}</td>
-                  <td className="px-4 py-3 text-right">
-                    <Button variant="ghost" size="sm" aria-label={`View ${doc.filename}`}>
-                      View
-                    </Button>
-                  </td>
-                </tr>
-              ))
+              documents.map((doc) => {
+                const docId = doc.documentId || doc.id;
+                const isAnalyzingThisDoc = activeAnalyzingDocId === docId && isWorkflowRunning;
+
+                return (
+                  <tr key={doc.id} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-4 py-3 font-medium text-slate-900">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-400 flex-shrink-0" aria-hidden="true">📄</span>
+                        <span className="truncate max-w-[160px]" title={doc.filename}>{doc.filename}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 hidden sm:table-cell">{doc.type || '—'}</td>
+                    <td className="px-4 py-3">
+                      <StatusBadge status={doc.status} />
+                    </td>
+                    <td className="px-4 py-3 text-slate-600 hidden lg:table-cell">
+                      {doc.chunksStored != null ? doc.chunksStored.toLocaleString() : doc.pages != null ? `~${doc.pages}p` : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-slate-400 font-mono text-xs hidden xl:table-cell">
+                      <span title={docId}>{truncateId(docId)}</span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-500 hidden md:table-cell">{formatDate(doc.uploadedAt)}</td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onAiSearch(doc)}
+                          aria-label={`AI Search for ${doc.filename}`}
+                          title="Ask questions using RAG search against this document"
+                        >
+                          AI Search
+                        </Button>
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => onAnalyzeInspection(doc)}
+                          disabled={isWorkflowRunning}
+                          aria-label={`Analyze Inspection for ${doc.filename}`}
+                          title="Run complete operational analysis and generate Approval Note"
+                        >
+                          {isAnalyzingThisDoc ? (
+                            <span className="flex items-center gap-1.5">
+                              <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                              </svg>
+                              Analyzing…
+                            </span>
+                          ) : (
+                            'Analyze Inspection'
+                          )}
+                        </Button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -288,6 +330,10 @@ function DocumentsTable({ documents }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function DocumentsPage() {
+  const navigate = useNavigate();
+  const analysisSectionRef = useRef(null);
+  const [activeAnalyzingDocId, setActiveAnalyzingDocId] = useState(null);
+
   const {
     documents,
     uploadState,
@@ -298,6 +344,56 @@ export function DocumentsPage() {
     uploadDocument,
     clearError,
   } = useDocuments();
+
+  const {
+    status: workflowStatus,
+    steps: workflowSteps,
+    findings: workflowFindings,
+    riskAssessment: workflowRisk,
+    recommendation: workflowRecommendation,
+    citations: workflowCitations,
+    approvalNote: workflowApprovalNote,
+    analyzedDoc,
+    error: workflowError,
+    isRunning: isWorkflowRunning,
+    isComplete: isWorkflowComplete,
+    runWorkflow,
+    reset: resetWorkflow,
+  } = useWorkflow();
+
+  const handleAiSearch = useCallback(
+    (doc) => {
+      const docId = doc.documentId || doc.id;
+      navigate(`/chat?documentId=${encodeURIComponent(docId)}`);
+    },
+    [navigate]
+  );
+
+  const handleAnalyzeInspection = useCallback(
+    async (doc) => {
+      const docId = doc.documentId || doc.id;
+      if (!docId || isWorkflowRunning) return;
+
+      setActiveAnalyzingDocId(docId);
+      setTimeout(() => {
+        analysisSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 100);
+
+      try {
+        await runWorkflow(docId, 'Analyze this inspection report and extract all significant findings.');
+      } catch (err) {
+        console.error('Inspection analysis failed:', err);
+      } finally {
+        setActiveAnalyzingDocId(null);
+      }
+    },
+    [isWorkflowRunning, runWorkflow]
+  );
+
+  const showAnalysisSection =
+    workflowStatus === 'running' ||
+    workflowStatus === 'complete' ||
+    workflowStatus === 'error';
 
   return (
     <div className="max-w-5xl mx-auto flex flex-col gap-6">
@@ -321,12 +417,263 @@ export function DocumentsPage() {
         />
       </section>
 
+      {/* Inspection Analysis Agent Activity & Results */}
+      {showAnalysisSection && (
+        <section
+          ref={analysisSectionRef}
+          aria-labelledby="analysis-section-heading"
+          className="bg-white rounded-xl border-2 border-blue-200 shadow-md p-6 flex flex-col gap-6 scroll-mt-6"
+        >
+          {/* Analysis Header */}
+          <div className="flex items-start justify-between border-b border-slate-100 pb-4">
+            <div>
+              <div className="flex items-center gap-2.5">
+                <span className="text-2xl" aria-hidden="true">🔬</span>
+                <h2 id="analysis-section-heading" className="text-lg font-bold text-slate-900">
+                  Inspection Analysis
+                </h2>
+                {isWorkflowRunning && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 animate-pulse">
+                    Analysis In Progress
+                  </span>
+                )}
+                {isWorkflowComplete && (
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800">
+                    ✓ Analysis Complete
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-500 mt-1">
+                Target Document: <strong className="text-slate-800">{analyzedDoc?.filename || 'Inspection Document'}</strong>
+                {analyzedDoc?.documentId && (
+                  <span className="ml-2 font-mono text-[11px] text-slate-400">({analyzedDoc.documentId})</span>
+                )}
+              </p>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={resetWorkflow}
+              aria-label="Close analysis panel"
+              disabled={isWorkflowRunning}
+            >
+              ✕ Close
+            </Button>
+          </div>
+
+          {/* Workflow Agent Activity UI */}
+          <div className="bg-slate-50 rounded-lg p-4 border border-slate-200">
+            <h3 className="text-xs font-semibold text-slate-600 uppercase tracking-wide mb-3">
+              Inspection Analysis Workflow Progress
+            </h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+              {workflowSteps.map((step) => {
+                const isDone = step.status === 'complete';
+                const isRun = step.status === 'running';
+
+                return (
+                  <div
+                    key={step.id}
+                    className={[
+                      'flex items-center gap-2.5 px-3 py-2 rounded-md border text-xs font-medium transition-colors',
+                      isDone
+                        ? 'bg-green-50 border-green-200 text-green-800'
+                        : isRun
+                        ? 'bg-blue-50 border-blue-200 text-blue-800 shadow-sm'
+                        : 'bg-white border-slate-200 text-slate-400',
+                    ].join(' ')}
+                  >
+                    {isDone ? (
+                      <span className="text-green-600 font-bold text-sm" aria-hidden="true">✓</span>
+                    ) : isRun ? (
+                      <svg className="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    ) : (
+                      <span className="text-slate-300 font-bold text-sm" aria-hidden="true">○</span>
+                    )}
+                    <span className="truncate">{step.label}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Error display */}
+          {workflowError && (
+            <div role="alert" className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800 flex items-start justify-between gap-4">
+              <div>
+                <p className="font-semibold">Workflow Failed</p>
+                <p className="text-xs text-red-600 mt-1">{workflowError}</p>
+              </div>
+              <Button size="sm" variant="ghost" onClick={resetWorkflow}>
+                Dismiss
+              </Button>
+            </div>
+          )}
+
+          {/* Final Results UI */}
+          {isWorkflowComplete && (
+            <div className="flex flex-col gap-6 pt-2">
+              {/* 1. Findings Section */}
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">
+                    Inspection Findings ({workflowFindings.length})
+                  </h3>
+                </div>
+
+                {workflowFindings.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic p-3 bg-slate-50 border border-slate-200 rounded">
+                    No significant inspection findings detected in this report.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-3">
+                    {workflowFindings.map((f, i) => (
+                      <div key={i} className="p-4 bg-white border border-slate-200 rounded-lg shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold text-slate-900">
+                            {f.finding || `Finding #${i + 1}`}
+                          </p>
+                          {f.severity && <StatusBadge status={f.severity} />}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-3 text-xs text-slate-600 bg-slate-50 p-2.5 rounded border border-slate-100">
+                          <div>
+                            <span className="font-semibold text-slate-700">Equipment: </span>
+                            {f.equipment || '—'}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-700">Observed Value: </span>
+                            {f.observedValue || '—'}
+                          </div>
+                          <div>
+                            <span className="font-semibold text-slate-700">Operating Limit: </span>
+                            {f.limit || '—'}
+                          </div>
+                        </div>
+
+                        {f.evidence && (
+                          <div className="mt-2.5 text-xs text-slate-700 bg-amber-50/70 border border-amber-200/70 p-2.5 rounded">
+                            <strong className="text-amber-900">Document Evidence: </strong>
+                            {f.evidence}
+                          </div>
+                        )}
+
+                        {f.sources && f.sources.length > 0 && (
+                          <div className="mt-2 text-[11px] text-slate-400 flex items-center gap-2">
+                            <span>Sources:</span>
+                            {f.sources.map((s, si) => (
+                              <span key={si} className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">
+                                p.{s.page} (chunk {s.chunkIndex})
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 2. Risk Assessment Section */}
+              <div className="flex flex-col gap-2 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                <div className="flex items-center gap-2.5">
+                  <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide">
+                    Risk Assessment
+                  </h3>
+                  {workflowRisk?.level && (
+                    <span
+                      className={[
+                        'px-2.5 py-0.5 text-xs font-bold rounded uppercase',
+                        workflowRisk.level === 'HIGH'
+                          ? 'bg-red-100 text-red-800'
+                          : workflowRisk.level === 'MEDIUM'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-green-100 text-green-800',
+                      ].join(' ')}
+                    >
+                      {workflowRisk.level} Risk
+                    </span>
+                  )}
+                </div>
+                <p className="text-sm text-slate-800 mt-1">
+                  {workflowRisk?.reason || 'No risk assessment available.'}
+                </p>
+              </div>
+
+              {/* 3. Recommendation Section */}
+              <div className="flex flex-col gap-2 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wide">
+                  Recommendation
+                </h3>
+                <p className="text-sm text-blue-950 leading-relaxed">
+                  {workflowRecommendation || 'Continue standard operating and inspection schedule.'}
+                </p>
+              </div>
+
+              {/* 4. References & Sources Section */}
+              {workflowCitations && workflowCitations.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-xs font-bold text-slate-600 uppercase tracking-wide">
+                    Authoritative SOP References & Citations ({workflowCitations.length})
+                  </h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    {workflowCitations.map((c, i) => (
+                      <div key={i} className="p-3 bg-white border border-slate-200 rounded-md text-xs text-slate-600 shadow-sm">
+                        <div className="flex items-center gap-1.5 font-medium text-slate-800">
+                          <span aria-hidden="true">📋</span>
+                          <span className="truncate" title={c.filename}>{c.filename || 'Authoritative SOP'}</span>
+                          {c.page && <span className="text-slate-400">· Page {c.page}</span>}
+                        </div>
+                        {c.text && (
+                          <p className="mt-1 text-[11px] text-slate-500 italic line-clamp-3">"{c.text}"</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 5. Download Approval Note Action */}
+              {workflowApprovalNote && (
+                <div className="flex items-center justify-between pt-4 border-t border-slate-200 bg-slate-50 -mx-6 -mb-6 p-6 rounded-b-xl">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">Official Approval Note DOCX</p>
+                    <p className="text-xs text-slate-500 mt-0.5">{workflowApprovalNote.filename}</p>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="md"
+                    onClick={() => triggerDocxDownload(workflowApprovalNote.filename)}
+                    aria-label="Download Approval Note DOCX"
+                    className="shadow"
+                  >
+                    <span className="flex items-center gap-2 font-semibold">
+                      <span aria-hidden="true">⬇</span>
+                      Download Approval Note
+                    </span>
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {/* Documents table */}
       <section aria-labelledby="documents-table-heading">
         <h2 id="documents-table-heading" className="text-sm font-semibold text-slate-700 mb-3">
           Document Library
         </h2>
-        <DocumentsTable documents={documents} />
+        <DocumentsTable
+          documents={documents}
+          onAiSearch={handleAiSearch}
+          onAnalyzeInspection={handleAnalyzeInspection}
+          activeAnalyzingDocId={activeAnalyzingDocId}
+          isWorkflowRunning={isWorkflowRunning}
+        />
       </section>
     </div>
   );

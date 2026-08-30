@@ -13,7 +13,7 @@
  *   POST /api/v1/inspection/workflow     — Complete end-to-end workflow
  */
 
-import { get, post, postForm } from './client.js';
+import { API_BASE_URL, get, post, postForm } from './client.js';
 
 /**
  * Ingest an inspection PDF into Qdrant.
@@ -65,14 +65,55 @@ export function downloadApprovalNote(filename) {
 }
 
 /**
- * Run the complete inspection workflow in one call.
- * @param {File} file - Inspection PDF
+ * Build the direct download URL for an Approval Note DOCX.
+ * @param {string} filename
+ * @returns {string}
+ */
+export function getApprovalNoteDownloadUrl(filename) {
+  return `${API_BASE_URL}/api/v1/inspection/download/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Trigger immediate browser download of an Approval Note DOCX file.
+ * @param {string} filename
+ */
+export function triggerDocxDownload(filename) {
+  if (!filename) return;
+  const url = getApprovalNoteDownloadUrl(filename);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+/**
+ * Run the inspection analysis workflow on an existing uploaded document.
+ * @param {string} documentId - Existing document ID
+ * @param {string} [task] - Optional analysis task prompt
+ * @returns {Promise<{ success: boolean, data: object }>}
+ */
+export function runInspectionWorkflow(documentId, task = 'Analyze this inspection report') {
+  return post('/api/v1/inspection/workflow', { documentId, task });
+}
+
+/**
+ * Complete workflow supporting either existing documentId or new File.
+ * @param {File|string|object} fileOrDocumentId
  * @param {string} [task]
  * @returns {Promise<{ success: boolean, data: object }>}
  */
-export function runWorkflow(file, task = '') {
+export function runWorkflow(fileOrDocumentId, task = '') {
+  if (typeof fileOrDocumentId === 'string') {
+    return runInspectionWorkflow(fileOrDocumentId, task);
+  }
+  if (fileOrDocumentId && typeof fileOrDocumentId === 'object' && !(fileOrDocumentId instanceof File)) {
+    return runInspectionWorkflow(fileOrDocumentId.documentId, fileOrDocumentId.task || task);
+  }
   const form = new FormData();
-  form.append('document', file);
+  form.append('document', fileOrDocumentId);
   if (task) form.append('task', task);
   return postForm('/api/v1/inspection/workflow', form);
 }
+

@@ -8,6 +8,7 @@ import {
 } from "../../../ai-service/inspection/inspection.service.js";
 import { assessFindingRisk } from "../../../ai-service/risk/risk.service.js";
 import { generateApprovalNote } from "../../../ai-service/reports/approval-note.service.js";
+import { getDocumentById } from "../repositories/documents.repository.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "../uploads");
@@ -136,14 +137,53 @@ export async function runApprovalNoteGeneration(data, options = {}) {
  * Orchestrates the end-to-end inspection workflow from PDF to Approval Note DOCX.
  */
 export async function runCompleteWorkflow(input, options = {}) {
-    // 1. Ingestion
-    const ingestionResult = await ingestInspectionFile(input, options.ingestOptions);
-    const documentId = ingestionResult.documentId;
+    let documentId;
+    let filename;
+    let chunksStored = 0;
+
+    // Check if input is operating on an existing documentId
+    const candidateDocId =
+        typeof input === "string" && !fs.existsSync(input)
+            ? input.trim()
+            : input && typeof input === "object" && input.documentId
+            ? String(input.documentId).trim()
+            : null;
+
+    if (candidateDocId) {
+        documentId = candidateDocId;
+        const docRecord = await getDocumentById(documentId);
+        if (!docRecord) {
+            const notFoundErr = new Error(`Document '${documentId}' not found in document library`);
+            notFoundErr.status = 404;
+            throw notFoundErr;
+        }
+
+        if (docRecord.status === "Processing") {
+            const processingErr = new Error(`Document '${documentId}' is still being indexed. Please wait until indexing completes.`);
+            processingErr.status = 400;
+            throw processingErr;
+        }
+
+        if (docRecord.status === "Failed") {
+            const failedErr = new Error(`Document '${documentId}' failed indexing. Please re-upload the document.`);
+            failedErr.status = 400;
+            throw failedErr;
+        }
+
+        filename = docRecord.original_filename || docRecord.filename || options.filename || `${documentId}.pdf`;
+        chunksStored = docRecord.chunks_stored || 0;
+    } else {
+        // Legacy / Multipart upload flow: ingest file
+        const ingestionResult = await ingestInspectionFile(input, options.ingestOptions);
+        documentId = ingestionResult.documentId;
+        filename = ingestionResult.filename;
+        chunksStored = ingestionResult.chunksStored || 0;
+    }
 
     // 2. Inspection Analysis
     const task =
         options.task ||
-        input.task ||
+        (input && typeof input === "object" ? input.task : null) ||
         "Analyze this inspection report and extract all significant findings.";
 
     const analysisResult = await runInspectionAnalysis(
@@ -205,7 +245,7 @@ export async function runCompleteWorkflow(input, options = {}) {
 
     // 4. Generate Approval Note DOCX
     const docxData = {
-        subject: `Inspection Report Analysis and Approval Recommendation — ${documentId}`,
+        subject: `Inspection Report Analysis and Approval Recommendation — ${filename}`,
         findings,
         riskAssessment: primaryRisk,
         recommendation: primaryRecommendation,
@@ -219,8 +259,8 @@ export async function runCompleteWorkflow(input, options = {}) {
 
     return {
         documentId,
-        filename: ingestionResult.filename,
-        chunksStored: ingestionResult.chunksStored,
+        filename,
+        chunksStored,
         findings,
         riskAssessments,
         recommendations,

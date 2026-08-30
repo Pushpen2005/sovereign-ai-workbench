@@ -198,7 +198,7 @@ export async function downloadApprovalNote(req, res, next) {
 }
 
 /**
- * Complete workflow from inspection PDF to generated Approval Note DOCX.
+ * Complete workflow from inspection PDF or existing documentId to generated Approval Note DOCX.
  */
 export async function runWorkflow(req, res, next) {
     try {
@@ -206,6 +206,7 @@ export async function runWorkflow(req, res, next) {
         let options = {};
 
         if (req.file) {
+            // Legacy / Multipart upload flow
             const documentId = path.basename(
                 req.file.filename,
                 path.extname(req.file.filename)
@@ -218,19 +219,42 @@ export async function runWorkflow(req, res, next) {
             if (req.body && req.body.task) {
                 options.task = req.body.task;
             }
-        } else if (req.body && (req.body.documentId || req.body.filePath || req.body.filename)) {
-            input = {
-                documentId: req.body.documentId,
-                filename: req.body.filename,
-                filePath: req.body.filePath,
-            };
-            if (req.body.task) {
-                options.task = req.body.task;
+        } else if (req.body && typeof req.body === "object") {
+            const { documentId, filePath, filename, task } = req.body;
+
+            // If documentId is explicitly passed in body, validate it
+            if (documentId !== undefined) {
+                if (typeof documentId !== "string" || !documentId.trim()) {
+                    return res.status(400).json({
+                        success: false,
+                        message: "Valid documentId is required",
+                    });
+                }
+                input = {
+                    documentId: documentId.trim(),
+                    filename,
+                    filePath,
+                };
+            } else if (filePath || filename) {
+                input = {
+                    filename,
+                    filePath,
+                };
+            } else {
+                return res.status(400).json({
+                    success: false,
+                    message: "Valid documentId is required to start workflow",
+                });
             }
+
+            options.task =
+                typeof task === "string" && task.trim().length > 0
+                    ? task.trim()
+                    : "Analyze this inspection report";
         } else {
             return res.status(400).json({
                 success: false,
-                message: "Inspection document file or documentId is required to start workflow",
+                message: "Valid documentId or inspection document file is required to start workflow",
             });
         }
 
@@ -248,11 +272,33 @@ export async function runWorkflow(req, res, next) {
                 citations: workflowResult.citations,
                 approvalNote: {
                     filename: workflowResult.approvalNote.filename,
-                    downloadUrl: `/api/v1/inspection/download/${workflowResult.approvalNote.filename}`,
+                    downloadUrl: `/api/v1/inspection/download/${encodeURIComponent(workflowResult.approvalNote.filename)}`,
                 },
             },
         });
     } catch (error) {
+        if (error.status === 404 || (error.message && error.message.includes("not found"))) {
+            return res.status(404).json({
+                success: false,
+                message: error.message,
+            });
+        }
+
+        if (
+            error.status === 400 ||
+            (error.message && (
+                error.message.includes("still being indexed") ||
+                error.message.includes("failed indexing") ||
+                error.message.includes("required") ||
+                error.message.includes("Invalid")
+            ))
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: error.message,
+            });
+        }
+
         next(error);
     }
 }

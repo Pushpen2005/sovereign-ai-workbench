@@ -9,6 +9,14 @@ function normalizeNullableString(value, fieldName) {
 
     const normalized = value.trim();
 
+    if (
+        normalized.toLowerCase() === "null" ||
+        normalized.toLowerCase() === "n/a" ||
+        normalized.toLowerCase() === "none"
+    ) {
+        return null;
+    }
+
     return normalized.length > 0 ? normalized : null;
 }
 
@@ -92,7 +100,7 @@ export function parseInspectionLlmResponse(rawResponse) {
 function findEvidenceSources(evidence, chunks) {
     const normalizedEvidence = normalizeText(evidence);
 
-    const matchingSources = chunks
+    let matchingSources = chunks
         .filter((chunk) => typeof chunk.text === "string" && chunk.text.trim().length > 0)
         .filter((chunk) => {
             const normalizedChunk = normalizeText(chunk.text);
@@ -109,6 +117,45 @@ function findEvidenceSources(evidence, chunks) {
             score: chunk.score,
         }))
         .sort((a, b) => b.score - a.score);
+
+    // Fallback: If no direct substring match, check if evidence explicitly references "SOURCE X"
+    if (matchingSources.length === 0) {
+        const sourceMatch = evidence.match(/SOURCE\s*(\d+)/i);
+        if (sourceMatch) {
+            const sourceIndex = parseInt(sourceMatch[1], 10) - 1;
+            if (sourceIndex >= 0 && sourceIndex < chunks.length) {
+                const targetChunk = chunks[sourceIndex];
+                if (targetChunk && typeof targetChunk.text === "string") {
+                    matchingSources.push({
+                        documentId: targetChunk.documentId,
+                        page: targetChunk.page,
+                        chunkIndex: targetChunk.chunkIndex,
+                        score: targetChunk.score,
+                    });
+                }
+            }
+        }
+    }
+
+    // Fallback: Check if evidence has >= 70% word overlap with a candidate chunk
+    if (matchingSources.length === 0 && normalizedEvidence.length > 20) {
+        const words = normalizedEvidence.split(/\s+/).filter((w) => w.length > 3);
+        if (words.length >= 3) {
+            for (const chunk of chunks) {
+                const normalizedChunk = normalizeText(chunk.text || "");
+                const matchedWords = words.filter((w) => normalizedChunk.includes(w));
+                if (matchedWords.length / words.length >= 0.7) {
+                    matchingSources.push({
+                        documentId: chunk.documentId,
+                        page: chunk.page,
+                        chunkIndex: chunk.chunkIndex,
+                        score: chunk.score,
+                    });
+                    break;
+                }
+            }
+        }
+    }
 
     return dedupeSources(matchingSources);
 }

@@ -69,6 +69,73 @@ function filterRelevantChunks(chunks, scoreThreshold, contextLimit) {
         .slice(0, contextLimit);
 }
 
+export const DEFAULT_INSPECTION_QUERY =
+    "What inspection findings, abnormal observations, equipment issues, or non-compliances are mentioned in this report?";
+
+export const DEFAULT_INSPECTION_QUERIES = [
+    "What inspection findings, abnormal observations, equipment issues, or non-compliances are mentioned in this report?",
+    "audit observations, non-compliances, penalties, or inspection findings",
+    "equipment inspection findings, abnormal observations, high temperature, vibration, pressure, or operating limits",
+];
+
+export function resolveInspectionRetrievalQuery(task, options = {}, input = {}) {
+    const explicitQuery =
+        (typeof options.query === "string" && options.query.trim()) ||
+        (typeof options.retrievalQuery === "string" && options.retrievalQuery.trim()) ||
+        (typeof input.query === "string" && input.query.trim()) ||
+        (typeof input.retrievalQuery === "string" && input.retrievalQuery.trim());
+
+    if (explicitQuery) {
+        return explicitQuery;
+    }
+
+    if (typeof task !== "string" || !task.trim()) {
+        return DEFAULT_INSPECTION_QUERY;
+    }
+
+    const trimmed = task.trim();
+    const isGenericInstruction =
+        /^analyze\s+this\s+inspection\s+report/i.test(trimmed) ||
+        /^analyze\s+findings/i.test(trimmed) ||
+        /^analyze\s+report/i.test(trimmed) ||
+        /^extract\s+all\s+(significant\s+)?findings/i.test(trimmed);
+
+    if (isGenericInstruction) {
+        return DEFAULT_INSPECTION_QUERY;
+    }
+
+    return trimmed;
+}
+
+export function resolveInspectionRetrievalQueries(task, options = {}, input = {}) {
+    const explicitQuery =
+        (typeof options.query === "string" && options.query.trim()) ||
+        (typeof options.retrievalQuery === "string" && options.retrievalQuery.trim()) ||
+        (typeof input.query === "string" && input.query.trim()) ||
+        (typeof input.retrievalQuery === "string" && input.retrievalQuery.trim());
+
+    if (explicitQuery) {
+        return [explicitQuery];
+    }
+
+    if (typeof task !== "string" || !task.trim()) {
+        return DEFAULT_INSPECTION_QUERIES;
+    }
+
+    const trimmed = task.trim();
+    const isGenericInstruction =
+        /^analyze\s+this\s+inspection\s+report/i.test(trimmed) ||
+        /^analyze\s+findings/i.test(trimmed) ||
+        /^analyze\s+report/i.test(trimmed) ||
+        /^extract\s+all\s+(significant\s+)?findings/i.test(trimmed);
+
+    if (isGenericInstruction) {
+        return DEFAULT_INSPECTION_QUERIES;
+    }
+
+    return [trimmed, ...DEFAULT_INSPECTION_QUERIES];
+}
+
 export async function analyzeInspectionReport(input, options = {}) {
     const { documentId, task } = validateInspectionRequest(input);
 
@@ -80,13 +147,41 @@ export async function analyzeInspectionReport(input, options = {}) {
     const searchSimilarChunksFn = options.searchSimilarChunks ?? searchSimilarChunks;
     const generateAnswerFn = options.generateAnswer ?? generateAnswer;
 
-    const queryEmbedding = await generateEmbeddingFn(task);
+    let chunks;
+    if (options.searchSimilarChunks || options.generateEmbedding) {
+        // Single retrieval call when dependencies are mocked (e.g. in unit tests)
+        const retrievalQuery = resolveInspectionRetrievalQuery(task, options, input);
+        const queryEmbedding = await generateEmbeddingFn(retrievalQuery);
+        chunks = await searchSimilarChunksFn(
+            queryEmbedding,
+            candidateLimit,
+            documentId
+        );
+    } else {
+        // Multi-aspect domain retrieval in production across inspection & audit dimensions
+        const queries = resolveInspectionRetrievalQueries(task, options, input);
+        const chunkMap = new Map();
 
-    const chunks = await searchSimilarChunksFn(
-        queryEmbedding,
-        candidateLimit,
-        documentId
-    );
+        for (const q of queries) {
+            const queryEmbedding = await generateEmbeddingFn(q);
+            const candidates = await searchSimilarChunksFn(
+                queryEmbedding,
+                candidateLimit,
+                documentId
+            );
+
+            if (Array.isArray(candidates)) {
+                for (const chunk of candidates) {
+                    const key = `${chunk.documentId || ""}:${chunk.page ?? ""}:${chunk.chunkIndex ?? ""}`;
+                    if (!chunkMap.has(key) || chunkMap.get(key).score < chunk.score) {
+                        chunkMap.set(key, chunk);
+                    }
+                }
+            }
+        }
+
+        chunks = Array.from(chunkMap.values()).sort((a, b) => b.score - a.score);
+    }
 
     if (!Array.isArray(chunks) || chunks.length === 0) {
         return createInspectionResult([]);

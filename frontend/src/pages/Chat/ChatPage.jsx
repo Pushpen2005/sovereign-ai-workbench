@@ -9,6 +9,7 @@
  */
 
 import React, { useRef, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { PageHeader } from '../../components/layout/PageHeader.jsx';
 import { Button } from '../../components/ui/Button.jsx';
 import { useChat } from '../../hooks/useChat.js';
@@ -126,10 +127,19 @@ function EmptyChatState({ hasDocuments }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function ChatPage() {
+  const [searchParams] = useSearchParams();
   const { documents } = useDocuments();
   const { messages, loading, error, documentId, setDocumentId, askQuestion, clearMessages } = useChat();
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
+
+  // Sync documentId from URL query param if present
+  useEffect(() => {
+    const paramDocId = searchParams.get('documentId');
+    if (paramDocId) {
+      setDocumentId(paramDocId);
+    }
+  }, [searchParams, setDocumentId]);
 
   // Auto-scroll to bottom on new messages or loading state change
   useEffect(() => {
