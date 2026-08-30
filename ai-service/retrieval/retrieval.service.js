@@ -14,12 +14,14 @@ const qdrant = new QdrantClient({
  * Optional filters:
  * - documentId
  * - documentType
+ * - allowedDocumentIds
  *
  * @param {number[]} queryVector
  * @param {number} limit
  * @param {string} [documentId]
  * @param {object} [filters]
  * @param {string} [filters.documentType]
+ * @param {string[]} [filters.allowedDocumentIds]
  * @returns {Promise<Array>}
  */
 export async function searchSimilarChunks(
@@ -88,8 +90,29 @@ export async function searchSimilarChunks(
         );
     }
 
+    if (
+        filters.allowedDocumentIds !== undefined &&
+        (
+            !Array.isArray(filters.allowedDocumentIds) ||
+            filters.allowedDocumentIds.some(
+                (value) => typeof value !== "string" || value.trim().length === 0
+            )
+        )
+    ) {
+        throw new Error(
+            "filters.allowedDocumentIds must be an array of non-empty strings"
+        );
+    }
+
     try {
         const must = [];
+        const allowedDocumentIds = Array.isArray(filters.allowedDocumentIds)
+            ? new Set(filters.allowedDocumentIds.map((value) => value.trim()))
+            : null;
+
+        if (allowedDocumentIds && allowedDocumentIds.size === 0) {
+            return [];
+        }
 
         // Filter by documentId when provided
         if (documentId !== undefined) {
@@ -139,7 +162,7 @@ export async function searchSimilarChunks(
             depth: null,
         });
 
-        return results.map((result) => ({
+        const mappedResults = results.map((result) => ({
             score: result.score,
 
             documentId:
@@ -166,6 +189,10 @@ export async function searchSimilarChunks(
             pageEndOffset:
                 result.payload?.pageEndOffset,
         }));
+
+        return allowedDocumentIds
+            ? mappedResults.filter((result) => allowedDocumentIds.has(result.documentId))
+            : mappedResults;
     } catch (error) {
         console.error(
             "Failed to search Qdrant:",

@@ -66,11 +66,25 @@ export async function answerQuestion(question, options = {}) {
         question.trim()
     );
 
+    const allowedDocumentIds = Array.isArray(options.allowedDocumentIds)
+        ? options.allowedDocumentIds
+            .filter((value) => typeof value === "string" && value.trim())
+            .map((value) => value.trim())
+        : undefined;
+
+    const retrievalLimit =
+        !options.documentId && allowedDocumentIds
+            ? Math.max(candidateLimit, 50)
+            : candidateLimit;
+
     // Retrieve candidate chunks
     const chunks = await searchSimilarChunks(
         queryEmbedding,
-        candidateLimit
-        ,options.documentId
+        retrievalLimit,
+        options.documentId,
+        {
+            allowedDocumentIds,
+        }
     );
 
     // No retrieval results
