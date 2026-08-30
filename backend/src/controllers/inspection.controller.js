@@ -8,6 +8,7 @@ import {
     runFindingRiskAssessment,
     runInspectionAnalysis,
 } from "../services/inspection.service.js";
+import { processAndIngestDocument } from "../services/documents.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GENERATED_DIR = path.resolve(__dirname, "../../generated");
@@ -50,7 +51,7 @@ export async function ingestInspection(req, res, next) {
             });
         }
 
-        const result = await ingestInspectionFile(target, options);
+        const result = await processAndIngestDocument(target, options);
 
         return res.status(200).json({
             success: true,

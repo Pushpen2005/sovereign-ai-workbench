@@ -22,8 +22,21 @@ const initialState = {
 
 function documentReducer(state, action) {
   switch (action.type) {
-    case 'SET_DOCUMENTS':
-      return { ...state, documents: action.payload };
+    case 'SET_DOCUMENTS': {
+      const backendDocs = action.payload || [];
+      const mapped = backendDocs.map((doc) => ({
+        id: doc.documentId || doc.id,
+        documentId: doc.documentId || doc.id,
+        filename: doc.originalFilename || doc.filename,
+        originalFilename: doc.originalFilename,
+        type: 'Inspection',
+        pages: null,
+        status: doc.status || 'Indexed',
+        uploadedAt: doc.createdAt || doc.uploadedAt || new Date().toISOString(),
+        chunksStored: doc.chunksStored,
+      }));
+      return { ...state, documents: mapped };
+    }
     case 'SELECT_DOCUMENT':
       return { ...state, selectedDocument: action.payload };
     case 'CLEAR_SELECTION':
@@ -40,28 +53,34 @@ function documentReducer(state, action) {
       return { ...state, uploadState: 'indexing' };
     case 'UPLOAD_SUCCESS': {
       const newDoc = action.payload;
+      const docId = newDoc.documentId || newDoc.id;
+      const displayFilename = newDoc.originalFilename || newDoc.filename;
+      // Prepend real document; remove any entry with same id or filename
+      const filtered = (state.documents || []).filter(
+        (d) => d.id !== docId && d.documentId !== docId && d.filename !== displayFilename
+      );
       return {
         ...state,
         uploadState: 'success',
         lastUploaded: {
-          documentId: newDoc.documentId,
-          filename: newDoc.filename,
+          documentId: docId,
+          filename: displayFilename,
           chunksStored: newDoc.chunksStored,
         },
-        // Prepend real document; remove any mock entry with same filename
         documents: [
           {
-            id: newDoc.documentId,
-            filename: newDoc.filename,
+            id: docId,
+            documentId: docId,
+            filename: displayFilename,
+            originalFilename: newDoc.originalFilename,
             type: 'Inspection',
             pages: null,
-            status: 'Indexed',
-            uploadedAt: new Date().toISOString(),
+            status: newDoc.status || 'Indexed',
+            uploadedAt: newDoc.createdAt || new Date().toISOString(),
             sizeMb: state.pendingFile?.sizeMb || null,
             chunksStored: newDoc.chunksStored,
-            documentId: newDoc.documentId,
           },
-          ...state.documents,
+          ...filtered,
         ],
       };
     }
@@ -109,6 +128,10 @@ export function useDocumentDispatch() {
 export function useDocumentActions() {
   const dispatch = useDocumentDispatch();
   return {
+    setDocuments: useCallback(
+      (docs) => dispatch({ type: 'SET_DOCUMENTS', payload: docs }),
+      [dispatch],
+    ),
     selectDocument: useCallback(
       (doc) => dispatch({ type: 'SELECT_DOCUMENT', payload: doc }),
       [dispatch],

@@ -10,21 +10,24 @@
  *     → { success, documentId, filename, chunksStored }
  */
 
-import { postForm } from './client.js';
+import { get, postForm } from './client.js';
 
 /**
- * Upload a PDF file and ingest it into Qdrant in a single call.
- *
- * The backend controller at POST /api/v1/inspection/ingest accepts a multipart
- * file, extracts text (OCR fallback), chunks, embeds (384-d), and upserts to
- * Qdrant — all in one request.
+ * Fetch all persisted documents from PostgreSQL metadata store.
+ * @returns {Promise<{ success: boolean, documents: Array }>}
+ */
+export function fetchDocuments() {
+  return get('/api/v1/documents');
+}
+
+/**
+ * Upload a PDF file and ingest it into Qdrant + PostgreSQL in a single call.
  *
  * @param {File} file - A PDF File object from the browser
- * @returns {Promise<{ success: boolean, documentId: string, filename: string, chunksStored: number }>}
+ * @returns {Promise<{ success: boolean, documentId: string, filename: string, originalFilename?: string, chunksStored: number }>}
  */
 export function uploadDocument(file) {
   const form = new FormData();
   form.append('document', file);         // field name MUST be "document"
-  return postForm('/api/v1/inspection/ingest', form);
-  // browser sets Content-Type: multipart/form-data; boundary=... automatically
+  return postForm('/api/v1/documents', form);
 }

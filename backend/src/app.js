@@ -13,11 +13,13 @@ import cors from 'cors';
 import router from './routes/files.routes.js';
 import multer from 'multer';
 import inspectionRouter from "./routes/inspection.routes.js";
+import documentsRouter from "./routes/documents.routes.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use('/api/v1', router);
+app.use("/api/v1/documents", documentsRouter);
 app.use("/api/v1/chat", chatRouter);
 app.use("/api/v1/inspection", inspectionRouter);
 app.get('/', (req, res) => {
