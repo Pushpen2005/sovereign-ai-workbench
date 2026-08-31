@@ -38,6 +38,38 @@ app.get('/api/v1/health', (req, res) => {
 });
 
 /**
+ * PR #23 — Model Router Diagnostic Endpoint
+ *
+ * GET /api/v1/router/models
+ * Returns the configured model registry and the list of locally installed
+ * Ollama models. Useful for verifying router configuration without running
+ * a full chat request.
+ */
+import {
+    getAvailableModels,
+    classifyTask,
+    TASK_TYPE,
+} from "../../ai-service/router/modelRouter.js";
+
+app.get('/api/v1/router/models', async (req, res) => {
+    const defaultModel  = process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
+    const documentModel = process.env.DOCUMENT_MODEL  || defaultModel;
+    const codingModel   = process.env.CODING_MODEL    || defaultModel;
+
+    const installedModels = await getAvailableModels();
+
+    res.status(200).json({
+        registry: {
+            [TASK_TYPE.DOCUMENT]: documentModel,
+            [TASK_TYPE.CODING]:   codingModel,
+            [TASK_TYPE.GENERAL]:  defaultModel,
+        },
+        installedModels,
+        ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
+    });
+});
+
+/**
  * PR #22 — Sovereignty Verification Endpoint
  *
  * Returns a real-time manifest confirming that all AI inference,

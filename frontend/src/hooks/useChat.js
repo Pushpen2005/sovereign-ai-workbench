@@ -148,6 +148,10 @@ export function useChat(initialDocumentId = null) {
           sources: response?.sources || [],
           timestamp: new Date().toISOString(),
           documentId,
+          taskType: response?.taskType || null,
+          selectedModel: response?.selectedModel || null,
+          routingReason: response?.routingReason || null,
+          isFallback: Boolean(response?.isFallback),
         };
 
         setMessages((prev) => [...prev, assistantMsg]);

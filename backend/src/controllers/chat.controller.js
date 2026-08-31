@@ -1,4 +1,5 @@
 import { answerQuestion } from "../../../ai-service/rag/rag.service.js";
+import { generateAnswer } from "../../../ai-service/llm/llm.service.js";
 import { resolveOrganizationId } from "../config/organization.js";
 import {
   getOrCreateConversation,
@@ -7,10 +8,15 @@ import {
   getConversationWithMessages,
   getChatStats,
 } from "../services/chat.service.js";
+import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.js";
 
 /**
  * POST /api/v1/chat/ask
- * Ask a question against the indexed document corpus with automatic PostgreSQL conversation persistence.
+ *
+ * PR #23 — Model Router integrated.
+ * Classifies the question (DOCUMENT / CODING / GENERAL), selects the
+ * appropriate local Ollama model, executes RAG with that model, and
+ * returns routing metadata alongside the existing answer/sources.
  */
 export async function askQuestion(req, res, next) {
   try {
@@ -36,6 +42,21 @@ export async function askQuestion(req, res, next) {
 
     const organizationId = resolveOrganizationId(req);
 
+    // ── PR #23: Route the question to the appropriate local model ────────────
+    let routing;
+    try {
+      routing = await routeTask(question.trim());
+    } catch (routerErr) {
+      if (routerErr instanceof RouterError) {
+        return res.status(503).json({
+          success: false,
+          message: routerErr.message,
+          code: "MODEL_UNAVAILABLE",
+        });
+      }
+      throw routerErr;
+    }
+
     // 1. Resolve or create persistent conversation
     const conversation = await getOrCreateConversation({
       conversationId: conversationId?.trim() || null,
@@ -43,10 +64,28 @@ export async function askQuestion(req, res, next) {
       question: question.trim(),
     });
 
-    // 2. Execute existing RAG pipeline
-    const result = await answerQuestion(question.trim(), {
-      documentId: documentId?.trim() || undefined,
-    });
+    let result;
+    if (routing.taskType === "CODING" && !documentId) {
+      // Direct code generation using the routed coding model (no document retrieval required)
+      const codingPrompt = `You are a skilled software engineering assistant.
+Provide clean, idiomatic, well-commented code that directly addresses the following user request.
+Do not require external documents or reference context.
+
+Request:
+${question.trim()}`;
+
+      const codeAnswer = await generateAnswer(codingPrompt, routing.selectedModel);
+      result = {
+        answer: codeAnswer,
+        sources: [],
+      };
+    } else {
+      // 2. Execute RAG pipeline with the router-selected model
+      result = await answerQuestion(question.trim(), {
+        documentId: documentId?.trim() || undefined,
+        model: routing.selectedModel,
+      });
+    }
 
     // 3. Persist user and assistant exchange
     const exchange = await saveChatExchange({
@@ -66,11 +105,17 @@ export async function askQuestion(req, res, next) {
       answer: result.answer,
       sources: result.sources || [],
       messageId: exchange.assistantMessage.id,
+      // ── PR #23 routing metadata ─────────────────────────────────────────
+      taskType:      routing.taskType,
+      selectedModel: routing.selectedModel,
+      routingReason: routing.routingReason,
+      isFallback:    routing.isFallback,
     });
   } catch (error) {
     next(error);
   }
 }
+
 
 /**
  * GET /api/v1/chat/history

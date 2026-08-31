@@ -1316,3 +1316,96 @@ networks:
 **Network-Level Caveat (Disclosed):**
 > The current Docker Compose configuration does not enforce network-layer egress blocking. The sovereignty guarantee is **architectural and code-level**, not **network-enforced**. Operators deploying in environments requiring certified air-gap should apply the network hardening recommendation above.
 
+---
+
+## 41. Model Router & Multi-Model Task Selection (PR #23)
+
+SovereignAI includes a deterministic, explainable **Model Router** that automatically classifies incoming user questions and routes them to the appropriate local open-weight model.
+
+### Architecture
+
+```
+User Request
+     │
+     ▼
+┌──────────────────────────────────────┐
+│  Task Classifier                     │
+│  (Fast deterministic keyword rules)  │
+└──────────────────┬───────────────────┘
+                   │
+         ┌─────────┴─────────┐
+         ▼                   ▼
+    [ DOCUMENT ]         [ CODING ]       [ GENERAL ]
+         │                   │                 │
+         ▼                   ▼                 ▼
+  DOCUMENT_MODEL       CODING_MODEL      DEFAULT_MODEL
+  (llama3.2:3b)       (e.g. qwen2.5-     (llama3.2:3b)
+                       coder:7b or
+                       fallback)
+         │                   │                 │
+         └─────────┬─────────┘                 │
+                   │                           │
+                   ▼                           ▼
+            Qdrant Vector RAG             Direct LLM
+                   │                           │
+                   ▼                           ▼
+            Grounded Answer              Code Response
+```
+
+### Supported Task Types
+
+| Task Type | Trigger Signals | Intended Model | Fallback Model |
+|---|---|---|---|
+| `DOCUMENT` | "what does SOP say", "summarize report", "why did pump fail", "find safety procedure" | `DOCUMENT_MODEL` (e.g. `llama3.2:3b`) | `DEFAULT_MODEL` |
+| `CODING` | "write python", "write sql", "create a function", "debug this code", "implement script" | `CODING_MODEL` (e.g. `qwen2.5-coder:7b`) | `DEFAULT_MODEL` (when fallback=true) |
+| `GENERAL` | Greetings, chit-chat, conversational inquiries without document/coding keywords | `DEFAULT_MODEL` (`llama3.2:3b`) | N/A |
+
+### Model Registry Configuration
+
+Models are configured strictly via environment variables. No code changes are required to add or swap models:
+
+```ini
+# .env or docker-compose environment:
+DEFAULT_MODEL=llama3.2:3b
+DOCUMENT_MODEL=llama3.2:3b
+CODING_MODEL=llama3.2:3b          # Set to qwen2.5-coder:7b when installed
+CODING_MODEL_FALLBACK=true        # If CODING_MODEL not installed, fall back to DEFAULT_MODEL
+```
+
+### Availability & Controlled Fallback Mechanics
+
+1. Before dispatching any request, the router queries the local Ollama daemon (`GET /api/tags`).
+2. If the preferred model is installed, it is dispatched immediately.
+3. If the configured `CODING_MODEL` is unavailable:
+   - If `CODING_MODEL_FALLBACK=true` (default): routes to `DEFAULT_MODEL` and marks the response with `isFallback: true` and a clear reason label in the UI badge.
+   - If `CODING_MODEL_FALLBACK=false`: returns a clean HTTP 503 error (`MODEL_UNAVAILABLE`) with instructions to run `ollama pull <model>`.
+4. **No cloud API calls are ever made.** If a model is missing, the system never silently attempts to download or query an external endpoint.
+
+### Diagnostic Endpoint
+
+`GET /api/v1/router/models`
+
+Returns the current registry mapping alongside the live list of models detected in Ollama:
+
+```json
+{
+  "registry": {
+    "DOCUMENT": "llama3.2:3b",
+    "CODING": "llama3.2:3b",
+    "GENERAL": "llama3.2:3b"
+  },
+  "installedModels": [
+    { "name": "llama3.2:3b", "size": 2019393189 }
+  ],
+  "ollamaUrl": "http://host.docker.internal:11434"
+}
+```
+
+### Extending with Additional Models
+
+To add a dedicated coding model in the future:
+1. Pull the model locally: `ollama pull qwen2.5-coder:7b`
+2. Update `.env`: `CODING_MODEL=qwen2.5-coder:7b`
+3. Restart backend: `docker compose restart backend`
+The router will immediately detect `qwen2.5-coder:7b` as available and route all `CODING` tasks to it while routing `DOCUMENT` tasks to `llama3.2:3b`.
+

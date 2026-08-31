@@ -47,6 +47,27 @@ function MessageBubble({ message, documents }) {
         </div>
       )}
       <div className={['flex flex-col gap-2', isUser ? 'items-end' : 'items-start', 'max-w-xl'].join(' ')}>
+        {/* Routing Badge — only on assistant messages if present */}
+        {!isUser && (message.taskType || message.selectedModel) && (
+          <div className="flex flex-wrap items-center gap-1.5 px-2.5 py-1 bg-slate-100/80 border border-slate-200 rounded-md text-[11px] text-slate-600">
+            <span className="font-semibold text-slate-700">
+              Task: {message.taskType === 'CODING' ? 'Coding' : message.taskType === 'DOCUMENT' ? 'Document Analysis' : 'General'}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span className="text-slate-600">
+              Model: <code className="font-mono text-[10px] bg-white px-1 py-0.5 rounded border border-slate-200">{message.selectedModel}</code>
+            </span>
+            {message.routingReason && (
+              <>
+                <span className="text-slate-300">·</span>
+                <span className="text-slate-500 italic truncate max-w-xs" title={message.routingReason}>
+                  {message.isFallback ? `Fallback: ${message.routingReason}` : message.routingReason}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Text */}
         <div
           className={[
