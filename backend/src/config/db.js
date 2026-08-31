@@ -9,6 +9,11 @@ const __dirname = path.dirname(__filename);
 // Ensure .env is loaded
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
+import {
+  DEFAULT_ORGANIZATION_ID,
+  DEFAULT_ORGANIZATION_NAME,
+} from "./organization.js";
+
 const { Pool } = pg;
 
 const pool = new Pool({
@@ -57,9 +62,32 @@ export async function checkDbConnection() {
 }
 
 export async function initDb() {
-  const createTableQuery = `
+  const createSchemaQuery = `
+    CREATE TABLE IF NOT EXISTS organizations (
+      id VARCHAR(255) PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_organizations_name_lower ON organizations (lower(name));
+
+    CREATE TABLE IF NOT EXISTS users (
+      id VARCHAR(255) PRIMARY KEY,
+      organization_id VARCHAR(255) NOT NULL REFERENCES organizations(id),
+      name VARCHAR(255) NOT NULL,
+      email VARCHAR(255) NOT NULL,
+      password_hash TEXT NOT NULL,
+      role VARCHAR(50) NOT NULL DEFAULT 'member',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower ON users (lower(email));
+
     CREATE TABLE IF NOT EXISTS documents (
       id VARCHAR(255) PRIMARY KEY,
+      organization_id VARCHAR(255) NOT NULL REFERENCES organizations(id),
       filename VARCHAR(255) NOT NULL,
       original_filename VARCHAR(255) NOT NULL,
       status VARCHAR(50) NOT NULL DEFAULT 'Processing',
@@ -69,11 +97,61 @@ export async function initDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_documents_organization_id ON documents (organization_id);
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id VARCHAR(255) PRIMARY KEY,
+      document_id VARCHAR(255) REFERENCES documents(id) ON DELETE SET NULL,
+      organization_id VARCHAR(255) NOT NULL REFERENCES organizations(id),
+      title VARCHAR(255) NOT NULL DEFAULT 'Approval Note',
+      filename VARCHAR(255) NOT NULL,
+      risk_level VARCHAR(50),
+      status VARCHAR(50) NOT NULL DEFAULT 'GENERATED',
+      task TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_reports_organization_id ON reports (organization_id);
+    CREATE INDEX IF NOT EXISTS idx_reports_document_id ON reports (document_id);
+
+    CREATE TABLE IF NOT EXISTS conversations (
+      id VARCHAR(255) PRIMARY KEY,
+      organization_id VARCHAR(255) NOT NULL REFERENCES organizations(id),
+      title VARCHAR(255) NOT NULL DEFAULT 'New Chat',
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_conversations_organization_id ON conversations (organization_id);
+    CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations (updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS messages (
+      id VARCHAR(255) PRIMARY KEY,
+      conversation_id VARCHAR(255) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      role VARCHAR(50) NOT NULL,
+      content TEXT NOT NULL,
+      sources JSONB DEFAULT '[]'::jsonb,
+      document_id VARCHAR(255),
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages (conversation_id);
+    CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages (created_at ASC);
   `;
 
   try {
-    await query(createTableQuery);
-    console.log("✓ PostgreSQL documents table verified / initialized.");
+    await query(createSchemaQuery);
+    console.log("✓ PostgreSQL schema verified / initialized.");
+
+    // Ensure default organization exists
+    await query(
+      `INSERT INTO organizations (id, name, created_at, updated_at)
+       VALUES ($1, $2, NOW(), NOW())
+       ON CONFLICT (id) DO NOTHING`,
+      [DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME]
+    );
 
     // Sync pre-existing Qdrant document if not present
     const existingDocCheck = await query(
@@ -82,11 +160,12 @@ export async function initDb() {
     );
     if (existingDocCheck.rows.length === 0) {
       await query(
-        `INSERT INTO documents (id, filename, original_filename, status, chunks_stored, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+        `INSERT INTO documents (id, organization_id, filename, original_filename, status, chunks_stored, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
          ON CONFLICT (id) DO NOTHING`,
         [
           "6216a2ec-9351-42ef-9ead-7cd2716b3397",
+          DEFAULT_ORGANIZATION_ID,
           "6216a2ec-9351-42ef-9ead-7cd2716b3397.pdf",
           "RIL-IAR-2025.pdf",
           "Indexed",

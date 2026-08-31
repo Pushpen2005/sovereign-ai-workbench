@@ -1,10 +1,17 @@
+export class InspectionValidationError extends Error {
+    constructor(message, options = {}) {
+        super(message, options);
+        this.name = "InspectionValidationError";
+    }
+}
+
 function normalizeNullableString(value, fieldName) {
     if (value === undefined || value === null) {
         return null;
     }
 
     if (typeof value !== "string") {
-        throw new Error(`${fieldName} must be a string or null`);
+        throw new InspectionValidationError(`${fieldName} must be a string or null`);
     }
 
     const normalized = value.trim();
@@ -22,13 +29,13 @@ function normalizeNullableString(value, fieldName) {
 
 function normalizeRequiredString(value, fieldName) {
     if (typeof value !== "string") {
-        throw new Error(`${fieldName} must be a non-empty string`);
+        throw new InspectionValidationError(`${fieldName} must be a non-empty string`);
     }
 
     const normalized = value.trim();
 
     if (!normalized) {
-        throw new Error(`${fieldName} must be a non-empty string`);
+        throw new InspectionValidationError(`${fieldName} must be a non-empty string`);
     }
 
     return normalized;
@@ -58,28 +65,36 @@ function dedupeSources(sources) {
 
 export function parseInspectionLlmResponse(rawResponse) {
     if (typeof rawResponse !== "string" || rawResponse.trim().length === 0) {
-        throw new Error("LLM response must be a non-empty string");
+        throw new InspectionValidationError("LLM response must be a non-empty string");
+    }
+
+    let cleaned = rawResponse.trim();
+
+    // Strip markdown code fences if present (e.g. ```json ... ```)
+    const codeBlockMatch = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+    if (codeBlockMatch) {
+        cleaned = codeBlockMatch[1].trim();
     }
 
     let parsed;
 
     try {
-        parsed = JSON.parse(rawResponse.trim());
+        parsed = JSON.parse(cleaned);
     } catch (error) {
-        throw new Error(`LLM returned invalid JSON: ${error.message}`);
+        throw new InspectionValidationError(`LLM returned invalid JSON: ${error.message}`);
     }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("LLM response must be a JSON object");
+        throw new InspectionValidationError("LLM response must be a JSON object");
     }
 
     if (!Array.isArray(parsed.findings)) {
-        throw new Error("LLM response must contain a findings array");
+        throw new InspectionValidationError("LLM response must contain a findings array");
     }
 
     const findings = parsed.findings.map((finding, index) => {
         if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
-            throw new Error(`Finding at index ${index} must be an object`);
+            throw new InspectionValidationError(`Finding at index ${index} must be an object`);
         }
 
         return {

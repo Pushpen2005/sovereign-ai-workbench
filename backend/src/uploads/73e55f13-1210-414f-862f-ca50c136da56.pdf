@@ -1,0 +1,68 @@
+%PDF-1.4
+4 0 obj
+<< /Length 593 >>
+stream
+BT /F1 11 Tf 50 750 Td (DEMO INSPECTION GUIDELINES) Tj T*
+() Tj T*
+(Document ID: SOP-INSP-001) Tj T*
+(Version: 1.0) Tj T*
+() Tj T*
+(1. Inspection Frequency) Tj T*
+() Tj T*
+(Routine inspection of rotating equipment must be conducted daily.) Tj T*
+(Comprehensive inspection must be conducted monthly.) Tj T*
+() Tj T*
+(2. Inspection Checklist) Tj T*
+() Tj T*
+(For each equipment unit record:) Tj T*
+(  - Temperature \(ambient and bearing\)) Tj T*
+(  - Vibration levels) Tj T*
+(  - Lubrication condition) Tj T*
+(  - Visual inspection for leaks) Tj T*
+(  - Noise and operational anomalies) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+6 0 obj
+<< /Length 500 >>
+stream
+BT /F1 11 Tf 50 750 Td (3. Reporting Requirements) Tj T*
+() Tj T*
+(All findings must be documented in the inspection report.) Tj T*
+(Critical findings must be escalated to the maintenance team within 2 hours.) Tj T*
+(Non-critical findings must be logged within 24 hours.) Tj T*
+() Tj T*
+(4. Severity Classification) Tj T*
+() Tj T*
+(High   - Immediate shutdown required.) Tj T*
+(Medium - Schedule repair within 48 hours.) Tj T*
+(Low    - Monitor and log; schedule at next maintenance window.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000001617 00000 n 
+0000001554 00000 n 
+0000000653 00000 n 
+0000000009 00000 n 
+0000001379 00000 n 
+0000000828 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1666
+%%EOF

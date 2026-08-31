@@ -3,6 +3,7 @@ import {
   getDocumentById,
   processAndIngestDocument,
 } from "../services/documents.service.js";
+import { resolveOrganizationId } from "../config/organization.js";
 
 /**
  * Documents Controller
@@ -11,7 +12,8 @@ import {
 
 export async function getDocuments(req, res, next) {
   try {
-    const documents = await getAllDocuments();
+    const organizationId = resolveOrganizationId(req);
+    const documents = await getAllDocuments(organizationId);
     return res.status(200).json({
       success: true,
       documents,
@@ -31,7 +33,8 @@ export async function getDocument(req, res, next) {
       });
     }
 
-    const document = await getDocumentById(id);
+    const organizationId = resolveOrganizationId(req);
+    const document = await getDocumentById(id, organizationId);
     if (!document) {
       return res.status(404).json({
         success: false,
@@ -57,8 +60,10 @@ export async function uploadDocument(req, res, next) {
       });
     }
 
+    const organizationId = resolveOrganizationId(req);
     const target = req.file || req.body;
     const options = {
+      organizationId,
       documentId: req.body?.documentId,
       filename: req.body?.filename,
       originalFilename: req.file?.originalname || req.body?.originalFilename || req.body?.filename,
@@ -69,6 +74,7 @@ export async function uploadDocument(req, res, next) {
     return res.status(200).json({
       success: true,
       documentId: result.documentId,
+      organizationId: result.organizationId,
       filename: result.filename,
       originalFilename: result.originalFilename,
       status: result.status,

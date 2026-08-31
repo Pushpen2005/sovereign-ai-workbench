@@ -8,7 +8,7 @@ class LLMError extends Error {
     }
 }
 
-async function generateAnswer(prompt, model) {
+async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
     // Validate prompt
     if (typeof prompt !== "string") {
         throw new LLMError("Prompt must be a string");
@@ -18,8 +18,19 @@ async function generateAnswer(prompt, model) {
         throw new LLMError("Prompt cannot be empty");
     }
 
+    let model = undefined;
+    let options = {};
+
+    if (typeof modelOrOptions === "string") {
+        model = modelOrOptions;
+        options = maybeOptions || {};
+    } else if (modelOrOptions && typeof modelOrOptions === "object") {
+        options = modelOrOptions;
+        model = options.model;
+    }
+
     // Validate model override
-    if (model !== undefined) {
+    if (model !== undefined && model !== null) {
         if (typeof model !== "string") {
             throw new LLMError("Model must be a string");
         }
@@ -43,18 +54,40 @@ async function generateAnswer(prompt, model) {
 
     const selectedModel = model?.trim() || ollamaModel;
 
+    const requestBody = {
+        model: selectedModel,
+        prompt: prompt.trim(),
+        stream: false,
+    };
+
+    if (options.format) {
+        requestBody.format = options.format;
+    }
+
     try {
-        const response = await fetch(`${ollamaUrl}/api/generate`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                model: selectedModel,
-                prompt: prompt.trim(),
-                stream: false,
-            }),
-        });
+        let response;
+        try {
+            response = await fetch(`${ollamaUrl}/api/generate`, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify(requestBody),
+            });
+        } catch (fetchErr) {
+            if (ollamaUrl.includes("host.docker.internal")) {
+                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
+                response = await fetch(`${fallbackUrl}/api/generate`, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                    },
+                    body: JSON.stringify(requestBody),
+                });
+            } else {
+                throw fetchErr;
+            }
+        }
 
         if (!response.ok) {
             if (response.status === 404) {

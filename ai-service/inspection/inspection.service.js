@@ -10,12 +10,24 @@ import { upsertChunks } from "../vectorstore/qdrant.service.js";
 import { generateAnswer } from "../llm/llm.service.js";
 import {
     buildInspectionPrompt,
+    buildInspectionRetryPrompt,
     buildInspectionContext,
 } from "./inspection.prompt.js";
 import {
     attachSourcesToFindings,
     parseInspectionLlmResponse,
+    InspectionValidationError,
 } from "./inspection.schema.js";
+
+export class InspectionExtractionError extends Error {
+    constructor(
+        message = "Inspection finding extraction failed because the local model did not return the required structured format.",
+        options = {}
+    ) {
+        super(message, options);
+        this.name = "InspectionExtractionError";
+    }
+}
 
 const INSPECTION_DOCUMENT_TYPE = "inspection";
 
@@ -199,8 +211,36 @@ export async function analyzeInspectionReport(input, options = {}) {
 
     const context = buildInspectionContext(relevantChunks);
     const prompt = buildInspectionPrompt(task, context);
-    const rawResponse = await generateAnswerFn(prompt, options.model);
-    const parsedResponse = parseInspectionLlmResponse(rawResponse);
+
+    let parsedResponse = null;
+    let lastError = null;
+
+    // Attempt 1: Standard structured extraction with format: "json"
+    try {
+        const rawResponse = await generateAnswerFn(prompt, options.model, { format: "json" });
+        parsedResponse = parseInspectionLlmResponse(rawResponse);
+    } catch (err) {
+        lastError = err;
+        console.warn(`[Inspection] Structured extraction attempt 1 failed validation: ${err.message}`);
+    }
+
+    // Attempt 2: Strict retry prompt if attempt 1 failed
+    if (!parsedResponse) {
+        console.log("[Inspection] Retrying structured extraction (attempt 2 of 2)...");
+        try {
+            const retryPrompt = buildInspectionRetryPrompt(task, context, lastError?.message);
+            const retryRawResponse = await generateAnswerFn(retryPrompt, options.model, { format: "json" });
+            parsedResponse = parseInspectionLlmResponse(retryRawResponse);
+            console.log("[Inspection] Structured extraction succeeded on attempt 2");
+        } catch (retryErr) {
+            console.error(`[Inspection] Structured extraction attempt 2 failed validation: ${retryErr.message}`);
+            throw new InspectionExtractionError(
+                "Inspection finding extraction failed because the local model did not return the required structured format.",
+                { cause: retryErr }
+            );
+        }
+    }
+
     const findings = attachSourcesToFindings(parsedResponse.findings, relevantChunks);
 
     return createInspectionResult(findings);
