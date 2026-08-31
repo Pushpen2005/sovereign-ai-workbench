@@ -1,6 +1,6 @@
 FROM node:22-bookworm-slim
 
-# Install system dependencies: Tesseract OCR, Python3, python-docx, Cairo, Pango, and curl
+# Install system dependencies: Tesseract OCR, Python3, python-docx, Cairo, Pango, curl, and docker.io
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     python3 \
@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg62-turbo \
     libgif7 \
     curl \
+    docker.io \
     && python3 -m pip install --no-cache-dir --break-system-packages python-docx \
     && rm -rf /var/lib/apt/lists/*
 

@@ -15,6 +15,7 @@ import { ChatPage }       from '../pages/Chat/ChatPage.jsx';
 import { AgentPage }      from '../pages/Agent/AgentPage.jsx';
 import { ReportsPage }    from '../pages/Reports/ReportsPage.jsx';
 import { SecurityPage }   from '../pages/Security/SecurityPage.jsx';
+import { CodingPage }     from '../pages/Coding/CodingPage.jsx';
 import { NotFoundPage }   from '../pages/NotFound/NotFoundPage.jsx';
 
 export function AppRoutes() {
@@ -28,6 +29,7 @@ export function AppRoutes() {
         <Route path="/dashboard" element={<DashboardPage />} />
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/chat"      element={<ChatPage />} />
+        <Route path="/coding"    element={<CodingPage />} />
         <Route path="/agent"     element={<AgentPage />} />
         <Route path="/reports"   element={<ReportsPage />} />
         <Route path="/security"  element={<SecurityPage />} />

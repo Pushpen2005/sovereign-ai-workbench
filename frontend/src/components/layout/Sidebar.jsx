@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: '/dashboard', label: 'Dashboard',        icon: '⊞' },
   { to: '/documents', label: 'Documents',         icon: '📄' },
   { to: '/chat',      label: 'AI Chat',           icon: '💬' },
+  { to: '/coding',    label: 'Coding Sandbox',    icon: '💻' },
   { to: '/agent',     label: 'Agent Workspace',   icon: '⚙' },
   { to: '/reports',   label: 'Reports',           icon: '📋' },
   { to: '/security',  label: 'Security',          icon: '🔒' },
