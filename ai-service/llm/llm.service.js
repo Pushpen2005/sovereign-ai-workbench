@@ -64,6 +64,10 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         requestBody.format = options.format;
     }
 
+    if (Array.isArray(options.images) && options.images.length > 0) {
+        requestBody.images = options.images;
+    }
+
     try {
         let response;
         try {
@@ -128,8 +132,18 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
     }
 }
 
+async function generateVisionAnswer(prompt, images, model, options = {}) {
+    const imageList = Array.isArray(images) ? images : [images];
+    return generateAnswer(prompt, model, {
+        ...options,
+        images: imageList.filter(Boolean),
+    });
+}
+
 export {
     generateAnswer,
+    generateVisionAnswer,
+    LLMError,
 };
 
 

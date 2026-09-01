@@ -15,6 +15,7 @@
 export const TASK_TYPE = Object.freeze({
     DOCUMENT: "DOCUMENT",
     CODING:   "CODING",
+    VISION:   "VISION",
     GENERAL:  "GENERAL",
 });
 
@@ -77,7 +78,11 @@ const DOCUMENT_KEYWORDS = [
  * @param {string} question
  * @returns {"DOCUMENT" | "CODING" | "GENERAL"}
  */
-export function classifyTask(question) {
+export function classifyTask(question, options = {}) {
+    if (options && (options.hasImage || options.image)) {
+        return TASK_TYPE.VISION;
+    }
+
     if (typeof question !== "string" || !question.trim()) {
         return TASK_TYPE.GENERAL;
     }
@@ -112,6 +117,7 @@ function getModelRegistry() {
     const defaultModel  = process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
     const documentModel = process.env.DOCUMENT_MODEL  || defaultModel;
     const codingModel   = process.env.CODING_MODEL    || defaultModel;
+    const visionModel   = process.env.VISION_MODEL    || "moondream";
 
     // "true" or "1" enables silent fallback to DEFAULT_MODEL when CODING_MODEL
     // is configured but not currently installed in Ollama.
@@ -121,8 +127,10 @@ function getModelRegistry() {
     return {
         [TASK_TYPE.DOCUMENT]: documentModel,
         [TASK_TYPE.CODING]:   codingModel,
+        [TASK_TYPE.VISION]:   visionModel,
         [TASK_TYPE.GENERAL]:  defaultModel,
         defaultModel,
+        visionModel,
         codingFallbackEnabled,
     };
 }
@@ -218,8 +226,8 @@ export async function getAvailableModels() {
  * @param {string} question
  * @returns {Promise<{taskType: string, selectedModel: string, routingReason: string, isFallback: boolean, registryModel: string}>}
  */
-export async function routeTask(question) {
-    const taskType = classifyTask(question);
+export async function routeTask(question, options = {}) {
+    const taskType = classifyTask(question, options);
     const registry = getModelRegistry();
 
     const registryModel = registry[taskType];
@@ -239,6 +247,14 @@ export async function routeTask(question) {
     }
 
     // Model not installed ─────────────────────────────────────────────────────
+    if (taskType === TASK_TYPE.VISION) {
+        // Vision tasks require a multimodal model; never silently fall back or auto-download
+        throw new RouterError(
+            `Configured local vision model '${registryModel}' is not available in Ollama. ` +
+            `Run: ollama pull ${registryModel}`
+        );
+    }
+
     if (registryModel === defaultModel) {
         // The registry model IS the default — if it's not available, hard error
         throw new RouterError(
@@ -281,6 +297,7 @@ function routingReason(taskType, model, isFallback) {
     const labels = {
         [TASK_TYPE.DOCUMENT]: "Document / RAG analysis request",
         [TASK_TYPE.CODING]:   "Code generation request",
+        [TASK_TYPE.VISION]:   "Multimodal visual inspection & document understanding",
         [TASK_TYPE.GENERAL]:  "General query — routed to default model",
     };
     return isFallback

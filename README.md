@@ -1526,3 +1526,113 @@ Executes submitted code strictly inside the isolated sandbox container.
 > - **Prototype Boundary:** Docker container isolation provides process, namespace, and network separation. In high-assurance multi-tenant cloud environments, hardware-virtualized microVMs (e.g. AWS Firecracker or gVisor) would be utilized.
 > - **Language Scope:** PR #24 exclusively targets Python (`python:3.11-alpine`). Additional runtimes (e.g. Node.js or Rust) can be attached following the same container-per-job architecture.
 
+---
+
+## 43. Local Multimodal Vision for Industrial Image & Scanned Document Understanding (PR #25)
+
+SovereignAI provides local **Multimodal Vision** capabilities to satisfy the MRPL requirement for image and scanned document visual understanding.
+
+### Architecture & Data Flow
+
+```
+Industrial Image (PNG / JPEG / WebP)
+     │
+     ▼
+Backend Image Validation (MIME, Extension & Magic Bytes, 10 MB limit)
+     │
+     ▼
+In-Memory Ephemeral Representation (zero disk writes, zero logs)
+     │
+     ▼
+Model Router (taskType: "VISION", model: VISION_MODEL)
+     │
+     ▼
+Local Ollama Multimodal API (host.docker.internal:11434/api/generate)
+     │
+     ▼
+Local Vision Model (e.g. moondream:1.8b / llama3.2-vision:11b)
+     │
+     ▼
+Structured Visual Findings (Summary, Components, Abnormalities, Limitations)
+     │
+     ▼
+Vision Workspace UI (Verified Local Processing)
+```
+
+### Distinction: OCR vs. Multimodal Vision
+
+| Attribute | Local OCR (Tesseract) | Local Multimodal Vision (Ollama) |
+|---|---|---|
+| **Primary Function** | Extracts alphanumeric characters and text lines from scanned PDF pages. | Interprets physical components, spatial geometry, diagrams, surface conditions, and abnormalities. |
+| **Input Format** | Scanned PDF document pages. | PNG, JPEG, JPG, WebP images, engineering drawings, and equipment photos. |
+| **Output** | Raw plain text used for chunking, vector embedding, and RAG retrieval. | Structured analysis: equipment identified, physical observations, visible defects, and viewing limitations. |
+| **Underlying Engine**| Tesseract OCR binary (C++). | Local Vision-Language Model (`moondream`, `llama3.2-vision`). |
+
+### Security & Sovereignty Controls
+
+- **100% On-Premise Execution**: Request routes to local Ollama on `host.docker.internal:11434`. Zero external network calls.
+- **No Cloud AI / Vision APIs**: Audited to guarantee complete absence of OpenAI, Gemini, Anthropic, AWS Rekognition, Google Cloud Vision, or Azure Computer Vision.
+- **In-Memory Buffering**: Uploads are processed in RAM using `multer.memoryStorage()` and converted to base64 for inference. Uploaded images are never saved to permanent disk storage, Docker volumes, or git repositories.
+- **Binary Magic Bytes Validation**: Prevents disguised executable or text files (`.exe` or `.txt` renamed to `.png`).
+- **Fail-Closed Availability**: If the configured vision model is not installed, the system immediately returns a controlled `HTTP 503 MODEL_UNAVAILABLE` error and refuses to silently fall back to cloud AI or perform silent background model downloads.
+
+### Configuring & Enabling Local Vision
+
+1. **Pull the recommended lightweight vision model**:
+   ```bash
+   ollama pull moondream
+   ```
+   *(Alternative: `ollama pull llama3.2-vision:11b` for higher parameter capacity on machines with >16GB VRAM).*
+
+2. **Configure environment variable (optional, defaults to `moondream`)**:
+   ```bash
+   # In .env:
+   VISION_MODEL=moondream
+   ```
+
+3. **Restart backend service**:
+   ```bash
+   docker compose restart backend
+   ```
+
+### API Reference
+
+#### `POST /api/v1/vision/analyze`
+Accepts `multipart/form-data`:
+- `image`: Image file (`image/png`, `image/jpeg`, `image/webp`, max 10 MB)
+- `prompt` *(optional)*: Analysis instructions or specific inspection questions
+
+**Success Response:**
+```json
+{
+  "success": true,
+  "taskType": "VISION",
+  "model": "moondream",
+  "analysis": "This is an industrial centrifugal pump casing inspection image...",
+  "structured": {
+    "summary": "Visual inspection of centrifugal pump casing completed.",
+    "observations": [
+      "Impeller shaft and discharge flange visible",
+      "Equipment identification plate PUMP-P102"
+    ],
+    "abnormalities": [
+      "An apparent surface crack is visible near the lower bearing housing section"
+    ],
+    "limitations": [
+      "Analysis limited to visible 2D surface features from current camera angle"
+    ]
+  },
+  "processing": {
+    "local": true,
+    "provider": "ollama",
+    "durationMs": 1420
+  }
+}
+```
+
+### Safety & Engineering Limitations
+
+> [!WARNING]
+> - **Assistive Scope:** Visual inspection results are assistive decision-support outputs and do not constitute certified Non-Destructive Testing (NDT), radiographic qualification, or autonomous safety approval.
+> - **Visual Boundary:** The model cannot evaluate internal metallurgy, subsurface stress, or occluded equipment areas not visible in the supplied 2D image.
+

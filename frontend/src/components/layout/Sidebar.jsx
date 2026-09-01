@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/documents', label: 'Documents',         icon: '📄' },
   { to: '/chat',      label: 'AI Chat',           icon: '💬' },
   { to: '/coding',    label: 'Coding Sandbox',    icon: '💻' },
+  { to: '/vision',    label: 'Vision Analysis',   icon: '👁' },
   { to: '/agent',     label: 'Agent Workspace',   icon: '⚙' },
   { to: '/reports',   label: 'Reports',           icon: '📋' },
   { to: '/security',  label: 'Security',          icon: '🔒' },
