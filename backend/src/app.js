@@ -17,6 +17,7 @@ import documentsRouter from "./routes/documents.routes.js";
 import reportsRouter from "./routes/reports.routes.js";
 import codingRouter from "./routes/coding.routes.js";
 import visionRouter from "./routes/vision.routes.js";
+import agentRouter from "./routes/agent.routes.js";
 
 const app = express();
 app.use(cors());
@@ -28,6 +29,7 @@ app.use("/api/v1/inspection", inspectionRouter);
 app.use("/api/v1/reports", reportsRouter);
 app.use("/api/v1/coding", codingRouter);
 app.use("/api/v1/vision", visionRouter);
+app.use("/api/v1/agent", agentRouter);
 app.get('/', (req, res) => {
     res.status(200).json({
         success: true,
