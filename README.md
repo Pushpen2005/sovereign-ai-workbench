@@ -1636,3 +1636,119 @@ Accepts `multipart/form-data`:
 > - **Assistive Scope:** Visual inspection results are assistive decision-support outputs and do not constitute certified Non-Destructive Testing (NDT), radiographic qualification, or autonomous safety approval.
 > - **Visual Boundary:** The model cannot evaluate internal metallurgy, subsurface stress, or occluded equipment areas not visible in the supplied 2D image.
 
+---
+
+## 44. Local Agent Tool Orchestration (PR #26)
+
+SovereignAI features an autonomous, multi-step **Local Agent Tool Orchestration Runtime** designed to fulfill the MRPL requirement for an assistant that acts like an agent: planning multi-step work, executing registered local tools, reading tool results, and iteratively synthesizing deliverables.
+
+### Agentic Loop Architecture
+
+```
+User Goal
+   │
+   ▼
+Agent Controller (POST /api/v1/agent/run)
+   │
+   ▼
+Agent Orchestration Loop (bounded by MAX_STEPS = 8, 60s timeout)
+   │
+   ├─► Local LLM Planner (structured JSON action: tool_call or final)
+   │     │
+   │     ▼
+   ├─► Tool Registry & Validation (Strict whitelist, schema checks)
+   │     ├── document_search      (Qdrant vector retrieval + citations)
+   │     ├── file_read            (PostgreSQL doc metadata + safe excerpt; no /etc/passwd)
+   │     ├── calculator           (Deterministic safe AST expression evaluator; zero eval())
+   │     ├── execute_sandbox_code (PR #24 Docker sandbox; --network none)
+   │     ├── document_generate    (PR #18 DOCX Approval Note compiler)
+   │     └── analyze_image        (PR #25 local vision wrapper)
+   │     │
+   │     ▼
+   ├─► Tool Execution & Output Truncation (safe summaries, error capture)
+   │     │
+   │     ▼
+   └─► Next Step / Final Synthesis (cites sources, outputs deliverable link)
+   │
+   ▼
+Agent Workspace UI (Goal input, live timeline, sources, DOCX download)
+```
+
+### What Makes the System Agentic
+
+Unlike single-turn chat or hardcoded scripts, the SovereignAI agent runtime:
+1. **Plans multi-step tasks**: Analyzes complex user objectives and breaks them into discrete tool operations.
+2. **Selects tools dynamically**: Chooses from a whitelist of verified local tools based on the current execution state.
+3. **Inspects tool outputs**: Feeds the result of each step back into the context so the model can inspect outcomes and make subsequent decisions.
+4. **Handles errors gracefully**: Retries on malformed outputs, captures tool failures, and adapts its plan without crashing.
+5. **Decides when to stop**: Concludes autonomously with an evidence-grounded final answer once sufficient information is gathered, or terminates safely at `MAX_STEPS = 8`.
+
+### Registered Tool Catalog
+
+| Tool Name | Capability & Security Boundary | Engine / Integration |
+|---|---|---|
+| `document_search` | Semantic search across indexed technical documents and SOPs. | Qdrant vector database (`retrieval.service.js`) |
+| `file_read` | Reads indexed document metadata and text excerpts. Rejects path traversal and arbitrary filesystem paths (`/etc/passwd`). | PostgreSQL `documents` + Qdrant |
+| `calculator` | Safe mathematical expression parser (`+`, `-`, `*`, `/`, `%`, `^`, `sqrt`, `abs`, `min`, `max`). Zero `eval()`, zero arbitrary code. | Deterministic AST recursive-descent parser |
+| `execute_sandbox_code` | Executes Python code inside an isolated container with network disabled (`--network none`) and resource caps. | PR #24 Docker sandbox (`sandbox.service.js`) |
+| `document_generate` | Compiles an official 8-section Approval Note `.docx` deliverable. | Python `python-docx` (`approval-note.service.js`) |
+| `analyze_image` | Multimodal visual inspection of industrial equipment images. | Local Ollama vision model (`moondream`) |
+
+### Security & Privacy Safeguards
+
+- **Zero Arbitrary Execution**: The LLM can never invoke arbitrary functions, shell commands, or operating system paths. Tools are the hard security boundary.
+- **Calculator Safety**: Mathematical expressions are parsed through an AST token stream without using JavaScript's `eval()` or `new Function()`.
+- **Sandbox Confinement**: All code execution occurs strictly inside ephemeral `python:3.11-alpine` containers with `--network none` and `--read-only` root.
+- **Privacy & Chain-of-Thought**: The agent does not expose raw internal chain-of-thought to the UI. Only clean action intent, tool name, status, concise result summary, and timing are recorded in the timeline.
+
+### API Reference
+
+#### `POST /api/v1/agent/run`
+**Request:**
+```json
+{
+  "goal": "Read the inspection report, find the relevant safety requirements, calculate the risk score using the provided values, and prepare a recommendation."
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "goal": "...",
+  "model": "llama3.2:3b",
+  "answer": "...",
+  "steps": [
+    {
+      "step": 1,
+      "type": "tool_call",
+      "tool": "document_search",
+      "status": "success",
+      "reason": "Search safety SOP for lockout/tagout rules",
+      "resultSummary": "Found 1 relevant chunks in Qdrant.",
+      "durationMs": 119
+    },
+    {
+      "step": 2,
+      "type": "final",
+      "status": "success",
+      "resultSummary": "Produced final answer.",
+      "durationMs": 53948
+    }
+  ],
+  "sources": [
+    {
+      "filename": "Demo_Safety_SOP.pdf",
+      "page": 2,
+      "chunkIndex": 1,
+      "score": 0.5727
+    }
+  ],
+  "deliverable": null,
+  "stoppedReason": "completed",
+  "totalSteps": 2,
+  "durationMs": 54067
+}
+```
+
+
