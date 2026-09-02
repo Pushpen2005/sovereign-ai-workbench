@@ -13,7 +13,7 @@
  *   POST /api/v1/inspection/workflow     — Complete end-to-end workflow
  */
 
-import { get, post, postForm } from './client.js';
+import axiosInstance, { post, postForm, API_BASE_URL } from './client.js';
 
 /**
  * Ingest an inspection PDF into Qdrant.
@@ -55,24 +55,69 @@ export function generateApprovalNote(data) {
 }
 
 /**
- * Download a generated DOCX file.
- * Returns the raw Response (binary) for blob download.
+ * Get direct download URL for a generated DOCX file.
  * @param {string} filename
- * @returns {Promise<Response>}
+ * @returns {string}
  */
-export function downloadApprovalNote(filename) {
-  return get(`/api/v1/inspection/download/${encodeURIComponent(filename)}`);
+export function getDownloadUrl(filename) {
+  return `${API_BASE_URL}/api/v1/inspection/download/${encodeURIComponent(filename)}`;
+}
+
+/**
+ * Download a generated DOCX file directly as a Blob.
+ * Triggers safe programmatic browser file download.
+ * @param {string} filename
+ * @returns {Promise<string>} downloaded filename
+ */
+export async function downloadApprovalNote(filename) {
+  if (!filename || typeof filename !== 'string') {
+    throw new Error('Filename is required for download');
+  }
+
+  const res = await axiosInstance.get(
+    `/api/v1/inspection/download/${encodeURIComponent(filename)}`,
+    { responseType: 'blob' }
+  );
+
+  const blob = new Blob([res.data], {
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+  return filename;
 }
 
 /**
  * Run the complete inspection workflow in one call.
- * @param {File} file - Inspection PDF
+ * Accepts either a File object (multipart upload) or documentId string / descriptor object.
+ * @param {File|string|object} input - Inspection PDF File or documentId
  * @param {string} [task]
  * @returns {Promise<{ success: boolean, data: object }>}
  */
-export function runWorkflow(file, task = '') {
-  const form = new FormData();
-  form.append('document', file);
-  if (task) form.append('task', task);
-  return postForm('/api/v1/inspection/workflow', form);
+export function runWorkflow(input, task = '') {
+  if (input instanceof File || input instanceof Blob) {
+    const form = new FormData();
+    form.append('document', input);
+    if (task) form.append('task', task);
+    return postForm('/api/v1/inspection/workflow', form);
+  }
+
+  if (typeof input === 'string') {
+    return post('/api/v1/inspection/workflow', { documentId: input, task });
+  }
+
+  if (input && typeof input === 'object') {
+    return post('/api/v1/inspection/workflow', {
+      ...input,
+      task: task || input.task || '',
+    });
+  }
+
+  throw new Error('Valid document file or documentId is required to run workflow');
 }

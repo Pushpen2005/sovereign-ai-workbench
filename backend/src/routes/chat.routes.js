@@ -1,9 +1,16 @@
 import express from "express";
-import { askQuestion } from "../controllers/chat.controller.js";
+import {
+  askQuestion,
+  getHistory,
+  getConversationMessages,
+  getStats,
+} from "../controllers/chat.controller.js";
 
 const router = express.Router();
 
-// PR #20 — RAG Chat
 router.post("/ask", askQuestion);
+router.get("/history", getHistory);
+router.get("/conversations/:id/messages", getConversationMessages);
+router.get("/stats", getStats);
 
 export default router;

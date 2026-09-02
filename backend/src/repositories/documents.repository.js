@@ -5,26 +5,63 @@ import { query } from "../config/db.js";
  * Handles all direct SQL queries for document metadata in PostgreSQL.
  */
 
+/**
+ * Create or update a document.
+ */
 export async function createDocument({
   id,
+  organizationId,
   filename,
   originalFilename,
   status = "Processing",
   chunksStored = 0,
 }) {
   const sql = `
-    INSERT INTO documents (id, filename, original_filename, status, chunks_stored, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+    INSERT INTO documents (
+      id,
+      organization_id,
+      filename,
+      original_filename,
+      status,
+      chunks_stored,
+      created_at,
+      updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+    ON CONFLICT (id) DO UPDATE SET
+      organization_id = EXCLUDED.organization_id,
+      filename = EXCLUDED.filename,
+      original_filename = EXCLUDED.original_filename,
+      status = EXCLUDED.status,
+      chunks_stored = EXCLUDED.chunks_stored,
+      updated_at = NOW()
     RETURNING *;
   `;
-  const values = [id, filename, originalFilename, status, chunksStored];
+
+  const values = [
+    id,
+    organizationId,
+    filename,
+    originalFilename,
+    status,
+    chunksStored,
+  ];
+
   const res = await query(sql, values);
+
   return res.rows[0];
 }
 
-export async function updateDocument(id, { status, chunksStored }) {
+/**
+ * Update document processing status/chunk count.
+ */
+export async function updateDocument(
+  id,
+  { status, chunksStored }
+) {
   const updates = ["updated_at = NOW()"];
   const values = [id];
+
   let paramIndex = 2;
 
   if (status !== undefined) {
@@ -45,36 +82,85 @@ export async function updateDocument(id, { status, chunksStored }) {
   `;
 
   const res = await query(sql, values);
+
   return res.rows[0] || null;
 }
 
-export async function getDocumentById(id) {
-  const sql = `SELECT * FROM documents WHERE id = $1;`;
-  const res = await query(sql, [id]);
-  return res.rows[0] || null;
-}
-
-export async function getAllDocuments() {
+/**
+ * Get a document by ID.
+ */
+export async function getDocumentById(
+  id,
+  organizationId
+) {
   const sql = `
-    SELECT id, filename, original_filename, status, chunks_stored, created_at, updated_at
+    SELECT *
     FROM documents
+    WHERE id = $1
+      AND organization_id = $2;
+  `;
+
+  const res = await query(sql, [
+    id,
+    organizationId,
+  ]);
+
+  return res.rows[0] || null;
+}
+
+/**
+ * Get all documents.
+ *
+ * NOTE:
+ * For multi-tenant security, this should eventually
+ * accept organizationId and filter by it.
+ */
+export async function getAllDocuments(organizationId) {
+  const sql = `
+    SELECT
+      id,
+      organization_id,
+      filename,
+      original_filename,
+      status,
+      chunks_stored,
+      created_at,
+      updated_at
+    FROM documents
+    WHERE organization_id = $1
     ORDER BY created_at DESC;
   `;
-  const res = await query(sql);
+
+  const res = await query(sql, [organizationId]);
+
   return res.rows;
 }
 
+/**
+ * Create or update a document.
+ */
 export async function upsertDocument({
   id,
+  organizationId,
   filename,
   originalFilename,
   status = "Processing",
   chunksStored = 0,
 }) {
   const sql = `
-    INSERT INTO documents (id, filename, original_filename, status, chunks_stored, created_at, updated_at)
-    VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+    INSERT INTO documents (
+      id,
+      organization_id,
+      filename,
+      original_filename,
+      status,
+      chunks_stored,
+      created_at,
+      updated_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
+      organization_id = EXCLUDED.organization_id,
       filename = EXCLUDED.filename,
       original_filename = EXCLUDED.original_filename,
       status = EXCLUDED.status,
@@ -82,7 +168,17 @@ export async function upsertDocument({
       updated_at = NOW()
     RETURNING *;
   `;
-  const values = [id, filename, originalFilename, status, chunksStored];
+
+  const values = [
+    id,
+    organizationId,
+    filename,
+    originalFilename,
+    status,
+    chunksStored,
+  ];
+
   const res = await query(sql, values);
+
   return res.rows[0];
 }

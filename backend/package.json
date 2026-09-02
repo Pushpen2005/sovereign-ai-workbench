@@ -1,5 +1,8 @@
 {
   "dependencies": {
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.13",
+    "canvas": "^3.2.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -11,7 +14,11 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "node tests/backend.e2e.test.js",
+    "test": "node tests/backend.e2e.test.js && node tests/reports.test.js && node tests/chat.test.js && node tests/inspection.structured.test.js",
+    "test:reports": "node tests/reports.test.js",
+    "test:chat": "node tests/chat.test.js",
+    "test:structured": "node tests/inspection.structured.test.js",
+    "test:graph": "node tests/inspection.graph.test.js",
     "dev": "npx nodemon server.js"
   },
   "keywords": [],

@@ -121,7 +121,21 @@ async function run() {
     assert.equal(docRow.original_filename, "QA_Test_Report.pdf");
     assert.equal(docRow.status, "Indexed");
     assert.equal(docRow.chunks_stored, uploadData.chunksStored);
-    console.log(`    ✓ PostgreSQL row verified: status=${docRow.status}, chunks_stored=${docRow.chunks_stored}`);
+    assert.ok(docRow.organization_id, "organization_id must be populated");
+    console.log(`    ✓ PostgreSQL row verified: status=${docRow.status}, chunks_stored=${docRow.chunks_stored}, organization_id=${docRow.organization_id}`);
+
+    // 3b. Testing GET /api/v1/documents/:id
+    console.log("\n[3b] Testing GET /api/v1/documents/:id...");
+    const getDocRes = await fetch(`${baseUrl}/api/v1/documents/${uploadData.documentId}`);
+    assert.equal(getDocRes.status, 200);
+    const getDocData = await getDocRes.json();
+    assert.equal(getDocData.success, true);
+    assert.equal(getDocData.document.documentId, uploadData.documentId);
+    assert.ok(getDocData.document.organizationId, "document must have organizationId");
+
+    const notFoundRes = await fetch(`${baseUrl}/api/v1/documents/non-existent-doc-id`);
+    assert.equal(notFoundRes.status, 404);
+    console.log("    ✓ GET /api/v1/documents/:id verified (200 on existing, 404 on missing)");
 
     // 4. GET /api/v1/documents again to verify persistence
     console.log("\n[4] Re-calling GET /api/v1/documents (Simulating browser refresh)...");
@@ -132,6 +146,7 @@ async function run() {
     assert.ok(foundNewDoc, "Newly uploaded document must be returned on refresh");
     assert.equal(foundNewDoc.originalFilename, "QA_Test_Report.pdf");
     assert.equal(foundNewDoc.chunksStored, uploadData.chunksStored);
+    assert.ok(foundNewDoc.organizationId, "Retrieved document must have organizationId");
     console.log("    ✓ Newly uploaded document persists and is returned on refresh");
 
     // 5. Validation errors

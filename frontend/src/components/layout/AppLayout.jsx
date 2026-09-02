@@ -15,21 +15,21 @@ export function AppLayout() {
   const { sidebarOpen } = useAppState();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50">
+    <div className="flex h-screen overflow-hidden bg-slate-100/60">
       <Sidebar />
 
-      {/* Main content shifts right based on sidebar state */}
+      {/* Main workspace container shifts right based on sidebar width */}
       <div
         className={[
-          'flex flex-col flex-1 min-w-0 overflow-hidden transition-[margin] duration-200 ease-in-out',
-          sidebarOpen ? 'lg:ml-56' : 'lg:ml-16',
+          'flex flex-col flex-1 min-w-0 h-full overflow-hidden transition-[margin] duration-200 ease-in-out',
+          sidebarOpen ? 'lg:ml-64' : 'lg:ml-16',
           'ml-0',
         ].join(' ')}
       >
         <Topbar />
         <main
           id="main-content"
-          className="flex-1 overflow-y-auto p-6"
+          className="flex-1 overflow-y-auto p-4 sm:p-6"
           role="main"
         >
           <Outlet />

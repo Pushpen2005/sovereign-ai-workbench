@@ -9,6 +9,10 @@ import {
     runInspectionAnalysis,
 } from "../services/inspection.service.js";
 import { processAndIngestDocument } from "../services/documents.service.js";
+import { resolveOrganizationId } from "../config/organization.js";
+import { createReportRecord } from "../services/reports.service.js";
+import { createDocument } from "../repositories/documents.repository.js";
+import { query } from "../config/db.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GENERATED_DIR = path.resolve(__dirname, "../../generated");
@@ -50,6 +54,9 @@ export async function ingestInspection(req, res, next) {
                 message: "Document file or documentId is required",
             });
         }
+
+        const organizationId = resolveOrganizationId(req);
+        options.organizationId = organizationId;
 
         const result = await processAndIngestDocument(target, options);
 
@@ -234,11 +241,53 @@ export async function runWorkflow(req, res, next) {
             });
         }
 
+        const organizationId = resolveOrganizationId(req);
+        if (!options.ingestOptions) {
+            options.ingestOptions = {};
+        }
+        options.ingestOptions.organizationId = organizationId;
+
         const workflowResult = await runCompleteWorkflow(input, options);
+
+        // Ensure document row exists in documents table for referential integrity
+        if (workflowResult.documentId) {
+            const docCheck = await query(
+                "SELECT id FROM documents WHERE id = $1",
+                [workflowResult.documentId]
+            );
+            if (docCheck.rows.length === 0) {
+                await createDocument({
+                    id: workflowResult.documentId,
+                    organizationId,
+                    filename: workflowResult.filename || `${workflowResult.documentId}.pdf`,
+                    originalFilename: workflowResult.filename || "Inspection Report",
+                    status: "Indexed",
+                    chunksStored: workflowResult.chunksStored || 0,
+                });
+            }
+        }
+
+        const primaryRisk =
+            Array.isArray(workflowResult.riskAssessments) && workflowResult.riskAssessments.length > 0
+                ? workflowResult.riskAssessments[0]?.level || null
+                : null;
+
+        const reportTitle = `Approval Note — ${workflowResult.filename || workflowResult.documentId}`;
+
+        const savedReport = await createReportRecord({
+            documentId: workflowResult.documentId || null,
+            organizationId,
+            title: reportTitle,
+            filename: workflowResult.approvalNote.filename,
+            riskLevel: primaryRisk,
+            status: "GENERATED",
+            task: options.task || "Analyze this inspection report and extract all significant findings.",
+        });
 
         return res.status(200).json({
             success: true,
             data: {
+                reportId: savedReport.id,
                 documentId: workflowResult.documentId,
                 filename: workflowResult.filename,
                 chunksStored: workflowResult.chunksStored,
@@ -250,6 +299,7 @@ export async function runWorkflow(req, res, next) {
                     filename: workflowResult.approvalNote.filename,
                     downloadUrl: `/api/v1/inspection/download/${workflowResult.approvalNote.filename}`,
                 },
+                report: savedReport,
             },
         });
     } catch (error) {
