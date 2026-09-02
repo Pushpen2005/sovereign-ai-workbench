@@ -1,5 +1,7 @@
 {
   "dependencies": {
+    "@langchain/core": "^1.2.9",
+    "@langchain/langgraph": "^1.4.13",
     "canvas": "^3.2.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -16,6 +18,7 @@
     "test:reports": "node tests/reports.test.js",
     "test:chat": "node tests/chat.test.js",
     "test:structured": "node tests/inspection.structured.test.js",
+    "test:graph": "node tests/inspection.graph.test.js",
     "dev": "npx nodemon server.js"
   },
   "keywords": [],

@@ -8,6 +8,7 @@ import {
 } from "../../../ai-service/inspection/inspection.service.js";
 import { assessFindingRisk } from "../../../ai-service/risk/risk.service.js";
 import { generateApprovalNote } from "../../../ai-service/reports/approval-note.service.js";
+import { runInspectionWorkflow } from "./inspection-orchestrator.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "../uploads");
@@ -133,9 +134,9 @@ export async function runApprovalNoteGeneration(data, options = {}) {
 }
 
 /**
- * Orchestrates the end-to-end inspection workflow from PDF to Approval Note DOCX.
+ * Legacy imperative inspection workflow implementation (maintained for rollback & equivalence testing).
  */
-export async function runCompleteWorkflow(input, options = {}) {
+export async function runLegacyCompleteWorkflow(input, options = {}) {
     // 1. Ingestion
     const ingestionResult = await ingestInspectionFile(input, options.ingestOptions);
     const documentId = ingestionResult.documentId;
@@ -230,4 +231,23 @@ export async function runCompleteWorkflow(input, options = {}) {
             filePath: docxResult.filePath,
         },
     };
+}
+
+/**
+ * Orchestrates the end-to-end inspection workflow from PDF to Approval Note DOCX.
+ *
+ * Supports feature flag switching via INSPECTION_ORCHESTRATOR environment variable:
+ * - "langgraph" (Default): Production LangGraph StateGraph orchestration
+ * - "legacy": Imperative promise chain fallback
+ */
+export async function runCompleteWorkflow(input, options = {}) {
+    const orchestratorMode = (
+        process.env.INSPECTION_ORCHESTRATOR || "langgraph"
+    ).trim().toLowerCase();
+
+    if (orchestratorMode === "legacy") {
+        return runLegacyCompleteWorkflow(input, options);
+    }
+
+    return runInspectionWorkflow(input, options);
 }
