@@ -33,7 +33,7 @@ const INSPECTION_DOCUMENT_TYPE = "inspection";
 
 const DEFAULT_CANDIDATE_LIMIT = 10;
 const DEFAULT_CONTEXT_LIMIT = 5;
-const DEFAULT_SCORE_THRESHOLD = 0.5;
+const DEFAULT_SCORE_THRESHOLD = Number(process.env.INSPECTION_SCORE_THRESHOLD || 0.35);
 
 export function createInspectionResult(findings = []) {
     if (!Array.isArray(findings)) {

@@ -133,7 +133,19 @@ export function validateRiskResponse(parsed) {
     }
 
     // 2. recommendation
-    if (typeof parsed.recommendation !== "string" || parsed.recommendation.trim().length === 0) {
+    let rec = parsed.recommendation;
+    if ((typeof rec !== "string" || rec.trim().length === 0) && parsed.recommendations) {
+        if (Array.isArray(parsed.recommendations)) {
+            rec = parsed.recommendations.filter((r) => typeof r === "string" && r.trim().length > 0).join(" ");
+        } else if (typeof parsed.recommendations === "string") {
+            rec = parsed.recommendations;
+        }
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && parsed.action) {
+        rec = String(parsed.action);
+    }
+
+    if (typeof rec !== "string" || rec.trim().length === 0) {
         throw new Error("recommendation must be a non-empty string");
     }
 
@@ -149,7 +161,7 @@ export function validateRiskResponse(parsed) {
             level,
             reason: reason.trim(),
         },
-        recommendation: parsed.recommendation.trim(),
+        recommendation: rec.trim(),
         citations: rawCitations,
     };
 }

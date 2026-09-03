@@ -23,14 +23,19 @@ const uploadInspection = (req, res) => {
   });
 };
 
-// Existing endpoint — keep it working
+/**
+ * @deprecated Legacy file upload endpoint. Maintained for backward compatibility.
+ * Use canonical POST /api/v1/inspection/upload instead.
+ */
 router.post(
   "/upload",
   upload.single("document"),
   uploadInspection
 );
 
-// New inspection endpoint
+/**
+ * Canonical inspection PDF upload endpoint.
+ */
 router.post(
   "/inspection/upload",
   upload.single("document"),

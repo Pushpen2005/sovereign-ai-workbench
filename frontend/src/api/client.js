@@ -28,6 +28,20 @@ const axiosInstance = axios.create({
   },
 });
 
+// ─── Request Interceptor: Attach JWT Bearer Token ─────────────────────────────
+
+axiosInstance.interceptors.request.use((config) => {
+  try {
+    const token = localStorage.getItem('sovereign_auth_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } catch {
+    // Non-blocking in non-browser environments
+  }
+  return config;
+});
+
 // ─── Error normalisation ──────────────────────────────────────────────────────
 
 export class ApiError extends Error {

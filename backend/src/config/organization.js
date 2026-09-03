@@ -19,7 +19,13 @@ export const DEFAULT_ORGANIZATION_NAME =
 export function resolveOrganizationId(req) {
   if (req?.user?.organizationId && typeof req.user.organizationId === "string") {
     const trimmed = req.user.organizationId.trim();
-    if (trimmed) return trimmed;
+    if (trimmed) {
+      const headerOrgId = req?.headers?.["x-organization-id"];
+      if (typeof headerOrgId === "string" && headerOrgId.trim() && headerOrgId.trim() !== trimmed) {
+        throw new Error("Forbidden: x-organization-id header does not match authenticated organization context");
+      }
+      return trimmed;
+    }
   }
 
   const headerOrgId = req?.headers?.["x-organization-id"];

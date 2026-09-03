@@ -95,6 +95,7 @@ export async function runInspectionWorkflow(input, options = {}) {
         filePath: filePath || null,
         task,
         organizationId,
+        userId: options.userId || null,
         metadata: {
             input,
             ingestOptions: options.ingestOptions || {},
