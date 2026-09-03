@@ -282,7 +282,8 @@ export async function ingestInspectionReport(filePath, options = {}) {
     const chunksWithMeta = rawChunks.map((chunk) => ({
         ...chunk,
         filename,
-        documentType: INSPECTION_DOCUMENT_TYPE,
+        documentType: options.documentType || INSPECTION_DOCUMENT_TYPE,
+        organizationId: options.organizationId || null,
     }));
 
     const chunksWithVectors = [];

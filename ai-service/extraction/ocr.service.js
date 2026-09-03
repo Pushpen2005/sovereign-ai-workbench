@@ -1,9 +1,10 @@
 import { spawn } from "child_process";
+import path from "path";
 
 /**
  * Extract text from an image using local Tesseract OCR.
  *
- * @param {string} imagePath - Absolute path to the image.
+ * @param {string} imagePath - Absolute or relative path to the image.
  * @returns {Promise<string>}
  */
 export function extractTextFromImage(imagePath) {
@@ -11,9 +12,11 @@ export function extractTextFromImage(imagePath) {
         throw new Error("A valid image path is required");
     }
 
+    const resolvedPath = path.resolve(imagePath);
+
     return new Promise((resolve, reject) => {
         const tesseract = spawn("tesseract", [
-            imagePath,
+            resolvedPath,
             "stdout",
         ]);
 

@@ -19,6 +19,7 @@
     "test": "node tests/backend.e2e.test.js && node tests/reports.test.js && node tests/chat.test.js && node tests/inspection.structured.test.js",
     "test:auth": "node tests/auth.test.js",
     "test:golden-path": "node tests/inspection.golden-path.test.js",
+    "test:rag": "node tests/rag.hardening.test.js",
     "test:reports": "node tests/reports.test.js",
     "test:chat": "node tests/chat.test.js",
     "test:structured": "node tests/inspection.structured.test.js",
