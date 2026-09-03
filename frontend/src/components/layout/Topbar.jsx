@@ -47,11 +47,11 @@ export function Topbar() {
         <Link
           to="/security"
           className="flex items-center gap-2 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full transition-colors"
-          title="Click to view air-gap sovereignty audit"
+          title="Click to view data sovereignty audit"
         >
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
           <span className="text-xs font-semibold text-emerald-800">
-            Local Air-Gapped · 0 Cloud Calls
+            Local Self-Hosted · 0 Cloud Calls
           </span>
         </Link>
       </div>

@@ -24,6 +24,7 @@ import { searchSimilarChunks } from "../../../../ai-service/retrieval/retrieval.
 import { searchSop } from "../../../../ai-service/knowledge/sop.service.js";
 import { assessFindingRisk } from "../../../../ai-service/risk/risk.service.js";
 import { filterValidCitations } from "../../../../ai-service/risk/risk.schema.js";
+import { buildSopQuery } from "../../../../ai-service/risk/risk.prompt.js";
 import { createReportRecord } from "../../services/reports.service.js";
 
 /**
@@ -128,10 +129,10 @@ export async function runFindingsExtraction(state, options = {}) {
 
 /**
  * Adapter 4: SOP Retrieval Adapter
- * Calls existing searchSop() with strict documentType="sop" filter.
+ * Calls existing searchSop() enforcing documentType='sop' filter.
  *
- * @param {object} finding Finding object or search query string
- * @param {object} [options] Search options
+ * @param {object|string} finding Inspection finding or task string
+ * @param {object} [options] Retrieval options
  * @returns {Promise<Array<object>>} Retrieved SOP chunks
  */
 export async function runSopRetrieval(finding, options = {}) {
@@ -139,9 +140,7 @@ export async function runSopRetrieval(finding, options = {}) {
     if (typeof finding === "string") {
         query = finding;
     } else if (finding && typeof finding === "object") {
-        query = [finding.equipment, finding.finding, finding.observedValue]
-            .filter(Boolean)
-            .join(" ");
+        query = buildSopQuery(finding);
     }
 
     if (!query || !query.trim()) {
@@ -149,7 +148,11 @@ export async function runSopRetrieval(finding, options = {}) {
     }
 
     const searchSopFn = options.searchSop ?? searchSop;
-    const sopChunks = await searchSopFn(query.trim(), options);
+    const sopOptions = {
+        scoreThreshold: options.scoreThreshold ?? 0.4,
+        ...options,
+    };
+    const sopChunks = await searchSopFn(query.trim(), sopOptions);
 
     return Array.isArray(sopChunks) ? sopChunks : [];
 }

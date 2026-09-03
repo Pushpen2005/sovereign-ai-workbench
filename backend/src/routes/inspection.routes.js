@@ -7,6 +7,7 @@ import {
     generateApprovalNoteDocx,
     ingestInspection,
     runWorkflow,
+    streamInspectionRun,
 } from "../controllers/inspection.controller.js";
 
 const router = express.Router();
@@ -46,6 +47,12 @@ router.post(
     "/workflow",
     upload.single("document"),
     runWorkflow
+);
+
+// Phase 7 — Live SSE Event Stream for Inspection Run
+router.get(
+    "/runs/:runId/stream",
+    streamInspectionRun
 );
 
 export default router;

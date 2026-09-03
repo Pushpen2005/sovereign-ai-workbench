@@ -2,9 +2,10 @@
  * Inspection Orchestration Module Entrypoint
  *
  * Central export for LangGraph inspection workflow components:
- * - State schema & annotations
+ * - State schema & annotations (InspectionAgentState)
  * - Service adapters (bridges to existing SovereignAI services)
- * - Node implementations and factory
+ * - Node implementations and factory (createInspectionNodes, defaultNodes)
+ * - Routing helper functions
  * - StateGraph builder & compiled graph instance
  */
 
@@ -24,10 +25,22 @@ export {
     ingestNode,
     retrieveNode,
     extractFindingsNode,
+    validateFindingsNode,
+    retryExtractionNode,
     retrieveSopNode,
+    checkSopEvidenceNode,
+    insufficientEvidenceNode,
     assessRiskNode,
+    validateRiskNode,
+    safeFailureNode,
     validateCitationsNode,
     generateReportNode,
+    routeFindingsValidation,
+    routeSopEvidence,
+    routeRiskValidation,
+    validateFindingStructure,
+    validateFindingsArray,
+    validateRiskStructure,
 } from "./inspection.nodes.js";
 export {
     createInspectionGraph,

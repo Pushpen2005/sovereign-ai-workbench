@@ -5,7 +5,7 @@
  * NO React state. NO UI logic.
  */
 
-import { post } from './client.js';
+import { get, post } from './client.js';
 
 /**
  * Execute an autonomous agent task for a given goal.
@@ -22,3 +22,42 @@ export function runAgent(goal, options = {}) {
     ...options,
   });
 }
+
+/**
+ * Fetch paginated agent runs for the organization.
+ *
+ * @param {object} [params]
+ * @param {number} [params.limit]
+ * @param {number} [params.offset]
+ * @param {string} [params.status]
+ * @returns {Promise<{ success: boolean, data: Array<object> }>}
+ */
+export function fetchAgentRuns(params = {}) {
+  const query = new URLSearchParams();
+  if (params.limit) query.set('limit', params.limit);
+  if (params.offset) query.set('offset', params.offset);
+  if (params.status) query.set('status', params.status);
+  const qStr = query.toString();
+  return get(`/api/v1/agent/runs${qStr ? `?${qStr}` : ''}`);
+}
+
+/**
+ * Fetch details of a specific agent run.
+ *
+ * @param {string} runId
+ * @returns {Promise<{ success: boolean, data: object }>}
+ */
+export function fetchAgentRun(runId) {
+  return get(`/api/v1/agent/runs/${encodeURIComponent(runId)}`);
+}
+
+/**
+ * Fetch execution timeline steps for an agent run.
+ *
+ * @param {string} runId
+ * @returns {Promise<{ success: boolean, data: Array<object> }>}
+ */
+export function fetchAgentRunSteps(runId) {
+  return get(`/api/v1/agent/runs/${encodeURIComponent(runId)}/steps`);
+}
+

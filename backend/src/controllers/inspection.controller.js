@@ -13,6 +13,7 @@ import { resolveOrganizationId } from "../config/organization.js";
 import { createReportRecord } from "../services/reports.service.js";
 import { createDocument } from "../repositories/documents.repository.js";
 import { query } from "../config/db.js";
+import { executionEvents } from "../services/execution-events.service.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GENERATED_DIR = path.resolve(__dirname, "../../generated");
@@ -246,6 +247,12 @@ export async function runWorkflow(req, res, next) {
             options.ingestOptions = {};
         }
         options.ingestOptions.organizationId = organizationId;
+        options.organizationId = organizationId;
+
+        const runId = req.headers["x-run-id"] || req.body?.runId || req.query?.runId;
+        if (runId) {
+            options.runId = runId;
+        }
 
         const workflowResult = await runCompleteWorkflow(input, options);
 
@@ -274,20 +281,30 @@ export async function runWorkflow(req, res, next) {
 
         const reportTitle = `Approval Note — ${workflowResult.filename || workflowResult.documentId}`;
 
-        const savedReport = await createReportRecord({
-            documentId: workflowResult.documentId || null,
-            organizationId,
-            title: reportTitle,
-            filename: workflowResult.approvalNote.filename,
-            riskLevel: primaryRisk,
-            status: "GENERATED",
-            task: options.task || "Analyze this inspection report and extract all significant findings.",
-        });
+        let savedReport = null;
+        if (workflowResult.approvalNote?.filename) {
+            savedReport = await createReportRecord({
+                documentId: workflowResult.documentId || null,
+                organizationId,
+                title: reportTitle,
+                filename: workflowResult.approvalNote.filename,
+                riskLevel: primaryRisk,
+                status: "GENERATED",
+                task: options.task || "Analyze this inspection report and extract all significant findings.",
+            });
+        }
+
+        const approvalNoteData = workflowResult.approvalNote?.filename
+            ? {
+                filename: workflowResult.approvalNote.filename,
+                downloadUrl: `/api/v1/inspection/download/${workflowResult.approvalNote.filename}`,
+            }
+            : null;
 
         return res.status(200).json({
             success: true,
             data: {
-                reportId: savedReport.id,
+                reportId: savedReport?.id || null,
                 documentId: workflowResult.documentId,
                 filename: workflowResult.filename,
                 chunksStored: workflowResult.chunksStored,
@@ -295,13 +312,34 @@ export async function runWorkflow(req, res, next) {
                 riskAssessments: workflowResult.riskAssessments,
                 recommendations: workflowResult.recommendations,
                 citations: workflowResult.citations,
-                approvalNote: {
-                    filename: workflowResult.approvalNote.filename,
-                    downloadUrl: `/api/v1/inspection/download/${workflowResult.approvalNote.filename}`,
-                },
+                approvalNote: approvalNoteData,
                 report: savedReport,
+                orchestration: workflowResult.orchestration,
             },
         });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/**
+ * Streams real-time Server-Sent Events (SSE) for an active or completed inspection run.
+ */
+export async function streamInspectionRun(req, res, next) {
+    try {
+        const organizationId = resolveOrganizationId(req);
+        const { runId } = req.params;
+
+        // Verify organization authorization
+        const owner = executionEvents.getRunOwner(runId);
+        if (!owner || owner.organizationId !== organizationId) {
+            return res.status(404).json({
+                success: false,
+                message: `Inspection run '${runId}' not found in this organization.`,
+            });
+        }
+
+        executionEvents.subscribe(runId, req, res);
     } catch (error) {
         next(error);
     }

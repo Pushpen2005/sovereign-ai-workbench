@@ -1,0 +1,25 @@
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Dependencies
+node_modules/
+*/node_modules/
+
+# Production build outputs
+dist/
+*/dist/
+
+# OS / Editor artifacts
+.DS_Store
+*.log
+scratch/
+.system_generated/
+
+# Uploads and temporary generated files
+backend/src/uploads/*
+!backend/src/uploads/.gitkeep
+backend/generated/*
+!backend/generated/.gitkeep
