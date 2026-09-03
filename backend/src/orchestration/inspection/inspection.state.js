@@ -167,6 +167,41 @@ export const InspectionAgentState = Annotation.Root({
         default: () => [],
     }),
 
+    findingValidation: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
+    extractionAttempts: Annotation({
+        reducer: replaceReducer,
+        default: () => 1,
+    }),
+
+    maxExtractionAttempts: Annotation({
+        reducer: replaceReducer,
+        default: () => 2,
+    }),
+
+    sopEvidenceStatus: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
+    riskValidation: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
+    failureReason: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
+    workflowOutcome: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
     metadata: Annotation({
         reducer: mergeReducer,
         default: () => ({}),

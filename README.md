@@ -46,9 +46,9 @@ Build and deploy a self-hosted, air-gap-capable AI workbench that:
 |---|---|
 | **Overall Completion Status** | **Fully Operational — All Core Workflows Live** |
 | **AI Ingestion & Extraction Engine** | ✅ Operational — PDF extraction, OCR fallback, chunking, embeddings, Qdrant indexing |
-| **Vector Storage (Qdrant)** | ✅ Operational — `documents` collection with **29,474 points** (persistent volume) |
+| **Vector Storage (Qdrant)** | ✅ Operational — `documents` collection with **30,969 points** (persistent volume) |
 | **Local LLM Runtime (Ollama)** | ✅ Operational — `llama3.2:3b` (1.9 GB) on `host.docker.internal:11434` |
-| **PostgreSQL Metadata Storage** | ✅ Operational — 4 orgs, 32 documents, 17 reports, 9 conversations, 28 messages |
+| **PostgreSQL Metadata Storage** | ✅ Operational — 4 orgs, 48 documents, 30 reports, 10 agent runs, 21 agent steps |
 | **Frontend UI Workbench** | ✅ Operational — All pages connected to live backend APIs (no mock data) |
 | **Chat History Persistence** | ✅ Operational — Conversations & messages stored in PostgreSQL |
 | **Reports Persistence** | ✅ Operational — Generated Approval Notes tracked in PostgreSQL |

@@ -18,6 +18,7 @@ import {
     getToolDefinitionsPrompt,
     executeRegisteredTool,
 } from "./agentTools/toolRegistry.js";
+import { runAgentWorkflow } from "./agent-orchestrator.service.js";
 
 const DEFAULT_MAX_STEPS = 8;
 const DEFAULT_TIMEOUT_MS = 60000; // 60 seconds
@@ -68,7 +69,7 @@ export function parseActionJSON(text) {
  * @param {object} toolResult
  * @returns {string}
  */
-function summarizeToolResult(toolName, toolResult) {
+export function summarizeToolResult(toolName, toolResult) {
     if (toolResult.status === "error") {
         return `Error: ${toolResult.error}`;
     }
@@ -111,7 +112,7 @@ function summarizeToolResult(toolName, toolResult) {
  * @param {object} args
  * @returns {object}
  */
-function sanitizeArgsForDisplay(args) {
+export function sanitizeArgsForDisplay(args) {
     if (!args || typeof args !== "object") return {};
     const sanitized = { ...args };
     if (sanitized.imageBase64) {
@@ -130,7 +131,7 @@ function sanitizeArgsForDisplay(args) {
  * @param {Array<object>} stepHistory
  * @returns {string}
  */
-function buildAgentPlannerPrompt(goal, stepHistory) {
+export function buildAgentPlannerPrompt(goal, stepHistory) {
     const toolDefs = getToolDefinitionsPrompt();
 
     let historyText = "No previous tools have been executed yet.";
@@ -189,7 +190,28 @@ Decide your next action:`;
 }
 
 /**
- * Runs the bounded agent loop.
+ * Runs the bounded agent loop with feature flag routing.
+ * Default: AGENT_ORCHESTRATOR=langgraph
+ * Rollback: AGENT_ORCHESTRATOR=legacy
+ *
+ * @param {object} params
+ * @returns {Promise<object>}
+ */
+export async function runAgentLoop(params) {
+    const orchestratorMode = (
+        process.env.AGENT_ORCHESTRATOR || "langgraph"
+    ).trim().toLowerCase();
+
+    if (orchestratorMode === "legacy") {
+        return runLegacyAgentLoop(params);
+    }
+
+    return runAgentWorkflow(params);
+}
+
+/**
+ * Legacy imperative while-loop agent implementation.
+ * Preserved for rollback and comparative equivalence testing.
  *
  * @param {object} params
  * @param {string} params.goal - The user's goal or inquiry
@@ -197,7 +219,7 @@ Decide your next action:`;
  * @param {number} [params.timeoutMs=60000] - Total execution timeout in ms
  * @returns {Promise<object>}
  */
-export async function runAgentLoop({
+export async function runLegacyAgentLoop({
     goal,
     maxSteps = DEFAULT_MAX_STEPS,
     timeoutMs = DEFAULT_TIMEOUT_MS,

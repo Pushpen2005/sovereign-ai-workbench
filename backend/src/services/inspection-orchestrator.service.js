@@ -2,14 +2,18 @@
  * Inspection Orchestration Service (LangGraph Production Layer)
  *
  * Coordinates the end-to-end confidential industrial document inspection
- * workflow through the compiled LangGraph StateGraph.
+ * workflow through the compiled LangGraph StateGraph, with real-time SSE streaming.
  *
  * Pipeline Sequencing:
- *   START -> ingest -> retrieve -> extract_findings -> retrieve_sop -> assess_risk -> validate_citations -> generate_report -> END
+ *   START -> ingest -> retrieve -> extract_findings -> validate_findings
+ *         -> retry_extraction? -> retrieve_sop -> check_sop_evidence
+ *         -> assess_risk -> validate_risk -> validate_citations -> generate_report -> END
  *
  * Guarantees:
  * - Multi-tenant isolation: Preserves organizationId across all graph operations
  * - Safety & Integrity: Discards ungrounded/hallucinated findings & citations
+ * - Real-time SSE Streaming: Publishes node events and validation transitions
+ * - Non-blocking Observability: SSE broadcast failures never fail active inspection
  * - API Compatibility: Maps final state exactly to runCompleteWorkflow() response contract
  */
 
@@ -17,6 +21,7 @@ import { randomUUID } from "crypto";
 import fs from "fs";
 import path from "path";
 import { compiledInspectionGraph } from "../orchestration/inspection/index.js";
+import { executionEvents } from "./execution-events.service.js";
 
 /**
  * Executes the formal LangGraph inspection workflow.
@@ -60,6 +65,29 @@ export async function runInspectionWorkflow(input, options = {}) {
 
     const runId = options.runId || randomUUID();
 
+    // 1. Register tenant ownership for run
+    if (organizationId) {
+        try {
+            executionEvents.registerRunOwner(runId, organizationId, "inspection");
+        } catch {
+            // Non-blocking
+        }
+    }
+
+    // 2. Publish run_started SSE event
+    try {
+        executionEvents.publish(runId, "run_started", {
+            runId,
+            engine: "langgraph",
+            workflow: "inspection",
+            status: "in_progress",
+            documentId: documentId || null,
+            filename: filename || null,
+        });
+    } catch {
+        // Non-blocking
+    }
+
     // Construct initial state conforming to InspectionAgentState schema
     const initialState = {
         runId,
@@ -78,16 +106,103 @@ export async function runInspectionWorkflow(input, options = {}) {
         },
     };
 
-    // Invoke compiled LangGraph StateGraph
-    const finalState = await compiledInspectionGraph.invoke(initialState);
+    // 3. Stream compiled LangGraph StateGraph snapshots in real-time
+    let finalState = { ...initialState };
+    let executionError = null;
+    let lastHandledNode = null;
 
-    // Fail-closed error handling: Propagate failure if graph halted with errors
-    if (finalState.status === "failed" || (Array.isArray(finalState.errors) && finalState.errors.length > 0)) {
-        const primaryError = finalState.errors[0];
-        const error = new Error(primaryError?.message || "Inspection workflow failed during execution");
+    try {
+        for await (const stateSnapshot of await compiledInspectionGraph.stream(initialState, { streamMode: "values" })) {
+            finalState = stateSnapshot;
+            const nodeName = stateSnapshot.currentNode;
+
+            if (nodeName && nodeName !== lastHandledNode) {
+                lastHandledNode = nodeName;
+
+                try {
+                    executionEvents.publish(runId, "node_started", { runId, node: nodeName });
+                    executionEvents.publish(runId, "node_completed", { runId, node: nodeName });
+
+                    if (nodeName === "validate_findings") {
+                        executionEvents.publish(runId, "validation", {
+                            runId,
+                            validator: "validate_findings",
+                            valid: stateSnapshot.findingValidation?.valid,
+                            findingsCount: stateSnapshot.findings?.length || 0,
+                        });
+                    } else if (nodeName === "check_sop_evidence") {
+                        executionEvents.publish(runId, "validation", {
+                            runId,
+                            validator: "check_sop_evidence",
+                            status: stateSnapshot.sopEvidenceStatus,
+                        });
+                    } else if (nodeName === "validate_risk") {
+                        executionEvents.publish(runId, "validation", {
+                            runId,
+                            validator: "validate_risk",
+                            valid: stateSnapshot.riskValidation?.valid,
+                        });
+                    } else if (nodeName === "validate_citations") {
+                        executionEvents.publish(runId, "validation", {
+                            runId,
+                            validator: "validate_citations",
+                            citationsCount: stateSnapshot.citations?.length || 0,
+                        });
+                    } else if (nodeName === "insufficient_evidence") {
+                        executionEvents.publish(runId, "run_stopped", {
+                            runId,
+                            node: "insufficient_evidence",
+                            outcome: "INSUFFICIENT_EVIDENCE",
+                            reason: stateSnapshot.failureReason,
+                        });
+                    } else if (nodeName === "safe_failure") {
+                        executionEvents.publish(runId, "run_failed", {
+                            runId,
+                            node: "safe_failure",
+                            outcome: "SAFE_FAILURE",
+                            reason: stateSnapshot.failureReason,
+                        });
+                    }
+                } catch {
+                    // Non-blocking
+                }
+            }
+        }
+    } catch (err) {
+        executionError = err;
+    }
+
+    // 4. Fail-closed error handling: Propagate failure if graph halted with errors or safe failure
+    if (
+        executionError ||
+        finalState.status === "failed" ||
+        finalState.workflowOutcome === "SAFE_FAILURE" ||
+        (Array.isArray(finalState.errors) && finalState.errors.length > 0)
+    ) {
+        const primaryError = finalState.errors?.[0];
+        const errorMsg =
+            executionError?.message ||
+            finalState.failureReason ||
+            primaryError?.message ||
+            "Inspection workflow failed during execution";
+
+        try {
+            executionEvents.publish(runId, "run_failed", {
+                runId,
+                status: "failed",
+                workflowOutcome: finalState.workflowOutcome || "SAFE_FAILURE",
+                reason: errorMsg,
+            });
+        } catch {
+            // Non-blocking
+        }
+
+        const error = new Error(errorMsg);
         error.node = primaryError?.node || finalState.currentNode || "unknown";
         error.executionOrder = finalState.executionOrder;
         error.errors = finalState.errors;
+        error.workflowOutcome = finalState.workflowOutcome || "SAFE_FAILURE";
+        error.failureReason = finalState.failureReason;
         throw error;
     }
 
@@ -100,6 +215,29 @@ export async function runInspectionWorkflow(input, options = {}) {
         ? finalState.recommendations
         : (finalState.recommendation ? [finalState.recommendation] : []);
 
+    const approvalNote = finalState.report?.filename
+        ? {
+            filename: finalState.report.filename,
+            filePath: finalState.report.filePath || "",
+        }
+        : {
+            filename: null,
+            filePath: null,
+        };
+
+    // 5. Publish terminal run_completed SSE event
+    try {
+        executionEvents.publish(runId, "run_completed", {
+            runId,
+            status: "completed",
+            documentId: finalState.documentId,
+            workflowOutcome: finalState.workflowOutcome || "SUCCESS",
+            reportFilename: approvalNote.filename,
+        });
+    } catch {
+        // Non-blocking
+    }
+
     return {
         documentId: finalState.documentId,
         filename: finalState.ingestionResult?.filename || filename || `${finalState.documentId}.pdf`,
@@ -108,15 +246,14 @@ export async function runInspectionWorkflow(input, options = {}) {
         riskAssessments,
         recommendations,
         citations: uniqueCitations,
-        approvalNote: {
-            filename: finalState.report?.filename || `Approval_Note_${finalState.documentId}.docx`,
-            filePath: finalState.report?.filePath || "",
-        },
+        approvalNote,
         orchestration: {
             engine: "langgraph",
             runId: finalState.runId,
             executionOrder: finalState.executionOrder,
             status: finalState.status,
+            workflowOutcome: finalState.workflowOutcome || "SUCCESS",
+            failureReason: finalState.failureReason || null,
         },
     };
 }

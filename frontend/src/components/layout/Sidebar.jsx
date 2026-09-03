@@ -17,11 +17,12 @@ import { useAppState, useAppActions } from '../../state/appState.jsx';
 import { fetchChatHistory } from '../../api/chat.api.js';
 
 const PRIMARY_NAV = [
-  { to: '/chat',      label: 'AI Search',         icon: '💬' },
-  { to: '/documents', label: 'Documents',         icon: '📄' },
-  { to: '/agent',     label: 'Inspection Agent',  icon: '⚙' },
-  { to: '/reports',   label: 'Reports',           icon: '📋' },
-  { to: '/security',  label: 'Security',          icon: '🔒' },
+  { to: '/chat',       label: 'AI Search',           icon: '💬' },
+  { to: '/documents',  label: 'Documents',           icon: '📄' },
+  { to: '/agent',      label: 'Agent Workspace',     icon: '⚡' },
+  { to: '/inspection', label: 'Inspection Agent',    icon: '⚙' },
+  { to: '/reports',    label: 'Reports',             icon: '📋' },
+  { to: '/security',   label: 'Security',            icon: '🔒' },
 ];
 
 const SECONDARY_NAV = [

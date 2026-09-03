@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
 
 import { AppLayout } from '../components/layout/AppLayout.jsx';
 import { LandingPage }    from '../pages/Landing/LandingPage.jsx';
@@ -13,6 +13,7 @@ import { DashboardPage }  from '../pages/Dashboard/DashboardPage.jsx';
 import { DocumentsPage }  from '../pages/Documents/DocumentsPage.jsx';
 import { ChatPage }       from '../pages/Chat/ChatPage.jsx';
 import { AgentPage }      from '../pages/Agent/AgentPage.jsx';
+import { InspectionPage } from '../pages/Inspection/InspectionPage.jsx';
 import { ReportsPage }    from '../pages/Reports/ReportsPage.jsx';
 import { SecurityPage }   from '../pages/Security/SecurityPage.jsx';
 import { CodingPage }     from '../pages/Coding/CodingPage.jsx';
@@ -27,14 +28,15 @@ export function AppRoutes() {
 
       {/* Authenticated shell */}
       <Route element={<AppLayout />}>
-        <Route path="/dashboard" element={<DashboardPage />} />
-        <Route path="/documents" element={<DocumentsPage />} />
-        <Route path="/chat"      element={<ChatPage />} />
-        <Route path="/coding"    element={<CodingPage />} />
-        <Route path="/vision"    element={<VisionPage />} />
-        <Route path="/agent"     element={<AgentPage />} />
-        <Route path="/reports"   element={<ReportsPage />} />
-        <Route path="/security"  element={<SecurityPage />} />
+        <Route path="/dashboard"  element={<DashboardPage />} />
+        <Route path="/documents"  element={<DocumentsPage />} />
+        <Route path="/chat"       element={<ChatPage />} />
+        <Route path="/coding"     element={<CodingPage />} />
+        <Route path="/vision"     element={<VisionPage />} />
+        <Route path="/agent"      element={<AgentPage />} />
+        <Route path="/inspection" element={<InspectionPage />} />
+        <Route path="/reports"    element={<ReportsPage />} />
+        <Route path="/security"   element={<SecurityPage />} />
       </Route>
 
       {/* 404 */}
