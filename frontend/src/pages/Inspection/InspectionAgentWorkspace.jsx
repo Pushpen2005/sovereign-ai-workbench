@@ -331,14 +331,22 @@ export function InspectionAgentWorkspace() {
         {riskAssessment && (
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                Operational Risk Assessment
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                  AI Risk Assessment
+                </h3>
+                <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-medium">
+                  Decision Support
+                </span>
+              </div>
               <StatusBadge status={riskAssessment.level || (isInsufficientEvidence ? 'INSUFFICIENT EVIDENCE' : 'MEDIUM')} />
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 text-xs text-slate-800 leading-relaxed">
               <p>
-                <strong>Evaluation:</strong> {riskAssessment.reason || 'Risk evaluated based on documented operational limits.'}
+                <strong>AI Evaluation:</strong> {riskAssessment.reason || 'Risk evaluated based on documented operational limits.'}
+              </p>
+              <p className="mt-2 text-[11px] text-slate-500 italic">
+                Notice: AI Risk Assessment is an advisory baseline. Final risk classification is subject to plant engineer review.
               </p>
             </div>
           </div>
@@ -347,12 +355,35 @@ export function InspectionAgentWorkspace() {
         {/* Corrective Recommendation Section */}
         {recommendation && !isInsufficientEvidence && (
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
-              Corrective Recommendation
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                AI Recommendation
+              </h3>
+              <span className="text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200 px-2 py-0.5 rounded">
+                Requires Human Review
+              </span>
+            </div>
             <div className="bg-emerald-50/60 border border-emerald-200 rounded-lg p-3.5 text-xs text-emerald-950 leading-relaxed">
               {recommendation}
             </div>
+          </div>
+        )}
+
+        {/* Human Review Boundary Banner */}
+        {approvalNote && (
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-600 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🛡</span>
+              <div>
+                <strong className="text-slate-800 block text-xs">Human Governance Boundary</strong>
+                <span className="text-[11px] text-slate-500">
+                  AI analysis is decision support. Formal sign-off requires qualified engineer review in Section 8 of the note.
+                </span>
+              </div>
+            </div>
+            <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-1 bg-blue-50 text-blue-700 border border-blue-200 rounded whitespace-nowrap">
+              Pending Human Approval
+            </span>
           </div>
         )}
 
@@ -367,11 +398,11 @@ export function InspectionAgentWorkspace() {
                 <div className="flex items-center gap-2">
                   <h4 className="text-sm font-bold text-white">Official Approval Note</h4>
                   <span className="text-[10px] font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-1.5 py-0.5 rounded">
-                    READY
+                    GENERATED
                   </span>
                 </div>
                 <p className="text-xs text-slate-400 font-mono mt-0.5">
-                  {approvalNote.filename} · Audit Ready DOCX
+                  {approvalNote.filename} · Executive DOCX Deliverable
                 </p>
               </div>
             </div>

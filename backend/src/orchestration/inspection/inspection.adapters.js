@@ -149,7 +149,7 @@ export async function runSopRetrieval(finding, options = {}) {
 
     const searchSopFn = options.searchSop ?? searchSop;
     const sopOptions = {
-        scoreThreshold: options.scoreThreshold ?? 0.4,
+        scoreThreshold: options.scoreThreshold ?? (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.35),
         ...options,
     };
     const sopChunks = await searchSopFn(query.trim(), sopOptions);

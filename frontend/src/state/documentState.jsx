@@ -8,10 +8,9 @@
  */
 
 import React, { createContext, useContext, useReducer, useCallback } from 'react';
-import { mockDocuments } from '../data/mockData.js';
 
 const initialState = {
-  documents: mockDocuments,
+  documents: [],
   selectedDocument: null,
   // 'idle' | 'uploading' | 'indexing' | 'success' | 'error'
   uploadState: 'idle',

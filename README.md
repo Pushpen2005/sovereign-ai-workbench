@@ -293,13 +293,11 @@ sovereign-ai-workbench/
         ├── components/
         │   ├── layout/                # AppLayout, Sidebar, Topbar, PageHeader
         │   └── ui/                    # Button, Card, Badge, StatusIndicator, FeedbackStates
-        ├── data/
-        │   └── mockData.js            # Mock dataset for simulated workbench views
         ├── hooks/
         │   ├── useChat.js             # Live hook calling backend chat API
         │   ├── useDocuments.js        # Live hook calling backend document APIs
-        │   ├── useInspection.js       # Simulated hook (mock data)
-        │   └── useWorkflow.js         # Simulated hook (mock data)
+        │   ├── useInspectionExecution.js # Live hook for LangGraph inspection workflow
+        │   └── useAgentExecution.js   # Live hook for autonomous agent workflow
         ├── pages/
         │   ├── Agent/AgentPage.jsx    # Approval note workflow UI
         │   ├── Chat/ChatPage.jsx      # Interactive RAG chat UI
@@ -565,8 +563,87 @@ The active route registrations in `backend/src/app.js`:
 | `GET` | `/api/v1/chat/history` | Conversation list | `chat.controller.js` | ✅ Working |
 | `GET` | `/api/v1/chat/conversations/:id/messages` | Per-conversation messages | `chat.controller.js` | ✅ Working |
 | `GET` | `/api/v1/chat/stats` | Chat usage statistics | `chat.controller.js` | ✅ Working |
+| `POST` | `/api/v1/auth/register` | User registration & JWT issuance | `auth.controller.js` | ✅ Working |
+| `POST` | `/api/v1/auth/login` | Credential login & JWT issuance | `auth.controller.js` | ✅ Working |
+| `GET` | `/api/v1/auth/me` | Current user profile | `auth.controller.js` | ✅ Working |
 | `GET` | `/api/v1/reports` | Report archive (all) | `reports.controller.js` | ✅ Working |
 | `GET` | `/api/v1/reports/:id` | Single report metadata | `reports.controller.js` | ✅ Working |
+
+#### Authentication API Examples
+
+##### `POST /api/v1/auth/register`
+```bash
+curl -X POST http://localhost:9000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Arun Kumar",
+    "email": "a.kumar@mrpl.co.in",
+    "password": "SecurePassword123!",
+    "organizationName": "Mangalore Refinery Unit 2"
+  }'
+```
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "e6a4b1c2-...",
+      "organizationId": "d8f7e6a5-...",
+      "name": "Arun Kumar",
+      "email": "a.kumar@mrpl.co.in",
+      "role": "member",
+      "createdAt": "2026-09-03T11:00:00.000Z"
+    },
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }
+}
+```
+
+##### `POST /api/v1/auth/login`
+```bash
+curl -X POST http://localhost:9000/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "engineer@example.com",
+    "password": "DemoPassword123!"
+  }'
+```
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "user": {
+      "id": "53ee9e5e-bf00-46ce-9621-f979148f36f7",
+      "organizationId": "0bd5dba2-05e1-4f5c-9047-25843d338622",
+      "name": "Demo Engineer",
+      "email": "engineer@example.com",
+      "role": "admin"
+    },
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }
+}
+```
+
+##### `GET /api/v1/auth/me`
+```bash
+curl -X GET http://localhost:9000/api/v1/auth/me \
+  -H "Authorization: Bearer <TOKEN>"
+```
+Response:
+```json
+{
+  "success": true,
+  "data": {
+    "id": "53ee9e5e-bf00-46ce-9621-f979148f36f7",
+    "organizationId": "0bd5dba2-05e1-4f5c-9047-25843d338622",
+    "name": "Demo Engineer",
+    "email": "engineer@example.com",
+    "role": "admin"
+  }
+}
+```
 
 ---
 

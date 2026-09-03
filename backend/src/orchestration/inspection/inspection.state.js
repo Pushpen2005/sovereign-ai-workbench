@@ -97,6 +97,11 @@ export const InspectionAgentState = Annotation.Root({
         default: () => null,
     }),
 
+    userId: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
     ingestionResult: Annotation({
         reducer: replaceReducer,
         default: () => null,

@@ -86,6 +86,24 @@ export async function analyzeInspection(req, res, next) {
             });
         }
 
+        const organizationId = resolveOrganizationId(req);
+        const docCheck = await query(
+            "SELECT id, organization_id FROM documents WHERE id = $1",
+            [documentId.trim()]
+        );
+        if (docCheck.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: `Inspection document '${documentId}' not found.`,
+            });
+        }
+        if (docCheck.rows[0].organization_id !== organizationId) {
+            return res.status(403).json({
+                success: false,
+                message: "Forbidden: document belongs to another organization.",
+            });
+        }
+
         const taskText =
             typeof task === "string" && task.trim().length > 0
                 ? task.trim()
@@ -195,6 +213,21 @@ export async function downloadApprovalNote(req, res, next) {
             });
         }
 
+        // Enforce tenant authorization if report record exists in database
+        const organizationId = resolveOrganizationId(req);
+        if (req.user) {
+            const reportCheck = await query(
+                "SELECT id, organization_id FROM reports WHERE filename = $1",
+                [safeFilename]
+            );
+            if (reportCheck.rows.length > 0 && reportCheck.rows[0].organization_id !== organizationId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Forbidden: report file belongs to another organization",
+                });
+            }
+        }
+
         res.setHeader(
             "Content-Type",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -248,6 +281,21 @@ export async function runWorkflow(req, res, next) {
         }
         options.ingestOptions.organizationId = organizationId;
         options.organizationId = organizationId;
+        options.userId = req.user?.id || null;
+
+        // Step 5: Document Authorization & Organization Validation
+        if (req.body && req.body.documentId) {
+            const docCheck = await query(
+                "SELECT id, organization_id FROM documents WHERE id = $1",
+                [req.body.documentId.trim()]
+            );
+            if (docCheck.rows.length > 0 && docCheck.rows[0].organization_id !== organizationId) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Forbidden: document belongs to another organization.",
+                });
+            }
+        }
 
         const runId = req.headers["x-run-id"] || req.body?.runId || req.query?.runId;
         if (runId) {

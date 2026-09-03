@@ -18,10 +18,19 @@ import reportsRouter from "./routes/reports.routes.js";
 import codingRouter from "./routes/coding.routes.js";
 import visionRouter from "./routes/vision.routes.js";
 import agentRouter from "./routes/agent.routes.js";
+import authRouter from "./routes/auth.routes.js";
+import { optionalAuth } from "./middleware/auth.middleware.js";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Authentication routes (public)
+app.use("/api/v1/auth", authRouter);
+
+// Token-aware authentication middleware for all subsequent API routes
+app.use(optionalAuth);
+
 app.use('/api/v1', router);
 app.use("/api/v1/documents", documentsRouter);
 app.use("/api/v1/chat", chatRouter);

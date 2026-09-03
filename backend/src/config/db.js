@@ -2,6 +2,7 @@ import pg from "pg";
 import dotenv from "dotenv";
 import path from "path";
 import { fileURLToPath } from "url";
+import bcrypt from "bcryptjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -193,6 +194,42 @@ export async function initDb() {
        ON CONFLICT (id) DO NOTHING`,
       [DEFAULT_ORGANIZATION_ID, DEFAULT_ORGANIZATION_NAME]
     );
+
+    // Ensure default demo user exists for SIH evaluation
+    const demoEmail = (process.env.DEMO_USER_EMAIL || "engineer@example.com").toLowerCase();
+    const demoPassword = process.env.DEMO_USER_PASSWORD || "DemoPassword123!";
+    const demoUserCheck = await query(
+      "SELECT id, password_hash FROM users WHERE lower(email) = lower($1)",
+      [demoEmail]
+    );
+
+    if (demoUserCheck.rows.length === 0) {
+      const demoHash = bcrypt.hashSync(demoPassword, 10);
+      await query(
+        `INSERT INTO users (id, organization_id, name, email, password_hash, role, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          "53ee9e5e-bf00-46ce-9621-f979148f36f7",
+          DEFAULT_ORGANIZATION_ID,
+          "Demo Engineer",
+          demoEmail,
+          demoHash,
+          "admin",
+        ]
+      );
+      console.log(`✓ Seeded default demo user: ${demoEmail}`);
+    } else {
+      const existingUser = demoUserCheck.rows[0];
+      if (existingUser.password_hash.startsWith("scrypt$")) {
+        const demoHash = bcrypt.hashSync(demoPassword, 10);
+        await query(
+          "UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2",
+          [demoHash, existingUser.id]
+        );
+        console.log(`✓ Updated demo user password hash for ${demoEmail}`);
+      }
+    }
 
     // Sync pre-existing Qdrant document if not present
     const existingDocCheck = await query(
