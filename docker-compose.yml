@@ -67,6 +67,11 @@ services:
       QDRANT_URL: http://qdrant:6333
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.2:3b}
+      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-llama3.2:3b}
+      CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
+      CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
+      VISION_MODEL: ${VISION_MODEL:-moondream}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -98,10 +103,16 @@ services:
       QDRANT_URL: http://qdrant:6333
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.2:3b}
+      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-llama3.2:3b}
+      CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
+      CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
+      VISION_MODEL: ${VISION_MODEL:-moondream}
       AI_SERVICE_URL: http://ai-service:5001
       DEFAULT_ORGANIZATION_ID: ${DEFAULT_ORGANIZATION_ID:-0bd5dba2-05e1-4f5c-9047-25843d338622}
       DEFAULT_ORGANIZATION_NAME: ${DEFAULT_ORGANIZATION_NAME:-Demo Organization}
       PYTHON_PATH: python3
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:5173,http://localhost:5174,http://localhost:3000,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:3000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
