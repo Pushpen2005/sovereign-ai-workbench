@@ -9,11 +9,17 @@ import {
     runInspectionAnalysis,
 } from "../services/inspection.service.js";
 import { processAndIngestDocument } from "../services/documents.service.js";
-import { resolveOrganizationId } from "../config/organization.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import { createReportRecord } from "../services/reports.service.js";
 import { createDocument } from "../repositories/documents.repository.js";
 import { query } from "../config/db.js";
 import { executionEvents } from "../services/execution-events.service.js";
+
+import {
+    validateFilename,
+    getReportStoragePath,
+    assertPathContained,
+} from "../utils/storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const GENERATED_DIR = path.resolve(__dirname, "../../generated");
@@ -33,37 +39,53 @@ export async function ingestInspection(req, res, next) {
                 path.extname(req.file.filename)
             );
             target = req.file.path;
-            options = {
+            options.ingestOptions = {
                 documentId,
                 filename: req.file.originalname || req.file.filename,
+                organizationId: req.user?.organizationId,
             };
         } else if (req.body && (req.body.documentId || req.body.filePath || req.body.filename)) {
-            target = {
+            target = req.body;
+            options.ingestOptions = {
                 documentId: req.body.documentId,
                 filename: req.body.filename,
-                filePath: req.body.filePath,
+                organizationId: req.user?.organizationId,
             };
-            if (req.body.documentId) {
-                options.documentId = req.body.documentId;
-            }
-            if (req.body.filename) {
-                options.filename = req.body.filename;
-            }
         } else {
             return res.status(400).json({
                 success: false,
-                message: "Document file or documentId is required",
+                message: "Inspection document file or document reference is required",
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         options.organizationId = organizationId;
 
-        const result = await processAndIngestDocument(target, options);
+        const result = await ingestInspectionFile(target, {
+            ...options.ingestOptions,
+            organizationId,
+        });
+
+        // Ensure document row exists in documents table for referential integrity
+        const docCheck = await query(
+            "SELECT id FROM documents WHERE id = $1",
+            [result.documentId]
+        );
+        if (docCheck.rows.length === 0) {
+            await createDocument({
+                id: result.documentId,
+                organizationId,
+                filename: result.filename || `${result.documentId}.pdf`,
+                originalFilename: req.file?.originalname || result.filename || "Inspection Report",
+                status: "Indexed",
+                chunksStored: result.chunksStored || 0,
+            });
+        }
 
         return res.status(200).json({
             success: true,
             documentId: result.documentId,
+            organizationId,
             filename: result.filename,
             chunksStored: result.chunksStored,
         });
@@ -73,7 +95,7 @@ export async function ingestInspection(req, res, next) {
 }
 
 /**
- * Extract findings from an ingested inspection report.
+ * Execute automated analysis on an ingested inspection report.
  */
 export async function analyzeInspection(req, res, next) {
     try {
@@ -86,7 +108,9 @@ export async function analyzeInspection(req, res, next) {
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
+
+        // Enforce document ownership
         const docCheck = await query(
             "SELECT id, organization_id FROM documents WHERE id = $1",
             [documentId.trim()]
@@ -94,7 +118,7 @@ export async function analyzeInspection(req, res, next) {
         if (docCheck.rows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: `Inspection document '${documentId}' not found.`,
+                message: "Document not found",
             });
         }
         if (docCheck.rows[0].organization_id !== organizationId) {
@@ -112,7 +136,7 @@ export async function analyzeInspection(req, res, next) {
         const result = await runInspectionAnalysis({
             documentId: documentId.trim(),
             task: taskText,
-        });
+        }, { organizationId });
 
         return res.status(200).json({
             success: true,
@@ -129,6 +153,7 @@ export async function analyzeInspection(req, res, next) {
  */
 export async function assessRisk(req, res, next) {
     try {
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { documentId, finding } = req.body || {};
 
         if (!finding || typeof finding !== "object" || Array.isArray(finding)) {
@@ -150,7 +175,7 @@ export async function assessRisk(req, res, next) {
             });
         }
 
-        const result = await runFindingRiskAssessment(finding);
+        const result = await runFindingRiskAssessment(finding, { organizationId });
 
         return res.status(200).json({
             success: true,
@@ -169,6 +194,7 @@ export async function assessRisk(req, res, next) {
  */
 export async function generateApprovalNoteDocx(req, res, next) {
     try {
+        const organizationId = resolveAuthenticatedOrganization(req);
         const data = req.body;
 
         if (!data || typeof data !== "object") {
@@ -178,7 +204,22 @@ export async function generateApprovalNoteDocx(req, res, next) {
             });
         }
 
-        const result = await runApprovalNoteGeneration(data);
+        const result = await runApprovalNoteGeneration(data, {
+            organizationId,
+            filename: data.filename,
+        });
+
+        // Bind generated report to authenticated organization in reports repository
+        try {
+            await createReportRecord({
+                organizationId,
+                title: data.subject || "Approval Note",
+                filename: result.filename,
+                status: "GENERATED",
+            });
+        } catch (repErr) {
+            console.warn("[InspectionController] Warning: Could not persist report record:", repErr.message);
+        }
 
         return res.status(200).json({
             success: true,
@@ -195,6 +236,7 @@ export async function generateApprovalNoteDocx(req, res, next) {
  */
 export async function downloadApprovalNote(req, res, next) {
     try {
+        const organizationId = resolveAuthenticatedOrganization(req);
         const filename = req.params.filename;
         if (!filename || typeof filename !== "string") {
             return res.status(400).json({
@@ -203,34 +245,63 @@ export async function downloadApprovalNote(req, res, next) {
             });
         }
 
-        const safeFilename = path.basename(filename);
-        const filePath = path.resolve(GENERATED_DIR, safeFilename);
-
-        if (!fs.existsSync(filePath)) {
-            return res.status(404).json({
+        let safeFilename;
+        try {
+            safeFilename = validateFilename(filename);
+        } catch (valErr) {
+            return res.status(400).json({
                 success: false,
-                message: `File '${safeFilename}' not found`,
+                message: valErr.message,
             });
         }
 
-        // Enforce tenant authorization if report record exists in database
-        const organizationId = resolveOrganizationId(req);
+        // 1. Enforce strict tenant authorization against reports database
         const reportCheck = await query(
-            "SELECT id, organization_id FROM reports WHERE filename = $1",
-            [safeFilename]
+            "SELECT id, organization_id, filename FROM reports WHERE filename = $1 AND organization_id = $2",
+            [safeFilename, organizationId]
         );
-        if (reportCheck.rows.length > 0 && reportCheck.rows[0].organization_id !== organizationId) {
-            return res.status(403).json({
+
+        if (reportCheck.rows.length === 0) {
+            // Defensive: check if file belongs to a foreign organization
+            const foreignCheck = await query(
+                "SELECT id, organization_id FROM reports WHERE filename = $1",
+                [safeFilename]
+            );
+            if (foreignCheck.rows.length > 0) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Forbidden: report file belongs to another organization",
+                });
+            }
+            return res.status(404).json({
                 success: false,
-                message: "Forbidden: report file belongs to another organization",
+                message: `Report file '${safeFilename}' not found for authenticated organization`,
             });
+        }
+
+        // 2. Resolve file path inside tenant's generated directory
+        const tenantFilePath = getReportStoragePath(organizationId, safeFilename);
+        let finalFilePath = tenantFilePath;
+
+        if (!fs.existsSync(finalFilePath)) {
+            // Safe fallback for pre-migration demo reports
+            const legacyPath = path.resolve(GENERATED_DIR, safeFilename);
+            if (fs.existsSync(legacyPath)) {
+                assertPathContained(legacyPath, GENERATED_DIR);
+                finalFilePath = legacyPath;
+            } else {
+                return res.status(404).json({
+                    success: false,
+                    message: `Report file '${safeFilename}' not found on storage`,
+                });
+            }
         }
 
         res.setHeader(
             "Content-Type",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         );
-        return res.download(filePath, safeFilename);
+        return res.download(finalFilePath, safeFilename);
     } catch (error) {
         next(error);
     }
@@ -273,7 +344,7 @@ export async function runWorkflow(req, res, next) {
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         if (!options.ingestOptions) {
             options.ingestOptions = {};
         }
@@ -373,19 +444,25 @@ export async function runWorkflow(req, res, next) {
  */
 export async function streamInspectionRun(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
-        // Verify organization authorization
-        const owner = executionEvents.getRunOwner(runId);
-        if (!owner || owner.organizationId !== organizationId) {
+        // Verify organization authorization with PostgreSQL hydration fallback
+        const authCheck = await executionEvents.verifyOrHydrateRunOwner(runId, organizationId);
+        if (authCheck.forbidden) {
+            return res.status(403).json({
+                success: false,
+                message: authCheck.message || "Forbidden: Inspection run belongs to another organization.",
+            });
+        }
+        if (authCheck.notFound) {
             return res.status(404).json({
                 success: false,
-                message: `Inspection run '${runId}' not found in this organization.`,
+                message: authCheck.message || `Inspection run '${runId}' not found.`,
             });
         }
 
-        executionEvents.subscribe(runId, req, res);
+        executionEvents.subscribe(runId, req, res, { organizationId });
     } catch (error) {
         next(error);
     }

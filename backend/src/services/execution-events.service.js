@@ -14,6 +14,7 @@
  */
 
 import { EventEmitter } from "events";
+import { query } from "../config/db.js";
 
 const BUFFER_MAX_EVENTS_PER_RUN = 100;
 const BUFFER_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL
@@ -21,7 +22,7 @@ const BUFFER_TTL_MS = 5 * 60 * 1000; // 5 minutes TTL
 class ExecutionEventsManager {
     constructor() {
         this.subscribers = new Map(); // Map<runId, Set<res>>
-        this.eventHistory = new Map(); // Map<runId, Array<{ id, event, data, timestamp }>>
+        this.eventHistory = new Map(); // Map<runId, Array<{ id, event, data, timestamp, organizationId }>>
         this.runOwners = new Map(); // Map<runId, { organizationId, workflowType, createdAt }>
         this.ttlTimers = new Map(); // Map<runId, Timeout>
         this.emitter = new EventEmitter();
@@ -29,7 +30,7 @@ class ExecutionEventsManager {
     }
 
     /**
-     * Registers tenant ownership for a runId.
+     * Registers tenant ownership for a runId in the in-memory cache.
      *
      * @param {string} runId
      * @param {string} organizationId
@@ -45,7 +46,7 @@ class ExecutionEventsManager {
     }
 
     /**
-     * Retrieves tenant ownership for a runId.
+     * Retrieves tenant ownership for a runId from cache.
      *
      * @param {string} runId
      * @returns {{ organizationId: string, workflowType: string, createdAt: number }|null}
@@ -53,6 +54,65 @@ class ExecutionEventsManager {
     getRunOwner(runId) {
         if (!runId) return null;
         return this.runOwners.get(runId) || null;
+    }
+
+    /**
+     * Verifies tenant ownership for a runId, hydrating from PostgreSQL if missing in memory.
+     * Fails closed: if the run does not exist, returns notFound.
+     * If the run belongs to a different organization, returns forbidden.
+     *
+     * @param {string} runId
+     * @param {string} requestingOrgId
+     * @returns {Promise<{ allowed: boolean, forbidden?: boolean, notFound?: boolean, message?: string, owner?: object }>}
+     */
+    async verifyOrHydrateRunOwner(runId, requestingOrgId) {
+        if (!runId) {
+            return { allowed: false, notFound: true, message: "Missing runId parameter" };
+        }
+
+        // 1. Check in-memory cache first
+        let owner = this.runOwners.get(runId);
+
+        // 2. If missing from memory (e.g. process restart, cache flush), verify against PostgreSQL
+        if (!owner) {
+            try {
+                const res = await query(
+                    "SELECT run_id, organization_id, user_id, status FROM agent_runs WHERE run_id = $1",
+                    [runId]
+                );
+                if (res.rows.length > 0) {
+                    const row = res.rows[0];
+                    this.registerRunOwner(row.run_id, row.organization_id, "agent");
+                    owner = this.runOwners.get(runId);
+                }
+            } catch (dbErr) {
+                console.warn("[ExecutionEvents] DB query failed during run owner hydration:", dbErr.message);
+            }
+        }
+
+        // 3. If still not found, the run does not exist
+        if (!owner) {
+            return {
+                allowed: false,
+                notFound: true,
+                message: `Run '${runId}' not found.`,
+            };
+        }
+
+        // 4. Enforce tenant isolation against requesting organization
+        if (requestingOrgId && owner.organizationId !== requestingOrgId) {
+            return {
+                allowed: false,
+                forbidden: true,
+                message: `Forbidden: Run '${runId}' belongs to another organization.`,
+                owner,
+            };
+        }
+
+        return {
+            allowed: true,
+            owner,
+        };
     }
 
     /**
@@ -98,21 +158,42 @@ class ExecutionEventsManager {
 
     /**
      * Publishes an SSE event for a specific runId.
+     * Enforces publisher tenant isolation and verifies that events are only delivered
+     * to subscribers belonging to the run's owning organization.
      *
      * @param {string} runId Execution run identifier
      * @param {string} event Event type (e.g. 'node_started', 'tool_completed')
      * @param {object} payload Event data
      * @param {string|number} [id] Optional explicit event sequence ID
+     * @param {string} [publisherOrgId] Optional organization ID of the publisher for authorization
      */
-    publish(runId, event, payload = {}, id = null) {
+    publish(runId, event, payload = {}, id = null, publisherOrgId = null) {
         if (!runId) return;
 
+        const owner = this.getRunOwner(runId);
+
+        // Enforce publisher tenant validation: caller cannot publish to another tenant's run
+        if (publisherOrgId && owner && owner.organizationId !== publisherOrgId) {
+            console.warn(
+                `[ExecutionEvents] Unauthorized publish dropped: publisher org '${publisherOrgId}' does not match run '${runId}' owner '${owner.organizationId}'`
+            );
+            return;
+        }
+
         const safeData = this.sanitizePayload(payload);
+        const resolvedOrgId = owner?.organizationId || publisherOrgId || null;
+
+        // Stamp authoritative organization identity into event payload if structured
+        if (resolvedOrgId && safeData && typeof safeData === "object" && !Array.isArray(safeData) && !safeData.organizationId) {
+            safeData.organizationId = resolvedOrgId;
+        }
+
         const eventRecord = {
             id: id ?? `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
             event,
             data: safeData,
             timestamp: Date.now(),
+            organizationId: resolvedOrgId,
         };
 
         // 1. Store in bounded historical buffer for replay to late subscribers
@@ -137,11 +218,17 @@ class ExecutionEventsManager {
             }, BUFFER_TTL_MS)
         );
 
-        // 2. Dispatch to live active subscribers
+        // 2. Dispatch to live active subscribers with strict tenant verification
         const clientSet = this.subscribers.get(runId);
         if (clientSet && clientSet.size > 0) {
             const sseChunk = `id: ${eventRecord.id}\nevent: ${event}\ndata: ${JSON.stringify(safeData)}\n\n`;
             for (const res of clientSet) {
+                // Drop if subscriber belongs to a different organization than the run
+                if (res.__organizationId && resolvedOrgId && res.__organizationId !== resolvedOrgId) {
+                    this.removeSubscriber(runId, res);
+                    continue;
+                }
+
                 try {
                     res.write(sseChunk);
                 } catch (writeErr) {
@@ -169,9 +256,13 @@ class ExecutionEventsManager {
      * @param {object} req Express request
      * @param {object} res Express response
      * @param {object} [options]
+     * @param {string} [options.organizationId] Requesting organization ID for tenant validation
      * @param {Array<object>} [options.persistedSteps] Optional persisted steps from PostgreSQL
      */
     subscribe(runId, req, res, options = {}) {
+        const organizationId = options.organizationId || null;
+        res.__organizationId = organizationId;
+
         // 1. Establish SSE HTTP headers
         res.writeHead(200, {
             "Content-Type": "text/event-stream",
@@ -182,7 +273,7 @@ class ExecutionEventsManager {
         res.flushHeaders?.();
 
         // 2. Send immediate initial connection confirmation event
-        res.write(`event: connected\ndata: ${JSON.stringify({ runId, timestamp: Date.now() })}\n\n`);
+        res.write(`event: connected\ndata: ${JSON.stringify({ runId, organizationId, timestamp: Date.now() })}\n\n`);
 
         // 3. Register subscriber
         if (!this.subscribers.has(runId)) {
@@ -207,13 +298,18 @@ class ExecutionEventsManager {
             this.removeSubscriber(runId, res);
         });
 
-        // 6. Replay historical buffered events to handle race conditions
+        // 6. Replay historical buffered events to handle race conditions (isolated by tenant)
         const history = this.eventHistory.get(runId) || [];
         const seenEventIds = new Set();
         const lastEventId = req?.headers?.["last-event-id"];
         let replaying = !lastEventId;
 
         for (const record of history) {
+            // Defense-in-depth: Never replay another organization's event record
+            if (organizationId && record.organizationId && record.organizationId !== organizationId) {
+                continue;
+            }
+
             if (!replaying) {
                 if (record.id === lastEventId) {
                     replaying = true;
@@ -235,6 +331,7 @@ class ExecutionEventsManager {
                         `id: ${stepId}\nevent: ${eventType}\ndata: ${JSON.stringify(
                             this.sanitizePayload({
                                 runId,
+                                organizationId,
                                 step: step.stepNumber,
                                 node: step.node,
                                 tool: step.toolName,

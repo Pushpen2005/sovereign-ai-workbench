@@ -229,7 +229,10 @@ export function createAgentNodes(customServices = {}) {
         const reason = action.reason || `Calling ${toolName}`;
 
         const toolStart = Date.now();
-        const toolExecResult = await services.executeRegisteredTool(toolName, toolArgs);
+        const toolExecResult = await services.executeRegisteredTool(toolName, toolArgs, {
+            organizationId: state.organizationId,
+            userId: state.userId,
+        });
         const toolDurationMs = Date.now() - toolStart;
 
         return {

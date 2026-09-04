@@ -3,6 +3,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import app from "../src/app.js";
+import { generateToken } from "../src/utils/auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,9 +18,22 @@ async function runReportsTests() {
   const BASE_URL = process.env.TEST_BASE_URL || `http://127.0.0.1:${port}`;
 
   try {
+    // Authenticate demo user for private reports operations
+    const loginRes = await fetch(`${BASE_URL}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: process.env.DEMO_USER_EMAIL || "engineer@example.com",
+        password: process.env.DEMO_USER_PASSWORD || "DemoPassword123!",
+      }),
+    });
+    const loginData = await loginRes.json();
+    const token = loginData.data?.token;
+    const authHeaders = { Authorization: `Bearer ${token}` };
+
     // 1. GET /api/v1/reports
     console.log("[1] Testing GET /api/v1/reports (initial)...");
-    const initRes = await fetch(`${BASE_URL}/api/v1/reports`);
+    const initRes = await fetch(`${BASE_URL}/api/v1/reports`, { headers: authHeaders });
     assert.equal(initRes.status, 200, "Must return HTTP 200");
     const initData = await initRes.json();
     assert.equal(initData.success, true, "Must have success: true");
@@ -29,7 +43,7 @@ async function runReportsTests() {
 
     // 2. GET /api/v1/reports/:id (non-existent)
     console.log("\n[2] Testing GET /api/v1/reports/:id with non-existent ID...");
-    const notFoundRes = await fetch(`${BASE_URL}/api/v1/reports/00000000-0000-0000-0000-000000000000`);
+    const notFoundRes = await fetch(`${BASE_URL}/api/v1/reports/00000000-0000-0000-0000-000000000000`, { headers: authHeaders });
     assert.equal(notFoundRes.status, 404, "Must return HTTP 404 for unknown report");
     console.log("    ✓ Handled non-existent report ID with HTTP 404");
 
@@ -38,7 +52,7 @@ async function runReportsTests() {
     console.log(`\n[3] Triggering POST /api/v1/inspection/workflow with docId: ${docId}...`);
     const wfRes = await fetch(`${BASE_URL}/api/v1/inspection/workflow`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({ documentId: docId }),
     });
     assert.equal(wfRes.status, 200, "Workflow must return HTTP 200");
@@ -54,7 +68,7 @@ async function runReportsTests() {
 
     // 4. Verify report is listed in GET /api/v1/reports
     console.log("\n[4] Verifying report appears in GET /api/v1/reports...");
-    const listRes = await fetch(`${BASE_URL}/api/v1/reports`);
+    const listRes = await fetch(`${BASE_URL}/api/v1/reports`, { headers: authHeaders });
     assert.equal(listRes.status, 200);
     const listData = await listRes.json();
     const currentTotal = listData.total !== undefined ? listData.total : listData.data.length;
@@ -69,7 +83,7 @@ async function runReportsTests() {
 
     // 5. Verify GET /api/v1/reports/:id
     console.log(`\n[5] Verifying GET /api/v1/reports/${createdReport.id}...`);
-    const singleRes = await fetch(`${BASE_URL}/api/v1/reports/${createdReport.id}`);
+    const singleRes = await fetch(`${BASE_URL}/api/v1/reports/${createdReport.id}`, { headers: authHeaders });
     assert.equal(singleRes.status, 200);
     const singleData = await singleRes.json();
     assert.equal(singleData.success, true);
@@ -77,10 +91,16 @@ async function runReportsTests() {
     assert.equal(singleData.data.filename, createdReport.filename);
     console.log("    ✓ Retrieved exact report by ID");
 
-    // 6. Test organization scoping
+    // 6. Test organization scoping using an authenticated token from another organization
     console.log("\n[6] Testing organization scoping for reports...");
+    const otherToken = generateToken({
+      userId: "00000000-0000-0000-0000-888888888888",
+      organizationId: "00000000-0000-0000-0000-999999999999",
+      email: "other@tenant.local",
+      role: "engineer",
+    });
     const otherOrgRes = await fetch(`${BASE_URL}/api/v1/reports`, {
-      headers: { "x-organization-id": "00000000-0000-0000-0000-999999999999" },
+      headers: { Authorization: `Bearer ${otherToken}` },
     });
     assert.equal(otherOrgRes.status, 200);
     const otherOrgData = await otherOrgRes.json();
@@ -92,11 +112,11 @@ async function runReportsTests() {
     console.log("\n[7] Testing failed workflow does not create report...");
     const failRes = await fetch(`${BASE_URL}/api/v1/inspection/workflow`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders },
       body: JSON.stringify({}),
     });
     assert.equal(failRes.status, 400, "Invalid workflow call must return 400");
-    const postFailList = await fetch(`${BASE_URL}/api/v1/reports`);
+    const postFailList = await fetch(`${BASE_URL}/api/v1/reports`, { headers: authHeaders });
     const postFailData = await postFailList.json();
     const postFailTotal = postFailData.total !== undefined ? postFailData.total : postFailData.data.length;
     assert.equal(postFailTotal, initialTotal + 1, "Report count must not change on failed call");

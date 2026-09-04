@@ -104,8 +104,26 @@ export async function searchSimilarChunks(
         );
     }
 
+    // MANDATORY TENANT BOUNDARY: Fail closed if organizationId is missing or invalid
+    if (
+        !filters.organizationId ||
+        typeof filters.organizationId !== "string" ||
+        filters.organizationId.trim().length === 0
+    ) {
+        throw new Error(
+            "organizationId is required for tenant-scoped vector retrieval"
+        );
+    }
+
     try {
-        const must = [];
+        const must = [
+            {
+                key: "organizationId",
+                match: {
+                    value: filters.organizationId.trim(),
+                },
+            },
+        ];
         const allowedDocumentIds = Array.isArray(filters.allowedDocumentIds)
             ? new Set(filters.allowedDocumentIds.map((value) => value.trim()))
             : null;
@@ -141,28 +159,14 @@ export async function searchSimilarChunks(
             });
         }
 
-        // Filter by organizationId when provided
-        if (filters.organizationId !== undefined && filters.organizationId !== null) {
-            must.push({
-                key: "organizationId",
-                match: {
-                    value: String(filters.organizationId).trim(),
-                },
-            });
-        }
-
         const searchRequest = {
             query: queryVector,
             limit,
             with_payload: true,
-        };
-
-        // Apply filters only when at least one exists
-        if (must.length > 0) {
-            searchRequest.filter = {
+            filter: {
                 must,
-            };
-        }
+            },
+        };
 
         const response = await qdrant.query(
             COLLECTION_NAME,

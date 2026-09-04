@@ -52,8 +52,11 @@ export class SseConnection {
       headers['x-organization-id'] = orgId;
     }
 
-    // Forward auth token if present
-    const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+    // Forward auth token if present (consistently check sovereign_auth_token)
+    const token =
+      localStorage.getItem('sovereign_auth_token') ||
+      localStorage.getItem('token') ||
+      localStorage.getItem('authToken');
     if (token && !headers['Authorization']) {
       headers['Authorization'] = `Bearer ${token}`;
     }

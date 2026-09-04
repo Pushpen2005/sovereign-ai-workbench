@@ -182,3 +182,16 @@ export async function upsertDocument({
 
   return res.rows[0];
 }
+
+/**
+ * Delete a document record scoped to organization.
+ */
+export async function deleteDocumentRecord(id, organizationId) {
+  const sql = `
+    DELETE FROM documents
+    WHERE id = $1 AND organization_id = $2
+    RETURNING *;
+  `;
+  const res = await query(sql, [id, organizationId]);
+  return res.rows[0] || null;
+}

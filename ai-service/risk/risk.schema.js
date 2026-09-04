@@ -172,9 +172,10 @@ export function validateRiskResponse(parsed) {
  *
  * @param {Array<object>} rawCitations Citations from LLM
  * @param {Array<object>} retrievedChunks Authoritative retrieved SOP chunks
+ * @param {string} [organizationId] Authoritative tenant organization ID
  * @returns {Array<{documentId: string, filename: string, page: number, chunkIndex: number}>}
  */
-export function filterValidCitations(rawCitations, retrievedChunks) {
+export function filterValidCitations(rawCitations, retrievedChunks, organizationId) {
     if (!Array.isArray(rawCitations) || !Array.isArray(retrievedChunks) || retrievedChunks.length === 0) {
         return [];
     }
@@ -187,9 +188,19 @@ export function filterValidCitations(rawCitations, retrievedChunks) {
             continue;
         }
 
+        // Cross-tenant check on citation
+        if (organizationId && citation.organizationId && citation.organizationId !== organizationId) {
+            continue;
+        }
+
         // Find a matching chunk from the retrieved SOP chunks
         const matchedChunk = retrievedChunks.find((chunk) => {
             if (!chunk) return false;
+
+            // Ensure chunk belongs to authenticated tenant
+            if (organizationId && chunk.organizationId && chunk.organizationId !== organizationId) {
+                return false;
+            }
 
             // Match by documentId or filename
             const matchesDoc =

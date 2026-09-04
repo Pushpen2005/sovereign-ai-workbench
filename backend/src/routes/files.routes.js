@@ -4,9 +4,14 @@ import path from "path";
 
 import fs from "fs";
 
+import { requireAuth } from "../middleware/auth.middleware.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
+
 const router = express.Router();
 
 const uploadInspection = (req, res) => {
+  const organizationId = resolveAuthenticatedOrganization(req);
+
   if (!req.file) {
     return res.status(400).json({
       message: "Document file is required",
@@ -43,6 +48,7 @@ const uploadInspection = (req, res) => {
   return res.status(200).json({
     success: true,
     documentId,
+    organizationId,
     filename: req.file.filename,
   });
 };
@@ -53,6 +59,7 @@ const uploadInspection = (req, res) => {
  */
 router.post(
   "/upload",
+  requireAuth,
   upload.single("document"),
   uploadInspection
 );
@@ -62,6 +69,7 @@ router.post(
  */
 router.post(
   "/inspection/upload",
+  requireAuth,
   upload.single("document"),
   uploadInspection
 );

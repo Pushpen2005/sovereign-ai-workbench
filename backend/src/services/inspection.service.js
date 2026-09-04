@@ -10,19 +10,66 @@ import { assessFindingRisk } from "../../../ai-service/risk/risk.service.js";
 import { generateApprovalNote } from "../../../ai-service/reports/approval-note.service.js";
 import { runInspectionWorkflow } from "./inspection-orchestrator.service.js";
 
+import {
+    getOrganizationUploadDir,
+    getDocumentStoragePath,
+    getReportStoragePath,
+    validateFilename,
+    UPLOADS_ROOT,
+} from "../utils/storage.js";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UPLOADS_DIR = path.resolve(__dirname, "../uploads");
 const GENERATED_DIR = path.resolve(__dirname, "../../generated");
 
 /**
  * Resolves a file path from documentId, filename, or direct filePath.
- * Searches in backend uploads directory if a relative or basename is provided.
+ * Enforces organization-scoped upload directory search with safe fallback.
  */
-export function resolveInspectionFilePath({ documentId, filename, filePath } = {}) {
-    if (filePath && typeof filePath === "string" && fs.existsSync(filePath)) {
-        return path.resolve(filePath);
+export function resolveInspectionFilePath({ documentId, filename, filePath, organizationId } = {}) {
+    if (filePath && typeof filePath === "string") {
+        const resolved = path.resolve(filePath);
+        if (organizationId) {
+            const orgUploadDir = getOrganizationUploadDir(organizationId, { create: false });
+            if (resolved.startsWith(UPLOADS_ROOT) && !resolved.startsWith(orgUploadDir)) {
+                throw new Error("Access Denied: File path belongs to another tenant or outside organization storage.");
+            }
+        }
+        if (fs.existsSync(resolved)) {
+            return resolved;
+        }
     }
 
+    if (organizationId && typeof organizationId === "string" && organizationId.trim()) {
+        const cleanOrgId = organizationId.trim();
+        if (filename && typeof filename === "string") {
+            try {
+                const targetFile = getDocumentStoragePath(cleanOrgId, filename);
+                if (fs.existsSync(targetFile)) {
+                    return targetFile;
+                }
+            } catch {
+                // Ignore path validation errors on lookup attempt
+            }
+        }
+
+        if (documentId && typeof documentId === "string") {
+            try {
+                const candidatePdf = getDocumentStoragePath(cleanOrgId, `${documentId}.pdf`);
+                if (fs.existsSync(candidatePdf)) {
+                    return candidatePdf;
+                }
+                const directCandidate = getDocumentStoragePath(cleanOrgId, documentId);
+                if (fs.existsSync(directCandidate)) {
+                    return directCandidate;
+                }
+            } catch {
+                // Ignore path validation errors on lookup attempt
+            }
+        }
+    }
+
+    // Fallback search in legacy root uploads for pre-existing fixtures/tests
     if (filename && typeof filename === "string") {
         const directPath = path.resolve(UPLOADS_DIR, filename);
         if (fs.existsSync(directPath)) {
@@ -36,7 +83,6 @@ export function resolveInspectionFilePath({ documentId, filename, filePath } = {
             return candidatePdf;
         }
 
-        // Also check exact documentId name without extension
         const directCandidate = path.resolve(UPLOADS_DIR, documentId);
         if (fs.existsSync(directCandidate)) {
             return directCandidate;
@@ -55,16 +101,17 @@ export async function ingestInspectionFile(target, options = {}) {
     let targetPath;
     let resolvedDocumentId = options.documentId;
     let resolvedFilename = options.filename;
+    const organizationId = options.organizationId;
 
     if (typeof target === "string") {
         if (fs.existsSync(target)) {
             targetPath = path.resolve(target);
             resolvedFilename = resolvedFilename || path.basename(targetPath);
         } else {
-            targetPath = resolveInspectionFilePath({ documentId: target });
+            targetPath = resolveInspectionFilePath({ documentId: target, organizationId });
         }
     } else if (target && typeof target === "object") {
-        targetPath = resolveInspectionFilePath(target);
+        targetPath = resolveInspectionFilePath({ ...target, organizationId });
         resolvedDocumentId = resolvedDocumentId || target.documentId;
         resolvedFilename = resolvedFilename || target.filename;
     } else {
@@ -114,12 +161,18 @@ export async function runFindingRiskAssessment(finding, options = {}) {
  * Generates an Approval Note DOCX from trusted findings and risk assessment.
  */
 export async function runApprovalNoteGeneration(data, options = {}) {
-    if (!fs.existsSync(GENERATED_DIR)) {
-        fs.mkdirSync(GENERATED_DIR, { recursive: true });
+    const defaultFilename = options.filename ? validateFilename(options.filename) : "Approval_Note.docx";
+    let defaultOutputPath;
+
+    if (options.organizationId && typeof options.organizationId === "string" && options.organizationId.trim()) {
+        defaultOutputPath = getReportStoragePath(options.organizationId.trim(), defaultFilename);
+    } else {
+        if (!fs.existsSync(GENERATED_DIR)) {
+            fs.mkdirSync(GENERATED_DIR, { recursive: true });
+        }
+        defaultOutputPath = path.resolve(GENERATED_DIR, defaultFilename);
     }
 
-    const defaultFilename = options.filename || "Approval_Note.docx";
-    const defaultOutputPath = path.resolve(GENERATED_DIR, defaultFilename);
     const outputPath = options.outputPath || defaultOutputPath;
 
     const generatedPath = await generateApprovalNote(data, {

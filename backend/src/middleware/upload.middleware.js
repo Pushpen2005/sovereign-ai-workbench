@@ -5,16 +5,18 @@ import crypto from "crypto";
 import fs from "fs";
 import { fileURLToPath } from "url";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const UPLOADS_DIR = path.resolve(__dirname, "../uploads");
-
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
+import { getOrganizationUploadDir } from "../utils/storage.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, UPLOADS_DIR);
+    try {
+      const organizationId = resolveAuthenticatedOrganization(req);
+      const tenantUploadDir = getOrganizationUploadDir(organizationId, { create: true });
+      cb(null, tenantUploadDir);
+    } catch (err) {
+      cb(err);
+    }
   },
 
   filename: (req, file, cb) => {

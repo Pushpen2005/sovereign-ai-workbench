@@ -1,4 +1,4 @@
-import { resolveOrganizationId } from "../config/organization.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import {
   getAllReports,
   getReportById,
@@ -16,7 +16,7 @@ import {
  */
 export async function getReports(req, res, next) {
   try {
-    const organizationId = resolveOrganizationId(req);
+    const organizationId = resolveAuthenticatedOrganization(req);
     const limit = parseInt(req.query.limit || "50", 10);
     const offset = parseInt(req.query.offset || "0", 10);
 
@@ -41,7 +41,7 @@ export async function getReports(req, res, next) {
 export async function getReport(req, res, next) {
   try {
     const { id } = req.params;
-    const organizationId = resolveOrganizationId(req);
+    const organizationId = resolveAuthenticatedOrganization(req);
 
     const report = await getReportById(id, organizationId);
 

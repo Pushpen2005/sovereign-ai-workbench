@@ -224,6 +224,8 @@ export async function runLegacyAgentLoop({
     goal,
     maxSteps = DEFAULT_MAX_STEPS,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    organizationId,
+    userId,
 }) {
     if (typeof goal !== "string" || !goal.trim()) {
         throw new AgentRuntimeError("goal must be a non-empty string");
@@ -311,7 +313,10 @@ export async function runLegacyAgentLoop({
             const reason = action.reason || `Calling ${toolName}`;
 
             const toolStart = Date.now();
-            const toolExecResult = await executeRegisteredTool(toolName, toolArgs);
+            const toolExecResult = await executeRegisteredTool(toolName, toolArgs, {
+                organizationId,
+                userId,
+            });
             const toolDurationMs = Date.now() - toolStart;
 
             const summary = summarizeToolResult(toolName, toolExecResult);

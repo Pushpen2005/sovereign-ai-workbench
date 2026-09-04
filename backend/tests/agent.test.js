@@ -27,6 +27,7 @@ import { executeDocumentSearch, DocumentSearchError } from "../src/services/agen
 import { executeSandboxCode, SandboxCodeError } from "../src/services/agentTools/sandboxCode.tool.js";
 import { executeDocumentGenerate } from "../src/services/agentTools/documentGenerate.tool.js";
 import { parseActionJSON, runAgentLoop } from "../src/services/agent.service.js";
+import { DEFAULT_ORGANIZATION_ID } from "../src/config/organization.js";
 
 console.log("==================================================");
 console.log("PR #26: Autonomous Agent Tool Orchestration Tests");
@@ -109,7 +110,7 @@ console.log("\n[3] File Read Tool Security Boundary");
 
 // 3.1 Path traversal /etc/passwd rejected
 try {
-    await executeFileRead({ documentId: "/etc/passwd" });
+    await executeFileRead({ documentId: "/etc/passwd" }, { organizationId: DEFAULT_ORGANIZATION_ID });
     report("Path traversal /etc/passwd rejected", false, "did not throw");
 } catch (err) {
     report("Path traversal /etc/passwd rejected", err instanceof FileReadError && err.message.includes("Access Denied"), err.message);
@@ -117,7 +118,7 @@ try {
 
 // 3.2 Directory traversal ../../secrets.env rejected
 try {
-    await executeFileRead({ documentId: "../../secrets.env" });
+    await executeFileRead({ documentId: "../../secrets.env" }, { organizationId: DEFAULT_ORGANIZATION_ID });
     report("Directory traversal ../../secrets.env rejected", false, "did not throw");
 } catch (err) {
     report("Directory traversal ../../secrets.env rejected", err instanceof FileReadError && err.message.includes("Access Denied"), err.message);
@@ -128,7 +129,7 @@ console.log("\n[4] Document Search Tool Input Validation");
 
 // 4.1 Empty query rejected
 try {
-    await executeDocumentSearch({ query: "" });
+    await executeDocumentSearch({ query: "" }, { organizationId: DEFAULT_ORGANIZATION_ID });
     report("Empty query rejected", false, "did not throw");
 } catch (err) {
     report("Empty query rejected", err instanceof DocumentSearchError, err.message);
@@ -136,7 +137,7 @@ try {
 
 // 4.2 Non-string argument rejected
 try {
-    await executeDocumentSearch({ query: 12345 });
+    await executeDocumentSearch({ query: 12345 }, { organizationId: DEFAULT_ORGANIZATION_ID });
     report("Non-string query rejected", false, "did not throw");
 } catch (err) {
     report("Non-string query rejected", err instanceof DocumentSearchError, err.message);
@@ -173,7 +174,7 @@ const docxRes = await executeDocumentGenerate({
         { heading: "Risk Assessment", content: "Risk level MEDIUM due to potential seal fatigue." },
         { heading: "Recommendation", content: "Schedule replacement of mechanical seal within 48 hours." },
     ],
-});
+}, { organizationId: DEFAULT_ORGANIZATION_ID });
 
 report(
     "Approval Note DOCX generated",
@@ -235,3 +236,4 @@ console.log("==================================================");
 if (failed > 0) {
     process.exit(1);
 }
+process.exit(0);

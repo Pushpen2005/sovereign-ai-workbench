@@ -1,6 +1,6 @@
 import { answerQuestion } from "../../../ai-service/rag/rag.service.js";
 import { generateAnswer } from "../../../ai-service/llm/llm.service.js";
-import { resolveOrganizationId } from "../config/organization.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import { query } from "../config/db.js";
 import {
   getOrCreateConversation,
@@ -22,14 +22,6 @@ import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/rout
 export async function askQuestion(req, res, next) {
   try {
     const { question, documentId, conversationId, model } = req.body || {};
-
-    // Enforce strict authentication when configured or requested
-    if ((process.env.ENFORCE_AUTH === "true" || req.headers["x-require-auth"] === "true") && !req.user) {
-      return res.status(401).json({
-        success: false,
-        message: "Authorization header with Bearer token is required",
-      });
-    }
 
     if (typeof question !== "string" || !question.trim()) {
       return res.status(400).json({
@@ -59,7 +51,7 @@ export async function askQuestion(req, res, next) {
       }
     }
 
-    const organizationId = resolveOrganizationId(req);
+    const organizationId = resolveAuthenticatedOrganization(req);
 
     // Document Authorization & Scoping
     let allowedDocumentIds = undefined;
@@ -153,7 +145,12 @@ ${question.trim()}`;
       question: question.trim(),
       documentId: documentId?.trim() || null,
       answer: result.answer,
+      grounded: result.grounded !== undefined ? result.grounded : ((result.sources && result.sources.length > 0) ? true : false),
+      reason: result.reason || null,
       sources: result.sources || [],
+      citations: result.citations || result.sources || [],
+      citationIntegrity: result.citationIntegrity || null,
+      claimGrounding: result.claimGrounding || null,
       messageId: exchange.assistantMessage.id,
       // ── PR #23 routing metadata ─────────────────────────────────────────
       taskType:      routing.taskType,
@@ -174,7 +171,7 @@ ${question.trim()}`;
  */
 export async function getHistory(req, res, next) {
   try {
-    const organizationId = resolveOrganizationId(req);
+    const organizationId = resolveAuthenticatedOrganization(req);
     const limit = parseInt(req.query.limit || "50", 10);
     const offset = parseInt(req.query.offset || "0", 10);
 
@@ -197,7 +194,7 @@ export async function getHistory(req, res, next) {
 export async function getConversationMessages(req, res, next) {
   try {
     const { id } = req.params;
-    const organizationId = resolveOrganizationId(req);
+    const organizationId = resolveAuthenticatedOrganization(req);
 
     const result = await getConversationWithMessages(id, organizationId);
 
@@ -217,7 +214,7 @@ export async function getConversationMessages(req, res, next) {
  */
 export async function getStats(req, res, next) {
   try {
-    const organizationId = resolveOrganizationId(req);
+    const organizationId = resolveAuthenticatedOrganization(req);
     const stats = await getChatStats(organizationId);
 
     return res.status(200).json({

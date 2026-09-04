@@ -69,9 +69,24 @@ async function run() {
   console.log(`Backend test server running at ${baseUrl}`);
 
   try {
+    // Authenticate demo user for private document operations
+    const loginRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: process.env.DEMO_USER_EMAIL || "engineer@example.com",
+        password: process.env.DEMO_USER_PASSWORD || "DemoPassword123!",
+      }),
+    });
+    const loginData = await loginRes.json();
+    const token = loginData.data?.token;
+    const authHeaders = { Authorization: `Bearer ${token}` };
+
     // 1. GET /api/v1/documents
     console.log("\n[1] Testing GET /api/v1/documents...");
-    const listRes = await fetch(`${baseUrl}/api/v1/documents`);
+    const listRes = await fetch(`${baseUrl}/api/v1/documents`, {
+      headers: authHeaders,
+    });
     assert.equal(listRes.status, 200);
     const listData = await listRes.json();
     assert.equal(listData.success, true);
@@ -103,6 +118,7 @@ async function run() {
 
     const uploadRes = await fetch(`${baseUrl}/api/v1/documents`, {
       method: "POST",
+      headers: authHeaders,
       body: formData,
     });
     assert.equal(uploadRes.status, 200);
@@ -126,20 +142,26 @@ async function run() {
 
     // 3b. Testing GET /api/v1/documents/:id
     console.log("\n[3b] Testing GET /api/v1/documents/:id...");
-    const getDocRes = await fetch(`${baseUrl}/api/v1/documents/${uploadData.documentId}`);
+    const getDocRes = await fetch(`${baseUrl}/api/v1/documents/${uploadData.documentId}`, {
+      headers: authHeaders,
+    });
     assert.equal(getDocRes.status, 200);
     const getDocData = await getDocRes.json();
     assert.equal(getDocData.success, true);
     assert.equal(getDocData.document.documentId, uploadData.documentId);
     assert.ok(getDocData.document.organizationId, "document must have organizationId");
 
-    const notFoundRes = await fetch(`${baseUrl}/api/v1/documents/non-existent-doc-id`);
+    const notFoundRes = await fetch(`${baseUrl}/api/v1/documents/non-existent-doc-id`, {
+      headers: authHeaders,
+    });
     assert.equal(notFoundRes.status, 404);
     console.log("    ✓ GET /api/v1/documents/:id verified (200 on existing, 404 on missing)");
 
     // 4. GET /api/v1/documents again to verify persistence
     console.log("\n[4] Re-calling GET /api/v1/documents (Simulating browser refresh)...");
-    const refreshRes = await fetch(`${baseUrl}/api/v1/documents`);
+    const refreshRes = await fetch(`${baseUrl}/api/v1/documents`, {
+      headers: authHeaders,
+    });
     assert.equal(refreshRes.status, 200);
     const refreshData = await refreshRes.json();
     const foundNewDoc = refreshData.documents.find((d) => d.documentId === uploadData.documentId);
@@ -155,6 +177,7 @@ async function run() {
     badForm.append("document", new Blob(["not pdf"], { type: "text/plain" }), "test.txt");
     const badRes = await fetch(`${baseUrl}/api/v1/documents`, {
       method: "POST",
+      headers: authHeaders,
       body: badForm,
     });
     assert.equal(badRes.status, 400);
@@ -162,6 +185,7 @@ async function run() {
     const emptyForm = new FormData();
     const emptyRes = await fetch(`${baseUrl}/api/v1/documents`, {
       method: "POST",
+      headers: authHeaders,
       body: emptyForm,
     });
     assert.equal(emptyRes.status, 400);

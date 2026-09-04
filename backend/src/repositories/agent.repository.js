@@ -435,32 +435,46 @@ export async function createAgentRunStep({
 
 /**
  * Retrieves all chronological execution steps for a specific agent run.
+ * Scoped to an organization via a JOIN on agent_runs when organizationId is provided.
  *
  * @param {string} runId
+ * @param {string} [organizationId]
  * @returns {Promise<Array<object>>}
  */
-export async function getAgentRunSteps(runId) {
+export async function getAgentRunSteps(runId, organizationId = null) {
     if (!runId) return [];
 
-    const sql = `
+    let sql = `
         SELECT
-            id,
-            run_id AS "runId",
-            step_number AS "stepNumber",
-            node,
-            action,
-            tool_name AS "toolName",
-            tool_arguments AS "toolArguments",
-            tool_result_summary AS "toolResultSummary",
-            status,
-            duration_ms AS "durationMs",
-            created_at AS "createdAt"
-        FROM agent_run_steps
-        WHERE run_id = $1
-        ORDER BY step_number ASC, created_at ASC;
+            s.id,
+            s.run_id AS "runId",
+            s.step_number AS "stepNumber",
+            s.node,
+            s.action,
+            s.tool_name AS "toolName",
+            s.tool_arguments AS "toolArguments",
+            s.tool_result_summary AS "toolResultSummary",
+            s.status,
+            s.duration_ms AS "durationMs",
+            s.created_at AS "createdAt"
+        FROM agent_run_steps s
     `;
 
-    const res = await query(sql, [runId]);
+    const values = [runId];
+
+    if (organizationId) {
+        sql += `
+            JOIN agent_runs r ON s.run_id = r.run_id
+            WHERE s.run_id = $1 AND r.organization_id = $2
+        `;
+        values.push(organizationId);
+    } else {
+        sql += ` WHERE s.run_id = $1`;
+    }
+
+    sql += ` ORDER BY s.step_number ASC, s.created_at ASC;`;
+
+    const res = await query(sql, values);
     return res.rows;
 }
 

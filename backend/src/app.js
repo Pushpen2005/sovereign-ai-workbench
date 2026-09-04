@@ -19,7 +19,7 @@ import codingRouter from "./routes/coding.routes.js";
 import visionRouter from "./routes/vision.routes.js";
 import agentRouter from "./routes/agent.routes.js";
 import authRouter from "./routes/auth.routes.js";
-import { optionalAuth } from "./middleware/auth.middleware.js";
+import { requireAuth } from "./middleware/auth.middleware.js";
 
 const app = express();
 
@@ -63,20 +63,10 @@ app.use(cors({
 // Hardened body parser limit (2 MB max) to prevent memory exhaustion
 app.use(express.json({ limit: "2mb" }));
 
-// Authentication routes (public)
+// Authentication routes (public registration/login, protected /me)
 app.use("/api/v1/auth", authRouter);
 
-// Token-aware authentication middleware for all subsequent API routes
-app.use(optionalAuth);
-
-app.use('/api/v1', router);
-app.use("/api/v1/documents", documentsRouter);
-app.use("/api/v1/chat", chatRouter);
-app.use("/api/v1/inspection", inspectionRouter);
-app.use("/api/v1/reports", reportsRouter);
-app.use("/api/v1/coding", codingRouter);
-app.use("/api/v1/vision", visionRouter);
-app.use("/api/v1/agent", agentRouter);
+// Public root and health endpoints
 app.get('/', (req, res) => {
     res.status(200).json({
         success: true,
@@ -89,6 +79,16 @@ app.get('/api/v1/health', (req, res) => {
         status: "ok"
     });
 });
+
+// Private operational routes — strictly protected by authentication boundary
+app.use('/api/v1', router);
+app.use("/api/v1/documents", requireAuth, documentsRouter);
+app.use("/api/v1/chat", requireAuth, chatRouter);
+app.use("/api/v1/inspection", requireAuth, inspectionRouter);
+app.use("/api/v1/reports", requireAuth, reportsRouter);
+app.use("/api/v1/coding", requireAuth, codingRouter);
+app.use("/api/v1/vision", requireAuth, visionRouter);
+app.use("/api/v1/agent", requireAuth, agentRouter);
 
 /**
  * PR #23 — Model Router Diagnostic Endpoint

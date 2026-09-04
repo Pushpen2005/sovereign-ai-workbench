@@ -9,7 +9,7 @@
  */
 
 import { runAgentLoop, AgentRuntimeError } from "../services/agent.service.js";
-import { resolveOrganizationId } from "../config/organization.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import {
     listAgentRuns,
     getAgentRunByRunId,
@@ -31,8 +31,8 @@ export async function runAgent(req, res, next) {
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
-        const userId = req.user?.id || req.body?.userId || null;
+        const organizationId = resolveAuthenticatedOrganization(req);
+        const userId = req.user?.id || req.user?.userId || null;
 
         const result = await runAgentLoop({
             goal: goal.trim(),
@@ -59,7 +59,7 @@ export async function runAgent(req, res, next) {
  */
 export async function getAgentRuns(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const limit = parseInt(req.query.limit || "50", 10);
         const offset = parseInt(req.query.offset || "0", 10);
         const status = req.query.status || null;
@@ -80,15 +80,24 @@ export async function getAgentRuns(req, res, next) {
  */
 export async function getAgentRun(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
         const run = await getAgentRunByRunId(runId, organizationId);
 
         if (!run) {
+            // Defensive: check if run exists in another tenant for explicit 403
+            const foreignRun = await getAgentRunByRunId(runId);
+            if (foreignRun) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Forbidden: Agent run belongs to another organization.",
+                });
+            }
+
             return res.status(404).json({
                 success: false,
-                message: `Agent run '${runId}' not found in this organization.`,
+                message: `Agent run '${runId}' not found.`,
             });
         }
 
@@ -106,20 +115,28 @@ export async function getAgentRun(req, res, next) {
  */
 export async function getAgentRunSteps(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
         // Verify organization ownership before exposing steps
         const run = await getAgentRunByRunId(runId, organizationId);
 
         if (!run) {
+            const foreignRun = await getAgentRunByRunId(runId);
+            if (foreignRun) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Forbidden: Agent run belongs to another organization.",
+                });
+            }
+
             return res.status(404).json({
                 success: false,
-                message: `Agent run '${runId}' not found in this organization.`,
+                message: `Agent run '${runId}' not found.`,
             });
         }
 
-        const steps = await getStepsByRunId(runId);
+        const steps = await getStepsByRunId(runId, organizationId);
 
         return res.status(200).json({
             success: true,
@@ -135,23 +152,26 @@ export async function getAgentRunSteps(req, res, next) {
  */
 export async function streamAgentRun(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
-        // Verify organization authorization
-        const run = await getAgentRunByRunId(runId, organizationId);
-        if (!run) {
-            const owner = executionEvents.getRunOwner(runId);
-            if (!owner || owner.organizationId !== organizationId) {
-                return res.status(404).json({
-                    success: false,
-                    message: `Agent run '${runId}' not found in this organization.`,
-                });
-            }
+        // Verify organization authorization with PostgreSQL fallback
+        const authCheck = await executionEvents.verifyOrHydrateRunOwner(runId, organizationId);
+        if (authCheck.forbidden) {
+            return res.status(403).json({
+                success: false,
+                message: authCheck.message || "Forbidden: Run belongs to another organization.",
+            });
+        }
+        if (authCheck.notFound) {
+            return res.status(404).json({
+                success: false,
+                message: authCheck.message || `Agent run '${runId}' not found.`,
+            });
         }
 
-        const persistedSteps = await getStepsByRunId(runId);
-        executionEvents.subscribe(runId, req, res, { persistedSteps });
+        const persistedSteps = await getStepsByRunId(runId, organizationId);
+        executionEvents.subscribe(runId, req, res, { organizationId, persistedSteps });
     } catch (error) {
         next(error);
     }

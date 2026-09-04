@@ -268,6 +268,7 @@ async function runSecuritySuite() {
 
     const fakePdfRes = await fetch(`${baseUrl}/api/v1/inspection/upload`, {
       method: "POST",
+      headers: { Authorization: `Bearer ${tokenA}` },
       body: fakePdfFormData,
     });
     assert.equal(fakePdfRes.status, 400, "Disguised PDF must return HTTP 400");
@@ -408,7 +409,9 @@ except Exception as e:
   }
 }
 
-runSecuritySuite().catch((err) => {
+runSecuritySuite().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error("Security hardening tests failed:", err);
   process.exit(1);
 });
