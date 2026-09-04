@@ -145,7 +145,12 @@ ${question.trim()}`;
       question: question.trim(),
       documentId: documentId?.trim() || null,
       answer: result.answer,
+      grounded: result.grounded !== undefined ? result.grounded : ((result.sources && result.sources.length > 0) ? true : false),
+      reason: result.reason || null,
       sources: result.sources || [],
+      citations: result.citations || result.sources || [],
+      citationIntegrity: result.citationIntegrity || null,
+      claimGrounding: result.claimGrounding || null,
       messageId: exchange.assistantMessage.id,
       // ── PR #23 routing metadata ─────────────────────────────────────────
       taskType:      routing.taskType,

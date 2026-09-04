@@ -48,13 +48,24 @@ export async function runIngestion(state, options = {}) {
         organizationId: state.organizationId || options.organizationId,
     };
 
-    const result = await ingestInspectionFile(target, ingestOpts);
+    try {
+        const result = await ingestInspectionFile(target, ingestOpts);
 
-    return {
-        documentId: result.documentId || state.documentId,
-        filename: result.filename || (state.filePath ? path.basename(state.filePath) : `${result.documentId}.pdf`),
-        chunksStored: result.chunksStored ?? 0,
-    };
+        return {
+            documentId: result.documentId || state.documentId,
+            filename: result.filename || (state.filePath ? path.basename(state.filePath) : `${result.documentId}.pdf`),
+            chunksStored: result.chunksStored ?? 0,
+        };
+    } catch (err) {
+        if (state.documentId && err.message?.includes("Inspection file could not be found")) {
+            return {
+                documentId: state.documentId,
+                filename: options.filename || state.metadata?.filename || `${state.documentId}.pdf`,
+                chunksStored: 0,
+            };
+        }
+        throw err;
+    }
 }
 
 /**
@@ -85,7 +96,11 @@ export async function runRetrieval(state, options = {}) {
         const candidates = await searchSimilarChunksFn(
             queryEmbedding,
             candidateLimit,
-            documentId
+            documentId,
+            {
+                organizationId: state.organizationId,
+                ...options,
+            }
         );
 
         if (Array.isArray(candidates)) {
@@ -119,9 +134,13 @@ export async function runFindingsExtraction(state, options = {}) {
     const analysisResult = await analyzeInspectionReport(
         {
             documentId,
+            organizationId: state.organizationId,
             task: state.task || "Analyze this inspection report and extract all significant findings.",
         },
-        options
+        {
+            organizationId: state.organizationId,
+            ...options,
+        }
     );
 
     return analysisResult.findings || [];

@@ -409,7 +409,9 @@ except Exception as e:
   }
 }
 
-runSecuritySuite().catch((err) => {
+runSecuritySuite().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error("Security hardening tests failed:", err);
   process.exit(1);
 });

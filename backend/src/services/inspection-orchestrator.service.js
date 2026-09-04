@@ -22,6 +22,7 @@ import fs from "fs";
 import path from "path";
 import { compiledInspectionGraph } from "../orchestration/inspection/index.js";
 import { executionEvents } from "./execution-events.service.js";
+import { createAgentRun, updateAgentRun } from "../repositories/agent.repository.js";
 
 /**
  * Executes the formal LangGraph inspection workflow.
@@ -65,12 +66,21 @@ export async function runInspectionWorkflow(input, options = {}) {
 
     const runId = options.runId || randomUUID();
 
-    // 1. Register tenant ownership for run
+    // 1. Register tenant ownership for run (in-memory cache & PostgreSQL)
     if (organizationId) {
         try {
             executionEvents.registerRunOwner(runId, organizationId, "inspection");
-        } catch {
-            // Non-blocking
+            await createAgentRun({
+                runId,
+                userId: options.userId || null,
+                organizationId,
+                goal: task,
+                model: "inspection-workflow",
+                status: "in_progress",
+                startedAt: new Date(),
+            });
+        } catch (dbErr) {
+            console.warn("[InspectionOrchestrator] Warning: Failed to persist inspection run initiation:", dbErr.message);
         }
     }
 
@@ -201,6 +211,19 @@ export async function runInspectionWorkflow(input, options = {}) {
             // Non-blocking
         }
 
+        if (organizationId) {
+            try {
+                await updateAgentRun(runId, organizationId, {
+                    status: "failed",
+                    stoppedReason: finalState.workflowOutcome || "safe_failure",
+                    error: errorMsg,
+                    completedAt: new Date(),
+                });
+            } catch (dbErr) {
+                console.warn("[InspectionOrchestrator] Warning: Failed to persist inspection run failure:", dbErr.message);
+            }
+        }
+
         const error = new Error(errorMsg);
         error.node = primaryError?.node || finalState.currentNode || "unknown";
         error.executionOrder = finalState.executionOrder;
@@ -240,6 +263,18 @@ export async function runInspectionWorkflow(input, options = {}) {
         });
     } catch {
         // Non-blocking
+    }
+
+    if (organizationId) {
+        try {
+            await updateAgentRun(runId, organizationId, {
+                status: "completed",
+                stoppedReason: finalState.workflowOutcome || "completed",
+                completedAt: new Date(),
+            });
+        } catch (dbErr) {
+            console.warn("[InspectionOrchestrator] Warning: Failed to persist inspection run completion:", dbErr.message);
+        }
     }
 
     return {

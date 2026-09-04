@@ -252,6 +252,28 @@ export async function initDb() {
       );
       console.log("✓ Synced existing pre-indexed RIL-IAR-2025.pdf document record into PostgreSQL.");
     }
+
+    // Safely backfill organizationId in Qdrant for pre-indexed demo data points
+    try {
+      const { backfillDemoDocumentPoints } = await import("../../../ai-service/vectorstore/qdrant.service.js");
+      const demoUserOrgRes = await query("SELECT organization_id FROM users WHERE lower(email) = lower($1)", [demoEmail]);
+      const demoOrgTarget = demoUserOrgRes.rows[0]?.organization_id || DEFAULT_ORGANIZATION_ID;
+
+      await backfillDemoDocumentPoints("6216a2ec-9351-42ef-9ead-7cd2716b3397", DEFAULT_ORGANIZATION_ID);
+      await backfillDemoDocumentPoints("31bc6f43-a5fb-47b7-9bee-5bc9deb0a2b1", demoOrgTarget);
+      await backfillDemoDocumentPoints("9ab8aa75-de69-40a3-a5cf-7690eca964bb", demoOrgTarget);
+      await backfillDemoDocumentPoints("73311980-8338-4833-8e2e-246aa107a1eb", demoOrgTarget);
+    } catch {
+      // Non-blocking if Qdrant is unreachable during offline DB init
+    }
+
+    // Tenant filesystem migration: safely move known files into tenant-scoped directories
+    try {
+      const { migrateKnownStorageFiles } = await import("../utils/storage.js");
+      await migrateKnownStorageFiles(query);
+    } catch (migErr) {
+      console.warn("[initDb] Filesystem migration notice:", migErr.message);
+    }
   } catch (error) {
     console.error("Failed to initialize PostgreSQL schema:", error.message);
     throw error;

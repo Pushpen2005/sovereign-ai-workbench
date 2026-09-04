@@ -141,6 +141,7 @@ async function runRagHardeningTests() {
       await upsertChunks([
         {
           documentId: "dim_test_doc",
+          organizationId: "dim_test_org",
           chunkIndex: 0,
           text: "Dimension test chunk",
           page: 1,
@@ -494,6 +495,7 @@ async function runRagHardeningTests() {
     const sopResults = await searchSimilarChunks(sopQueryEmbedding, 10, undefined, {
       documentType: "sop",
       allowedDocumentIds: orgAlphaDocIds,
+      organizationId: orgAlphaId,
     });
     assert.ok(sopResults.length > 0, "SOP search must return results");
     for (const r of sopResults) {
@@ -540,6 +542,7 @@ async function runRagHardeningTests() {
       const qVec = await generateEmbedding(item.question);
       const topChunks = await searchSimilarChunks(qVec, 10, undefined, {
         allowedDocumentIds: orgAlphaDocIds,
+        organizationId: orgAlphaId,
       });
       const tRetrieval = Date.now() - tStart;
       evaluationMetrics.retrievalLatencies.push(tRetrieval);

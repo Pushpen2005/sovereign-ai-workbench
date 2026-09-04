@@ -30,9 +30,14 @@ const SAFE_DOC_ID_REGEX = /^[a-zA-Z0-9_\-.:]{1,128}$/;
  * @param {number} [args.maxChunks=5] - Maximum text chunks to retrieve (1-10)
  * @returns {Promise<{ documentId: string, filename: string, status: string, totalChunks: number, textExcerpt: string, chunks: Array<object> }>}
  */
-export async function executeFileRead(args) {
+export async function executeFileRead(args, context = {}) {
     if (!args || typeof args !== "object") {
         throw new FileReadError("Arguments must be an object with a 'documentId' field");
+    }
+
+    const organizationId = context?.organizationId;
+    if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
+        throw new FileReadError("Execution context missing authenticated organizationId for file read");
     }
 
     const { documentId, maxChunks: rawMax } = args;
@@ -52,16 +57,17 @@ export async function executeFileRead(args) {
 
     const maxChunks = Math.min(Math.max(Number.isInteger(rawMax) ? rawMax : 5, 1), 10);
 
-    // 2. Query PostgreSQL metadata store
+    // 2. Query PostgreSQL metadata store strictly scoped to the authenticated organization
     let docRow = null;
     try {
         const sql = `
             SELECT id, organization_id, filename, original_filename, status, chunks_stored, created_at, updated_at
             FROM documents
-            WHERE id::text = $1 OR filename = $1 OR original_filename = $1
+            WHERE (id::text = $1 OR filename = $1 OR original_filename = $1)
+              AND organization_id = $2
             LIMIT 1;
         `;
-        const res = await query(sql, [cleanId]);
+        const res = await query(sql, [cleanId, organizationId.trim()]);
         if (res.rows.length > 0) {
             docRow = res.rows[0];
         }
@@ -69,7 +75,7 @@ export async function executeFileRead(args) {
         console.warn(`[FileReadTool] PostgreSQL query warning: ${dbErr.message}`);
     }
 
-    // 3. Query Qdrant for document chunks
+    // 3. Query Qdrant for document chunks strictly filtered by organizationId
     const retrievedChunks = [];
     const targetDocId = docRow ? docRow.id : cleanId;
 
@@ -84,6 +90,10 @@ export async function executeFileRead(args) {
                         {
                             key: "documentId",
                             match: { value: targetDocId },
+                        },
+                        {
+                            key: "organizationId",
+                            match: { value: organizationId.trim() },
                         },
                     ],
                 },

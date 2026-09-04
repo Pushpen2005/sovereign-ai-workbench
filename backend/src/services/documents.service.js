@@ -1,5 +1,16 @@
 import path from "path";
+import fs from "fs";
 import crypto from "crypto";
+import { query } from "../config/db.js";
+import {
+  getDocumentStoragePath,
+  getOrganizationUploadDir,
+  safeDeleteFile,
+  validateFilename,
+  assertPathContained,
+  UPLOADS_ROOT,
+} from "../utils/storage.js";
+import { deleteChunksByDocumentId } from "../../../ai-service/vectorstore/qdrant.service.js";
 
 import {
   createDocument,
@@ -7,6 +18,7 @@ import {
   getAllDocuments as fetchAllDocuments,
   getDocumentById as fetchDocumentById,
   upsertDocument,
+  deleteDocumentRecord,
 } from "../repositories/documents.repository.js";
 
 import { ingestInspectionFile } from "./inspection.service.js";
@@ -242,4 +254,247 @@ export async function processAndIngestDocument(
 
     throw error;
   }
+}
+
+/**
+ * Resolves the physical file path for downloading a document.
+ * Strictly verifies tenant authorization in PostgreSQL and containment inside uploads/<organizationId>/.
+ *
+ * @param {string} documentId
+ * @param {string} organizationId
+ * @returns {Promise<{ filePath: string, filename: string, originalFilename: string }>}
+ */
+export async function getDocumentDownloadPath(documentId, organizationId) {
+  if (!documentId || typeof documentId !== "string" || !documentId.trim()) {
+    const error = new Error("documentId must be a non-empty string");
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanDocId = documentId.trim();
+  if (cleanDocId.includes("/") || cleanDocId.includes("\\") || cleanDocId.includes("..") || cleanDocId.includes("\0") || cleanDocId.includes("%2e")) {
+    const error = new Error("Access Denied: Path traversal detected in documentId");
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
+    const error = new Error("organizationId is required");
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanOrgId = organizationId.trim();
+
+  // 1. Verify ownership in PostgreSQL
+  const docCheck = await query(
+    "SELECT id, organization_id, filename, original_filename FROM documents WHERE id = $1 AND organization_id = $2",
+    [cleanDocId, cleanOrgId]
+  );
+
+  if (docCheck.rows.length === 0) {
+    // Check if document belongs to a foreign organization
+    const foreignCheck = await query(
+      "SELECT id, organization_id FROM documents WHERE id = $1",
+      [cleanDocId]
+    );
+    if (foreignCheck.rows.length > 0) {
+      const error = new Error("Forbidden: document belongs to another organization");
+      error.status = 403;
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const error = new Error(`Document '${cleanDocId}' not found`);
+    error.status = 404;
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const doc = docCheck.rows[0];
+
+  // 2. Derive path inside tenant upload directory
+  const tenantFilePath = getDocumentStoragePath(cleanOrgId, doc.filename);
+  let finalPath = tenantFilePath;
+
+  if (!fs.existsSync(finalPath)) {
+    // Fallback to legacy root uploads for pre-migration demo records
+    const legacyPath = path.resolve(UPLOADS_ROOT, doc.filename);
+    if (fs.existsSync(legacyPath)) {
+      assertPathContained(legacyPath, UPLOADS_ROOT);
+      finalPath = legacyPath;
+    } else {
+      const error = new Error(`Document file '${doc.filename}' not found on storage`);
+      error.status = 404;
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  return {
+    filePath: finalPath,
+    filename: doc.filename,
+    originalFilename: doc.original_filename || doc.filename,
+  };
+}
+
+/**
+ * Resolves the physical file path by filename for the authenticated organization.
+ *
+ * @param {string} filename
+ * @param {string} organizationId
+ * @returns {Promise<{ filePath: string, filename: string, originalFilename: string }>}
+ */
+export async function getDocumentDownloadPathByFilename(filename, organizationId) {
+  if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
+    const error = new Error("organizationId is required");
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanOrgId = organizationId.trim();
+  let safeFilename;
+  try {
+    safeFilename = validateFilename(filename);
+  } catch (valErr) {
+    const error = new Error(valErr.message);
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  // 1. Verify ownership in PostgreSQL
+  const docCheck = await query(
+    "SELECT id, organization_id, filename, original_filename FROM documents WHERE (filename = $1 OR original_filename = $1) AND organization_id = $2 LIMIT 1",
+    [safeFilename, cleanOrgId]
+  );
+
+  if (docCheck.rows.length === 0) {
+    const foreignCheck = await query(
+      "SELECT id, organization_id FROM documents WHERE filename = $1 OR original_filename = $1 LIMIT 1",
+      [safeFilename]
+    );
+    if (foreignCheck.rows.length > 0) {
+      const error = new Error("Forbidden: document belongs to another organization");
+      error.status = 403;
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const error = new Error(`Document file '${safeFilename}' not found for organization`);
+    error.status = 404;
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const doc = docCheck.rows[0];
+  const tenantFilePath = getDocumentStoragePath(cleanOrgId, doc.filename);
+  let finalPath = tenantFilePath;
+
+  if (!fs.existsSync(finalPath)) {
+    const legacyPath = path.resolve(UPLOADS_ROOT, doc.filename);
+    if (fs.existsSync(legacyPath)) {
+      assertPathContained(legacyPath, UPLOADS_ROOT);
+      finalPath = legacyPath;
+    } else {
+      const error = new Error(`Document file '${doc.filename}' not found on storage`);
+      error.status = 404;
+      error.statusCode = 404;
+      throw error;
+    }
+  }
+
+  return {
+    filePath: finalPath,
+    filename: doc.filename,
+    originalFilename: doc.original_filename || doc.filename,
+  };
+}
+
+/**
+ * Deletes a document:
+ * 1. Checks ownership in PostgreSQL.
+ * 2. Unlinks physical file inside tenant upload directory.
+ * 3. Deletes Qdrant vectors scoped to (documentId, organizationId).
+ * 4. Deletes PostgreSQL record.
+ *
+ * @param {string} documentId
+ * @param {string} organizationId
+ * @returns {Promise<boolean>}
+ */
+export async function deleteDocumentById(documentId, organizationId) {
+  if (!documentId || typeof documentId !== "string" || !documentId.trim()) {
+    const error = new Error("documentId must be a non-empty string");
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanDocId = documentId.trim();
+  if (cleanDocId.includes("/") || cleanDocId.includes("\\") || cleanDocId.includes("..") || cleanDocId.includes("\0") || cleanDocId.includes("%2e")) {
+    const error = new Error("Access Denied: Path traversal detected in documentId");
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
+    const error = new Error("organizationId is required");
+    error.status = 400;
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const cleanOrgId = organizationId.trim();
+
+  // 1. Verify ownership in PostgreSQL
+  const docCheck = await query(
+    "SELECT id, organization_id, filename FROM documents WHERE id = $1 AND organization_id = $2",
+    [cleanDocId, cleanOrgId]
+  );
+
+  if (docCheck.rows.length === 0) {
+    const foreignCheck = await query(
+      "SELECT id FROM documents WHERE id = $1",
+      [cleanDocId]
+    );
+    if (foreignCheck.rows.length > 0) {
+      const error = new Error("Forbidden: document belongs to another organization");
+      error.status = 403;
+      error.statusCode = 403;
+      throw error;
+    }
+
+    const error = new Error(`Document '${cleanDocId}' not found`);
+    error.status = 404;
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const doc = docCheck.rows[0];
+
+  // 2. Safely unlink physical file from tenant directory
+  try {
+    const tenantUploadDir = getOrganizationUploadDir(cleanOrgId, { create: false });
+    const tenantFilePath = getDocumentStoragePath(cleanOrgId, doc.filename);
+    safeDeleteFile(tenantFilePath, tenantUploadDir);
+  } catch (fsErr) {
+    console.warn(`[DocumentsService] Warning during physical file deletion: ${fsErr.message}`);
+  }
+
+  // 3. Delete Qdrant vectors strictly scoped to (documentId, organizationId)
+  try {
+    await deleteChunksByDocumentId(cleanDocId, cleanOrgId);
+  } catch (vecErr) {
+    console.warn(`[DocumentsService] Warning during vector deletion: ${vecErr.message}`);
+  }
+
+  // 4. Delete PostgreSQL record
+  await deleteDocumentRecord(cleanDocId, cleanOrgId);
+
+  return true;
 }

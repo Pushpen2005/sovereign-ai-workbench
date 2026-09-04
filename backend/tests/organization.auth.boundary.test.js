@@ -343,7 +343,9 @@ async function runAuthBoundarySuite() {
   }
 }
 
-runAuthBoundarySuite().catch((err) => {
+runAuthBoundarySuite().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error("❌ Phase 1 test failure:", err);
   process.exit(1);
 });

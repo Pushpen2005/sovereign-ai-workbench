@@ -53,19 +53,33 @@ export async function createCollection() {
             console.log(
                 `Collection "${COLLECTION_NAME}" already exists`
             );
-            return;
+        } else {
+            await qdrant.createCollection(COLLECTION_NAME, {
+                vectors: {
+                    size: VECTOR_SIZE,
+                    distance: "Cosine",
+                },
+            });
+
+            console.log(
+                `Collection "${COLLECTION_NAME}" created successfully`
+            );
         }
 
-        await qdrant.createCollection(COLLECTION_NAME, {
-            vectors: {
-                size: VECTOR_SIZE,
-                distance: "Cosine",
-            },
-        });
-
-        console.log(
-            `Collection "${COLLECTION_NAME}" created successfully`
-        );
+        // Ensure payload index on organizationId for fast, tenant-isolated vector filtering
+        try {
+            await qdrant.createPayloadIndex(COLLECTION_NAME, {
+                field_name: "organizationId",
+                field_schema: "keyword",
+                wait: true,
+            });
+            console.log(`Payload index for "organizationId" verified on "${COLLECTION_NAME}"`);
+        } catch (idxErr) {
+            // Index already exists or non-fatal
+            if (!String(idxErr?.message || "").includes("already exists")) {
+                console.warn(`[Qdrant] Payload index warning on organizationId:`, idxErr?.message);
+            }
+        }
     } catch (error) {
         console.error(
             "Failed to create Qdrant collection:",
@@ -96,6 +110,15 @@ export async function upsertChunks(chunks) {
             ) {
                 throw new Error(
                     "Chunk documentId must be a non-empty string"
+                );
+            }
+
+            if (
+                typeof chunk.organizationId !== "string" ||
+                chunk.organizationId.trim().length === 0
+            ) {
+                throw new Error(
+                    "Chunk organizationId must be a non-empty string for tenant-scoped vector storage"
                 );
             }
 
@@ -157,7 +180,7 @@ export async function upsertChunks(chunks) {
                     documentId: chunk.documentId,
                     filename: chunk.filename,
                     documentType: chunk.documentType,
-                    organizationId: chunk.organizationId || null,
+                    organizationId: chunk.organizationId.trim(),
                     page: chunk.page,
                     text: chunk.text,
                     chunkIndex: chunk.chunkIndex,
@@ -189,4 +212,75 @@ export async function upsertChunks(chunks) {
     }
 }
 
-export { generatePointId };
+/**
+ * Safely delete chunks for a document scoped strictly by organizationId.
+ * Prevents cross-tenant deletion even if an attacker supplies a foreign documentId.
+ *
+ * @param {string} documentId
+ * @param {string} organizationId
+ */
+export async function deleteChunksByDocumentId(documentId, organizationId) {
+    if (typeof documentId !== "string" || !documentId.trim()) {
+        throw new Error("documentId is required for tenant-scoped vector deletion");
+    }
+    if (typeof organizationId !== "string" || !organizationId.trim()) {
+        throw new Error("organizationId is required for tenant-scoped vector deletion");
+    }
+
+    try {
+        await qdrant.delete(COLLECTION_NAME, {
+            wait: true,
+            filter: {
+                must: [
+                    {
+                        key: "documentId",
+                        match: {
+                            value: documentId.trim(),
+                        },
+                    },
+                    {
+                        key: "organizationId",
+                        match: {
+                            value: organizationId.trim(),
+                        },
+                    },
+                ],
+            },
+        });
+    } catch (error) {
+        throw new Error(`Qdrant vector deletion failed: ${error.message}`);
+    }
+}
+
+/**
+ * Safely backfill organizationId for pre-indexed demo data points.
+ *
+ * @param {string} documentId
+ * @param {string} organizationId
+ */
+export async function backfillDemoDocumentPoints(documentId, organizationId) {
+    if (!documentId || !organizationId) return;
+
+    try {
+        await qdrant.setPayload(COLLECTION_NAME, {
+            payload: {
+                organizationId: organizationId.trim(),
+            },
+            filter: {
+                must: [
+                    {
+                        key: "documentId",
+                        match: {
+                            value: documentId.trim(),
+                        },
+                    },
+                ],
+            },
+            wait: true,
+        });
+    } catch (err) {
+        console.warn(`[Qdrant] Warning during demo points backfill for ${documentId}:`, err.message);
+    }
+}
+
+export { generatePointId, qdrant as qdrantClient };

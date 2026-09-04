@@ -140,6 +140,17 @@ export async function searchSop(
         );
     }
 
+    // MANDATORY TENANT BOUNDARY: Fail closed if organizationId is missing or invalid
+    if (
+        !options?.organizationId ||
+        typeof options.organizationId !== "string" ||
+        options.organizationId.trim().length === 0
+    ) {
+        throw new Error(
+            "organizationId is required for tenant-scoped SOP retrieval"
+        );
+    }
+
     const limit =
         options.limit ?? DEFAULT_LIMIT;
 
@@ -154,8 +165,8 @@ export async function searchSop(
     // 2. Search Qdrant
     //
     // IMPORTANT:
-    // documentType filter is applied at the Qdrant level.
-    // Mixed-type documents are NEVER retrieved and then filtered
+    // documentType filter and organizationId filter are applied at the Qdrant level.
+    // Mixed-type or cross-tenant documents are NEVER retrieved and then filtered
     // in JavaScript — the filter happens inside Qdrant.
     const chunks = await searchSimilarChunks(
         queryVector,
@@ -163,6 +174,7 @@ export async function searchSop(
         undefined,
         {
             documentType: SOP_DOCUMENT_TYPE,
+            organizationId: options.organizationId.trim(),
         }
     );
 
@@ -192,5 +204,6 @@ export async function searchSop(
                 chunk.chunkIndex ?? null,
             score: chunk.score,
             text: chunk.text,
+            organizationId: chunk.organizationId ?? null,
         }));
 }

@@ -416,6 +416,7 @@ export function createInspectionNodes(customAdapters = {}) {
             }
 
             const sopOptions = {
+                organizationId: state.organizationId,
                 ...state.metadata?.riskOptions,
                 ...state.metadata?.sopOptions,
             };
@@ -528,6 +529,7 @@ export function createInspectionNodes(customAdapters = {}) {
             const rawCitations = [];
 
             const riskOptions = {
+                organizationId: state.organizationId,
                 ...state.metadata?.riskOptions,
             };
             if (!riskOptions.searchSop && Array.isArray(state.sopEvidence) && state.sopEvidence.length > 0) {

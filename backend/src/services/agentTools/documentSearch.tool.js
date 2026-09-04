@@ -25,9 +25,14 @@ export class DocumentSearchError extends Error {
  * @param {string} [args.documentId] - Optional filter to limit search to a single document
  * @returns {Promise<{ query: string, totalResults: number, results: Array<object> }>}
  */
-export async function executeDocumentSearch(args) {
+export async function executeDocumentSearch(args, context = {}) {
     if (!args || typeof args !== "object") {
         throw new DocumentSearchError("Arguments must be an object with a 'query' string");
+    }
+
+    const organizationId = context?.organizationId;
+    if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
+        throw new DocumentSearchError("Execution context missing authenticated organizationId for document search");
     }
 
     const { query, documentId, limit: rawLimit } = args;
@@ -47,7 +52,9 @@ export async function executeDocumentSearch(args) {
 
     let chunks;
     try {
-        chunks = await searchSimilarChunks(queryVector, limit, documentId);
+        chunks = await searchSimilarChunks(queryVector, limit, documentId, {
+            organizationId: organizationId.trim(),
+        });
     } catch (searchErr) {
         throw new DocumentSearchError(`Qdrant vector search failed: ${searchErr.message}`);
     }

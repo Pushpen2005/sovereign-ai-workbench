@@ -2,6 +2,9 @@ import {
   getAllDocuments,
   getDocumentById,
   processAndIngestDocument,
+  getDocumentDownloadPath,
+  getDocumentDownloadPathByFilename,
+  deleteDocumentById,
 } from "../services/documents.service.js";
 import { resolveAuthenticatedOrganization } from "../config/organization.js";
 
@@ -84,3 +87,43 @@ export async function uploadDocument(req, res, next) {
     next(error);
   }
 }
+
+export async function downloadDocument(req, res, next) {
+  try {
+    const { id } = req.params;
+    const organizationId = resolveAuthenticatedOrganization(req);
+
+    const { filePath, originalFilename } = await getDocumentDownloadPath(id, organizationId);
+    return res.download(filePath, originalFilename);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function downloadDocumentByFilename(req, res, next) {
+  try {
+    const { filename } = req.params;
+    const organizationId = resolveAuthenticatedOrganization(req);
+
+    const { filePath, originalFilename } = await getDocumentDownloadPathByFilename(filename, organizationId);
+    return res.download(filePath, originalFilename);
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteDocument(req, res, next) {
+  try {
+    const { id } = req.params;
+    const organizationId = resolveAuthenticatedOrganization(req);
+
+    await deleteDocumentById(id, organizationId);
+    return res.status(200).json({
+      success: true,
+      message: `Document '${id}' deleted successfully`,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+

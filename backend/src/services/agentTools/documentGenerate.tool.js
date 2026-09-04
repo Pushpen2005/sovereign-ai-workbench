@@ -1,14 +1,9 @@
-/**
- * PR #26 — Document Generate Agent Tool
- *
- * Programmatically compiles an official Approval Note (.docx)
- * using the existing python-docx report generator.
- */
-
 import path from "path";
 import fs from "fs";
 import { randomUUID } from "crypto";
 import { generateApprovalNote } from "../../../../ai-service/reports/approval-note.service.js";
+import { getReportStoragePath, getOrganizationGeneratedDir } from "../../utils/storage.js";
+import { createReport } from "../../repositories/reports.repository.js";
 
 export class DocumentGenerateError extends Error {
     constructor(message) {
@@ -23,13 +18,20 @@ export class DocumentGenerateError extends Error {
  * @param {object} args
  * @param {string} [args.title="Approval Note"] - Subject/title of the deliverable
  * @param {Array<{heading: string, content: string}>} args.sections - Structured report sections
- * @returns {Promise<{ filename: string, downloadUrl: string, title: string, sectionsCount: number }>}
+ * @param {object} [context={}] - Execution context containing authoritative organizationId
+ * @returns {Promise<{ filename: string, downloadUrl: string, title: string, sectionsCount: number, status: string, reportId?: string }>}
  */
-export async function executeDocumentGenerate(args) {
+export async function executeDocumentGenerate(args, context = {}) {
     if (!args || typeof args !== "object") {
         throw new DocumentGenerateError("Arguments must be an object containing 'sections'");
     }
 
+    const organizationId = context?.organizationId;
+    if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
+        throw new DocumentGenerateError("Execution context missing authenticated organizationId for document generate");
+    }
+
+    // Explicitly ignore any organizationId in args to prevent LLM spoofing
     const { title = "Approval Note", sections } = args;
 
     if (!Array.isArray(sections) || sections.length === 0) {
@@ -96,17 +98,30 @@ export async function executeDocumentGenerate(args) {
         ],
     };
 
-    // Ensure output directory exists
-    const generatedDir = path.resolve(process.cwd(), "generated");
-    if (!fs.existsSync(generatedDir)) {
-        fs.mkdirSync(generatedDir, { recursive: true });
-    }
+    // Ensure output directory exists inside tenant-scoped generated storage
+    const cleanOrgId = organizationId.trim();
+    getOrganizationGeneratedDir(cleanOrgId, { create: true });
 
     const filename = `Approval_Note_Agent_${randomUUID().slice(0, 8)}.docx`;
-    const outputPath = path.join(generatedDir, filename);
+    const outputPath = getReportStoragePath(cleanOrgId, filename);
 
     try {
         await generateApprovalNote(approvalNoteData, { outputPath });
+
+        // Persist report record in PostgreSQL bound strictly to authenticated organization
+        let reportRow = null;
+        try {
+            reportRow = await createReport({
+                organizationId: cleanOrgId,
+                title: approvalNoteData.subject,
+                filename,
+                riskLevel,
+                status: "GENERATED",
+                task: "Agent document_generate",
+            });
+        } catch (dbErr) {
+            console.warn(`[documentGenerate.tool] Warning: Failed to persist report record in DB: ${dbErr.message}`);
+        }
 
         return {
             filename,
@@ -114,8 +129,10 @@ export async function executeDocumentGenerate(args) {
             title: approvalNoteData.subject,
             sectionsCount: sections.length,
             status: "Generated",
+            reportId: reportRow?.id || null,
         };
     } catch (docxErr) {
         throw new DocumentGenerateError(`Failed to generate DOCX deliverable: ${docxErr.message}`);
     }
 }
+

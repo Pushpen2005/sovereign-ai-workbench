@@ -269,7 +269,9 @@ async function runPersistenceTests() {
     }
 }
 
-runPersistenceTests().catch((err) => {
+runPersistenceTests().then(() => {
+    process.exit(0);
+}).catch((err) => {
     console.error("Persistence test execution failure:", err);
     process.exit(1);
 });

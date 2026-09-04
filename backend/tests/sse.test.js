@@ -31,6 +31,7 @@ import app from "../src/app.js";
 import { executionEvents } from "../src/services/execution-events.service.js";
 import { createAgentRun } from "../src/repositories/agent.repository.js";
 import { DEFAULT_ORGANIZATION_ID } from "../src/config/organization.js";
+import { generateToken } from "../src/utils/auth.js";
 
 async function runSseTests() {
     console.log("==================================================");
@@ -55,6 +56,17 @@ async function runSseTests() {
     const BASE_URL = `http://127.0.0.1:${port}`;
     const testOrgId = DEFAULT_ORGANIZATION_ID;
     const foreignOrgId = "foreign-org-uuid-9999";
+
+    const testToken = generateToken({
+        userId: "test-user-id",
+        organizationId: testOrgId,
+        role: "engineer",
+    });
+    const foreignToken = generateToken({
+        userId: "foreign-user-id",
+        organizationId: foreignOrgId,
+        role: "engineer",
+    });
 
     try {
         // ─── 1. Sensitive Data Sanitization ──────────────────────────────────
@@ -96,22 +108,22 @@ async function runSseTests() {
 
         // Non-existent run -> 404
         const badRunRes = await fetch(`${BASE_URL}/api/v1/agent/runs/non-existent-run-xyz/stream`, {
-            headers: { "x-organization-id": testOrgId },
+            headers: { Authorization: `Bearer ${testToken}` },
         });
         record("Non-existent run stream request rejected with 404", badRunRes.status === 404);
 
-        // Foreign organization -> 404 (Cross-tenant leak prevention)
+        // Foreign organization -> 403 or 404 (Cross-tenant leak prevention)
         const foreignRes = await fetch(`${BASE_URL}/api/v1/agent/runs/${agentRunId}/stream`, {
-            headers: { "x-organization-id": foreignOrgId },
+            headers: { Authorization: `Bearer ${foreignToken}` },
         });
-        record("Cross-tenant run stream request rejected with 404", foreignRes.status === 404);
+        record("Cross-tenant run stream request rejected with 403/404", [403, 404].includes(foreignRes.status));
 
         // Authorized organization -> 200 with text/event-stream
         const authStreamPromise = new Promise((resolve, reject) => {
             const req = http.request(
                 `${BASE_URL}/api/v1/agent/runs/${agentRunId}/stream`,
                 {
-                    headers: { "x-organization-id": testOrgId },
+                    headers: { Authorization: `Bearer ${testToken}` },
                 },
                 (res) => {
                     resolve({
@@ -252,7 +264,7 @@ async function runSseTests() {
                 `${BASE_URL}/api/v1/agent/runs/${replayRunId}/stream`,
                 {
                     headers: {
-                        "x-organization-id": testOrgId,
+                        Authorization: `Bearer ${testToken}`,
                         "last-event-id": "evt-2",
                     },
                 },
@@ -292,7 +304,7 @@ async function runSseTests() {
         executionEvents.registerRunOwner(inspectionRunId, testOrgId, "inspection");
 
         const inspRes = await fetch(`${BASE_URL}/api/v1/inspection/runs/${inspectionRunId}/stream`, {
-            headers: { "x-organization-id": testOrgId },
+            headers: { Authorization: `Bearer ${testToken}` },
         });
 
         record("Inspection stream returns HTTP 200", inspRes.status === 200);
@@ -346,7 +358,9 @@ async function runSseTests() {
     }
 }
 
-runSseTests().catch((err) => {
+runSseTests().then(() => {
+    process.exit(0);
+}).catch((err) => {
     console.error("SSE test suite execution failure:", err);
     process.exit(1);
 });

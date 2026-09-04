@@ -33,7 +33,10 @@ export async function assessFindingRisk(finding, options = {}) {
 
     // 3. Retrieve SOP evidence
     const searchSopFn = options.searchSop ?? searchSop;
-    const sopOptions = options.sopOptions ?? {};
+    const sopOptions = {
+        organizationId: options.organizationId || options.sopOptions?.organizationId,
+        ...(options.sopOptions ?? {}),
+    };
 
     const retrievedChunks = await searchSopFn(sopQuery, sopOptions);
 
@@ -42,10 +45,11 @@ export async function assessFindingRisk(finding, options = {}) {
         return {
             riskAssessment: {
                 level: null,
-                reason: "Insufficient evidence to determine risk level.",
+                reason: "Insufficient SOP evidence is available to determine risk level.",
             },
             recommendation: "Insufficient SOP evidence is available to provide a validated recommendation.",
             citations: [],
+            grounded: false,
         };
     }
 
@@ -60,9 +64,11 @@ export async function assessFindingRisk(finding, options = {}) {
     const parsedResponse = parseRiskLlmResponse(rawResponse);
 
     // 8. Enforce citation integrity (reject hallucinated citations, keep valid ones)
+    const orgId = options.organizationId || options.sopOptions?.organizationId;
     const validatedCitations = filterValidCitations(
         parsedResponse.citations,
-        retrievedChunks
+        retrievedChunks,
+        orgId
     );
 
     // 9. Return trusted structured result
@@ -70,6 +76,7 @@ export async function assessFindingRisk(finding, options = {}) {
         riskAssessment: parsedResponse.riskAssessment,
         recommendation: parsedResponse.recommendation,
         citations: validatedCitations,
+        grounded: true,
     };
 }
 

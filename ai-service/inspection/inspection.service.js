@@ -160,6 +160,12 @@ export async function analyzeInspectionReport(input, options = {}) {
     const generateAnswerFn = options.generateAnswer ?? generateAnswer;
 
     let chunks;
+    const resolvedOrgId = (options.organizationId || input.organizationId)?.trim?.() || options.organizationId || input.organizationId;
+    const searchFilterOptions = {
+        ...options,
+        organizationId: resolvedOrgId,
+    };
+
     if (options.searchSimilarChunks || options.generateEmbedding) {
         // Single retrieval call when dependencies are mocked (e.g. in unit tests)
         const retrievalQuery = resolveInspectionRetrievalQuery(task, options, input);
@@ -167,7 +173,8 @@ export async function analyzeInspectionReport(input, options = {}) {
         chunks = await searchSimilarChunksFn(
             queryEmbedding,
             candidateLimit,
-            documentId
+            documentId,
+            searchFilterOptions
         );
     } else {
         // Multi-aspect domain retrieval in production across inspection & audit dimensions
@@ -179,7 +186,8 @@ export async function analyzeInspectionReport(input, options = {}) {
             const candidates = await searchSimilarChunksFn(
                 queryEmbedding,
                 candidateLimit,
-                documentId
+                documentId,
+                searchFilterOptions
             );
 
             if (Array.isArray(candidates)) {
@@ -257,6 +265,17 @@ export async function ingestInspectionReport(filePath, options = {}) {
         throw new Error(`Inspection file does not exist: ${filePath}`);
     }
 
+    // MANDATORY TENANT BOUNDARY: Fail closed if organizationId is missing or invalid
+    if (
+        !options?.organizationId ||
+        typeof options.organizationId !== "string" ||
+        options.organizationId.trim().length === 0
+    ) {
+        throw new Error(
+            "organizationId is required for tenant-scoped document ingestion"
+        );
+    }
+
     const documentId =
         typeof options.documentId === "string" && options.documentId.trim().length > 0
             ? options.documentId.trim()
@@ -283,7 +302,7 @@ export async function ingestInspectionReport(filePath, options = {}) {
         ...chunk,
         filename,
         documentType: options.documentType || INSPECTION_DOCUMENT_TYPE,
-        organizationId: options.organizationId || null,
+        organizationId: options.organizationId.trim(),
     }));
 
     const chunksWithVectors = [];

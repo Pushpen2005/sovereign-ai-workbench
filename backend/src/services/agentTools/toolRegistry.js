@@ -163,7 +163,7 @@ export function getToolDefinitionsPrompt() {
  * @param {object} args
  * @returns {Promise<{ status: "success" | "error", result?: any, error?: string, durationMs: number }>}
  */
-export async function executeRegisteredTool(toolName, args = {}) {
+export async function executeRegisteredTool(toolName, args = {}, context = {}) {
     const startTime = Date.now();
 
     if (typeof toolName !== "string" || !toolName.trim()) {
@@ -186,7 +186,7 @@ export async function executeRegisteredTool(toolName, args = {}) {
     }
 
     try {
-        const result = await tool.execute(args);
+        const result = await tool.execute(args, context);
         return {
             status: "success",
             result,
