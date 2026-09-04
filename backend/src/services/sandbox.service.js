@@ -76,6 +76,7 @@ export async function executeInSandbox({
         "--rm",
         "-i",
         "--name", containerName,
+        "--user", "1000:1000",
         "--network", "none",
         "--cpus", "1",
         "--memory", "256m",

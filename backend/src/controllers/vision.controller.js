@@ -9,7 +9,7 @@
  */
 
 import { generateVisionAnswer, LLMError } from "../../../ai-service/llm/llm.service.js";
-import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.js";
+import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/router/modelRouter.js";
 import { validateImageMagicBytes } from "../middleware/imageUpload.middleware.js";
 
 const DEFAULT_VISION_PROMPT =
@@ -89,11 +89,11 @@ export function extractStructuredVisionAnalysis(text) {
  */
 export async function analyzeImage(req, res, next) {
     try {
-        // 1. Validate file presence
-        if (!req.file || !req.file.buffer) {
+        // 1. Validate file presence and non-empty buffer
+        if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
             return res.status(400).json({
                 success: false,
-                message: "Image file is required (form field: 'image')",
+                message: "Image file is required and cannot be empty (form field: 'image')",
             });
         }
 
@@ -106,14 +106,24 @@ export async function analyzeImage(req, res, next) {
             });
         }
 
+        // 3. Model allowlist validation
+        if (req.body?.model) {
+            if (!isModelAllowed(req.body.model)) {
+                return res.status(400).json({
+                    success: false,
+                    message: `Model '${req.body.model}' is not in the sovereign model allowlist.`,
+                });
+            }
+        }
+
         const prompt = (req.body?.prompt && typeof req.body.prompt === "string" && req.body.prompt.trim())
             ? req.body.prompt.trim()
             : DEFAULT_VISION_PROMPT;
 
-        // 3. Route through Model Router
+        // 4. Route through Model Router
         let routing;
         try {
-            routing = await routeTask(prompt, { hasImage: true });
+            routing = await routeTask(prompt, { hasImage: true, model: req.body?.model });
         } catch (routerErr) {
             if (routerErr instanceof RouterError) {
                 return res.status(503).json({
@@ -125,7 +135,15 @@ export async function analyzeImage(req, res, next) {
             throw routerErr;
         }
 
-        // 4. Prepare base64 representation
+        console.log(`[VISION-AUDIT] ${JSON.stringify({
+            event: "vision.started",
+            userId: req.user?.id || null,
+            organizationId: req.user?.organizationId || null,
+            model: routing.selectedModel,
+            sizeBytes: req.file.size,
+        })}`);
+
+        // 5. Prepare base64 representation
         const base64Image = req.file.buffer.toString("base64");
 
         const systemVisionPrompt = `You are an expert industrial visual inspection AI.
@@ -144,7 +162,7 @@ ${prompt}`;
 
         const startTime = Date.now();
 
-        // 5. Invoke local Ollama vision endpoint
+        // 6. Invoke local Ollama vision endpoint
         let rawAnswer;
         try {
             rawAnswer = await generateVisionAnswer(
@@ -153,6 +171,14 @@ ${prompt}`;
                 routing.selectedModel
             );
         } catch (err) {
+            console.warn(`[VISION-AUDIT] ${JSON.stringify({
+                event: "vision.failed",
+                userId: req.user?.id || null,
+                organizationId: req.user?.organizationId || null,
+                model: routing.selectedModel,
+                error: err.message,
+            })}`);
+
             if (err instanceof LLMError) {
                 if (err.message.includes("Model unavailable") || err.message.includes("does not support multimodal")) {
                     return res.status(503).json({
@@ -172,12 +198,21 @@ ${prompt}`;
         const durationMs = Date.now() - startTime;
         const structured = extractStructuredVisionAnalysis(rawAnswer);
 
+        console.log(`[VISION-AUDIT] ${JSON.stringify({
+            event: "vision.completed",
+            userId: req.user?.id || null,
+            organizationId: req.user?.organizationId || null,
+            model: routing.selectedModel,
+            durationMs,
+        })}`);
+
         return res.status(200).json({
             success: true,
             taskType: routing.taskType,
             model: routing.selectedModel,
             analysis: rawAnswer,
             structured,
+            governance: "Visual AI analysis is advisory decision support. It does not replace certified engineer inspection or statutory sign-off.",
             processing: {
                 local: true,
                 provider: "ollama",

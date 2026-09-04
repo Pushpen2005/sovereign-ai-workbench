@@ -457,7 +457,9 @@ async function runGoldenPathTests() {
   }
 }
 
-runGoldenPathTests().catch((err) => {
+runGoldenPathTests().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error("Golden path test suite failed:", err);
   process.exit(1);
 });

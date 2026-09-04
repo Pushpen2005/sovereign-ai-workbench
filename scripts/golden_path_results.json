@@ -1,0 +1,110 @@
+{
+  "environment": {},
+  "auth": {
+    "loginSuccess": true,
+    "jwtPresent": true,
+    "user": "Demo Engineer",
+    "email": "engineer@example.com",
+    "orgId": "0bd5dba2-05e1-4f5c-9047-25843d338622",
+    "corsHeader": "http://localhost:5174",
+    "latencyMs": 540
+  },
+  "documents": {
+    "uploadSuccess": true,
+    "documentId": "70c389e9-3fb0-4e5e-90c1-59b510808104",
+    "filename": "70c389e9-3fb0-4e5e-90c1-59b510808104.pdf",
+    "chunksStored": 2,
+    "visibleInList": false,
+    "latencyMs": 660
+  },
+  "rag": {
+    "status": 200,
+    "answer": "The bearing temperature recorded for Pump-03 was 92 degrees C.",
+    "sourcesCount": 2,
+    "mentionsCorrectTemp": true,
+    "latencyMs": 8159
+  },
+  "noAnswer": {
+    "status": 200,
+    "response": "The provided context does not contain information about the chemical composition of Pump-03 lubricant.",
+    "safeRefusal": true,
+    "latencyMs": 2228
+  },
+  "inspection": {
+    "status": 200,
+    "reportId": "6e9c2aee-6763-4c2e-8a7c-f8672e2c7d8f",
+    "findingsCount": 3,
+    "riskLevel": "HIGH",
+    "sopLimitFound": true,
+    "recommendationSnippet": "",
+    "latencyMs": 143185
+  },
+  "approvalNote": {
+    "filename": "Approval_Note_70c389e9-3fb0-4e5e-90c1-59b510808104.docx",
+    "downloadStatus": 200,
+    "sizeBytes": 39849,
+    "validZipHeader": true,
+    "latencyMs": 0
+  },
+  "vision": {
+    "status": 200,
+    "taskType": "VISION",
+    "model": "moondream",
+    "execution": "LOCAL",
+    "analysisSnippet": "The reading on this pressure gauge is 0.",
+    "structured": {
+      "summary": "The reading on this pressure gauge is 0.",
+      "observations": [
+        "Visual components identified in image."
+      ],
+      "abnormalities": [
+        "No severe abnormalities visually detected."
+      ],
+      "limitations": [
+        "Analysis limited to visible 2D surface features."
+      ]
+    },
+    "latencyMs": 8515
+  },
+  "coding": {
+    "status": 200,
+    "stdout": "Pump Efficiency: 75.0%",
+    "exitCode": 0,
+    "sandbox": {
+      "isolated": true,
+      "network": "none",
+      "timeoutSeconds": 5,
+      "memoryLimitMb": 256,
+      "cpuLimit": 1,
+      "pidLimit": 64,
+      "readOnlyRoot": true,
+      "image": "python:3.11-alpine"
+    },
+    "latencyMs": 2137
+  },
+  "tenantIsolation": {
+    "forgedTokenStatus": 401,
+    "preventedLeakage": true
+  },
+  "sovereignty": {
+    "status": "sovereign",
+    "externalApisCount": 0,
+    "llmLocal": true,
+    "visionLocal": true,
+    "embeddingsLocal": true,
+    "ocrLocal": true,
+    "vectorDbLocal": true,
+    "relationalDbLocal": true,
+    "networkFirewallNote": "Code-level sovereignty verified. No application code calls external AI APIs. Network-layer isolation requires additional iptables/firewall rules for true air-gap."
+  },
+  "timings": {
+    "login": 540,
+    "upload": 660,
+    "rag": 8159,
+    "agent": 143185,
+    "docx": 0,
+    "vision": 8515,
+    "coding": 2137
+  },
+  "errors": []
+}
