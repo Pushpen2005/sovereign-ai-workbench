@@ -9,7 +9,7 @@
  */
 
 import { runAgentLoop, AgentRuntimeError } from "../services/agent.service.js";
-import { resolveOrganizationId } from "../config/organization.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import {
     listAgentRuns,
     getAgentRunByRunId,
@@ -31,8 +31,8 @@ export async function runAgent(req, res, next) {
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
-        const userId = req.user?.id || req.body?.userId || null;
+        const organizationId = resolveAuthenticatedOrganization(req);
+        const userId = req.user?.id || req.user?.userId || null;
 
         const result = await runAgentLoop({
             goal: goal.trim(),
@@ -59,7 +59,7 @@ export async function runAgent(req, res, next) {
  */
 export async function getAgentRuns(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const limit = parseInt(req.query.limit || "50", 10);
         const offset = parseInt(req.query.offset || "0", 10);
         const status = req.query.status || null;
@@ -80,7 +80,7 @@ export async function getAgentRuns(req, res, next) {
  */
 export async function getAgentRun(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
         const run = await getAgentRunByRunId(runId, organizationId);
@@ -106,7 +106,7 @@ export async function getAgentRun(req, res, next) {
  */
 export async function getAgentRunSteps(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
         // Verify organization ownership before exposing steps
@@ -135,7 +135,7 @@ export async function getAgentRunSteps(req, res, next) {
  */
 export async function streamAgentRun(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
         // Verify organization authorization

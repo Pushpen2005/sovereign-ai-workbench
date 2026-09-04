@@ -268,6 +268,7 @@ async function runSecuritySuite() {
 
     const fakePdfRes = await fetch(`${baseUrl}/api/v1/inspection/upload`, {
       method: "POST",
+      headers: { Authorization: `Bearer ${tokenA}` },
       body: fakePdfFormData,
     });
     assert.equal(fakePdfRes.status, 400, "Disguised PDF must return HTTP 400");

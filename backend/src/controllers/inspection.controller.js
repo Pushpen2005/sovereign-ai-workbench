@@ -9,7 +9,7 @@ import {
     runInspectionAnalysis,
 } from "../services/inspection.service.js";
 import { processAndIngestDocument } from "../services/documents.service.js";
-import { resolveOrganizationId } from "../config/organization.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import { createReportRecord } from "../services/reports.service.js";
 import { createDocument } from "../repositories/documents.repository.js";
 import { query } from "../config/db.js";
@@ -56,7 +56,7 @@ export async function ingestInspection(req, res, next) {
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         options.organizationId = organizationId;
 
         const result = await processAndIngestDocument(target, options);
@@ -86,7 +86,7 @@ export async function analyzeInspection(req, res, next) {
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const docCheck = await query(
             "SELECT id, organization_id FROM documents WHERE id = $1",
             [documentId.trim()]
@@ -169,6 +169,7 @@ export async function assessRisk(req, res, next) {
  */
 export async function generateApprovalNoteDocx(req, res, next) {
     try {
+        const organizationId = resolveAuthenticatedOrganization(req);
         const data = req.body;
 
         if (!data || typeof data !== "object") {
@@ -179,6 +180,18 @@ export async function generateApprovalNoteDocx(req, res, next) {
         }
 
         const result = await runApprovalNoteGeneration(data);
+
+        // Bind generated report to authenticated organization in reports repository
+        try {
+            await createReportRecord({
+                organizationId,
+                title: data.subject || "Approval Note",
+                filename: result.filename,
+                status: "GENERATED",
+            });
+        } catch (repErr) {
+            console.warn("[InspectionController] Warning: Could not persist report record:", repErr.message);
+        }
 
         return res.status(200).json({
             success: true,
@@ -214,7 +227,7 @@ export async function downloadApprovalNote(req, res, next) {
         }
 
         // Enforce tenant authorization if report record exists in database
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const reportCheck = await query(
             "SELECT id, organization_id FROM reports WHERE filename = $1",
             [safeFilename]
@@ -273,7 +286,7 @@ export async function runWorkflow(req, res, next) {
             });
         }
 
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         if (!options.ingestOptions) {
             options.ingestOptions = {};
         }
@@ -373,7 +386,7 @@ export async function runWorkflow(req, res, next) {
  */
 export async function streamInspectionRun(req, res, next) {
     try {
-        const organizationId = resolveOrganizationId(req);
+        const organizationId = resolveAuthenticatedOrganization(req);
         const { runId } = req.params;
 
         // Verify organization authorization
