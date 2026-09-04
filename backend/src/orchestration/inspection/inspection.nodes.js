@@ -122,6 +122,28 @@ export function validateRiskStructure(riskAssessment, recommendation) {
 }
 
 /**
+ * Validates citations output structure.
+ *
+ * @param {Array<object>} citations
+ * @returns {{ isValid: boolean, error?: string }}
+ */
+export function validateCitationsStructure(citations) {
+    if (!Array.isArray(citations)) {
+        return { isValid: false, error: "Citations must be an array" };
+    }
+    for (let i = 0; i < citations.length; i++) {
+        const c = citations[i];
+        if (!c || typeof c !== "object" || Array.isArray(c)) {
+            return { isValid: false, error: `citations[${i}] must be a JSON object` };
+        }
+        if (typeof c.documentId !== "string" || !c.documentId.trim()) {
+            return { isValid: false, error: `citations[${i}].documentId must be a non-empty string` };
+        }
+    }
+    return { isValid: true };
+}
+
+/**
  * Routing functions for LangGraph conditional edges
  */
 export function routeFindingsValidation(state) {
@@ -133,8 +155,8 @@ export function routeFindingsValidation(state) {
         return "retrieve_sop";
     }
 
-    const attempts = state.extractionAttempts || 1;
-    const maxAttempts = state.maxExtractionAttempts || 2;
+    const attempts = Number.isInteger(state.extractionAttempts) ? state.extractionAttempts : 1;
+    const maxAttempts = Number.isInteger(state.maxExtractionAttempts) ? state.maxExtractionAttempts : 2;
 
     if (attempts < maxAttempts) {
         return "retry_extraction";
@@ -162,6 +184,18 @@ export function routeRiskValidation(state) {
 
     if (state.riskValidation?.isValid === true) {
         return "validate_citations";
+    }
+
+    return "safe_failure";
+}
+
+export function routeCitationsValidation(state) {
+    if (state.status === "failed") {
+        return "safe_failure";
+    }
+
+    if (state.citationValidation?.isValid === true) {
+        return "generate_report";
     }
 
     return "safe_failure";
@@ -633,7 +667,11 @@ export function createInspectionNodes(customAdapters = {}) {
         const executionOrder = ["validate_citations"];
         try {
             if (state.status === "failed") {
-                return { currentNode: "validate_citations", executionOrder };
+                return {
+                    citationValidation: { isValid: false, status: "INVALID", error: state.errors?.[0]?.message || "Prior failure" },
+                    currentNode: "validate_citations",
+                    executionOrder,
+                };
             }
 
             const rawCitations = Array.isArray(state.citations) ? state.citations : [];
@@ -650,13 +688,27 @@ export function createInspectionNodes(customAdapters = {}) {
                 return true;
             });
 
+            const check = validateCitationsStructure(uniqueCitations);
+            if (!check.isValid) {
+                return {
+                    citations: uniqueCitations,
+                    citationValidation: { isValid: false, status: "INVALID", error: check.error },
+                    failureReason: check.error,
+                    currentNode: "validate_citations",
+                    executionOrder,
+                };
+            }
+
             return {
                 citations: uniqueCitations,
+                citationValidation: { isValid: true, status: "VALID" },
                 currentNode: "validate_citations",
                 executionOrder,
             };
         } catch (err) {
             return {
+                citationValidation: { isValid: false, status: "INVALID", error: err.message },
+                failureReason: err.message,
                 currentNode: "validate_citations",
                 executionOrder,
                 status: "failed",

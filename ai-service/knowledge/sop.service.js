@@ -82,6 +82,7 @@ export async function ingestSop(filePath, options = {}) {
         ...chunk,
         filename,
         documentType: SOP_DOCUMENT_TYPE,
+        organizationId: options.organizationId || null,
     }));
 
     // --- Embed and attach vector to each chunk ---

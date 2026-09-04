@@ -215,17 +215,15 @@ export async function downloadApprovalNote(req, res, next) {
 
         // Enforce tenant authorization if report record exists in database
         const organizationId = resolveOrganizationId(req);
-        if (req.user) {
-            const reportCheck = await query(
-                "SELECT id, organization_id FROM reports WHERE filename = $1",
-                [safeFilename]
-            );
-            if (reportCheck.rows.length > 0 && reportCheck.rows[0].organization_id !== organizationId) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Forbidden: report file belongs to another organization",
-                });
-            }
+        const reportCheck = await query(
+            "SELECT id, organization_id FROM reports WHERE filename = $1",
+            [safeFilename]
+        );
+        if (reportCheck.rows.length > 0 && reportCheck.rows[0].organization_id !== organizationId) {
+            return res.status(403).json({
+                success: false,
+                message: "Forbidden: report file belongs to another organization",
+            });
         }
 
         res.setHeader(

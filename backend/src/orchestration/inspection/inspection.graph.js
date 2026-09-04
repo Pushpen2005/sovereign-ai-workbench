@@ -44,6 +44,7 @@ import {
     routeFindingsValidation,
     routeSopEvidence,
     routeRiskValidation,
+    routeCitationsValidation,
 } from "./inspection.nodes.js";
 
 /**
@@ -107,7 +108,10 @@ export function createInspectionGraph(customNodes = null, compileOptions = {}) {
         })
 
         // 9. Citation validation and deliverable generation
-        .addEdge("validate_citations", "generate_report")
+        .addConditionalEdges("validate_citations", routeCitationsValidation, {
+            generate_report: "generate_report",
+            safe_failure: "safe_failure",
+        })
 
         // 10. Terminal edges to END
         .addEdge("generate_report", END)

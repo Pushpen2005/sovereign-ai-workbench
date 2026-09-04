@@ -197,6 +197,11 @@ export const InspectionAgentState = Annotation.Root({
         default: () => null,
     }),
 
+    citationValidation: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
     failureReason: Annotation({
         reducer: replaceReducer,
         default: () => null,

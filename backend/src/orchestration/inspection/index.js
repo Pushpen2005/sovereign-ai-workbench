@@ -38,9 +38,11 @@ export {
     routeFindingsValidation,
     routeSopEvidence,
     routeRiskValidation,
+    routeCitationsValidation,
     validateFindingStructure,
     validateFindingsArray,
     validateRiskStructure,
+    validateCitationsStructure,
 } from "./inspection.nodes.js";
 export {
     createInspectionGraph,

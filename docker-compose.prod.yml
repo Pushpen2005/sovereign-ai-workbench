@@ -1,10 +1,20 @@
+# SovereignAI Production Hardened Docker Compose Configuration
+#
+# Production Security Invariants:
+# 1. Zero external host port exposure for data & AI stores (PostgreSQL, Qdrant, Ollama, ai-service).
+# 2. Only Frontend (port 80) and Backend API (port 9000) are reachable from host/network ingress.
+# 3. All internal services communicate strictly over the private bridge network 'sovereign_net'.
+# 4. Mandatory health checks and restart policies enabled.
+# 5. Log rotation enforced across all containers (max-size 10m, max-file 3).
+
 services:
   postgres:
     image: postgres:16-alpine
     container_name: sovereign-ai-postgres
-    restart: unless-stopped
-    ports:
-      - "5433:5432"
+    restart: always
+    # Production Hardening: NO host port exposure (Internal to sovereign_net only)
+    expose:
+      - "5432"
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-workbench_db}
       POSTGRES_USER: ${POSTGRES_USER:-workbench}
@@ -16,16 +26,22 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sovereign_net
 
   qdrant:
     image: qdrant/qdrant:latest
     container_name: sovereign-ai-qdrant
-    restart: unless-stopped
-    ports:
-      - "6333:6333"
-      - "6334:6334"
+    restart: always
+    # Production Hardening: NO host port exposure (Internal to sovereign_net only)
+    expose:
+      - "6333"
+      - "6334"
     volumes:
       - qdrant_storage:/qdrant/storage
     healthcheck:
@@ -33,15 +49,21 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sovereign_net
 
   ollama:
     image: ollama/ollama:latest
     container_name: sovereign-ai-ollama
-    restart: unless-stopped
-    ports:
-      - "${OLLAMA_HOST_PORT:-11435}:11434"
+    restart: always
+    # Production Hardening: NO host port exposure (Internal to sovereign_net only)
+    expose:
+      - "11434"
     environment:
       OLLAMA_KEEP_ALIVE: "24h"
     volumes:
@@ -51,6 +73,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sovereign_net
 
@@ -59,11 +86,13 @@ services:
       context: .
       dockerfile: ai-service/Dockerfile
     container_name: sovereign-ai-service
-    restart: unless-stopped
-    ports:
-      - "5001:5001"
+    restart: always
+    # Production Hardening: NO host port exposure (Internal to sovereign_net only)
+    expose:
+      - "5001"
     environment:
       PORT: 5001
+      NODE_ENV: production
       QDRANT_URL: http://qdrant:6333
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
@@ -82,6 +111,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sovereign_net
 
@@ -90,11 +124,12 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: sovereign-ai-backend
-    restart: unless-stopped
+    restart: always
     ports:
       - "9000:9000"
     environment:
       PORT: 9000
+      NODE_ENV: production
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER:-workbench}
@@ -131,6 +166,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sovereign_net
 
@@ -141,7 +181,7 @@ services:
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:9000}
     container_name: sovereign-ai-frontend
-    restart: unless-stopped
+    restart: always
     ports:
       - "${FRONTEND_PORT:-5173}:80"
     depends_on:
@@ -152,6 +192,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sovereign_net
 
@@ -161,11 +206,9 @@ volumes:
   qdrant_storage:
     external: true
   ollama_data:
-    name: ollama_data
+    external: true
   uploads_data:
-    name: uploads_data
   reports_data:
-    name: reports_data
 
 networks:
   sovereign_net:

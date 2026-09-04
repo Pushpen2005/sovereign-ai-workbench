@@ -22,7 +22,7 @@
 
 import { StateGraph, START, END } from "@langchain/langgraph";
 import { AgentAgentState } from "./agent.state.js";
-import { defaultAgentNodes, routeAgentDecision } from "./agent.nodes.js";
+import { defaultAgentNodes, routeAgentDecision, routeToolResultNext } from "./agent.nodes.js";
 
 /**
  * Builds and compiles the agent StateGraph.
@@ -52,7 +52,10 @@ export function createAgentGraph(customNodes = null, compileOptions = {}) {
         })
 
         .addEdge("execute_tool", "validate_tool_result")
-        .addEdge("validate_tool_result", "reason")
+        .addConditionalEdges("validate_tool_result", routeToolResultNext, {
+            reason: "reason",
+            safe_failure: "safe_failure",
+        })
 
         .addEdge("final_answer", END)
         .addEdge("safe_failure", END);

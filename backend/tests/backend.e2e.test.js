@@ -402,3 +402,4 @@ async function run() {
 }
 
 await run();
+process.exit(process.exitCode || 0);

@@ -24,8 +24,8 @@ async function runReportsTests() {
     const initData = await initRes.json();
     assert.equal(initData.success, true, "Must have success: true");
     assert.ok(Array.isArray(initData.data), "data must be an array");
-    const initialCount = initData.data.length;
-    console.log(`    ✓ Returned HTTP 200 with ${initialCount} existing report(s)`);
+    const initialTotal = initData.total !== undefined ? initData.total : initData.data.length;
+    console.log(`    ✓ Returned HTTP 200 with ${initialTotal} existing report(s)`);
 
     // 2. GET /api/v1/reports/:id (non-existent)
     console.log("\n[2] Testing GET /api/v1/reports/:id with non-existent ID...");
@@ -57,7 +57,8 @@ async function runReportsTests() {
     const listRes = await fetch(`${BASE_URL}/api/v1/reports`);
     assert.equal(listRes.status, 200);
     const listData = await listRes.json();
-    assert.equal(listData.data.length, initialCount + 1, "Report count must increment by 1");
+    const currentTotal = listData.total !== undefined ? listData.total : listData.data.length;
+    assert.equal(currentTotal, initialTotal + 1, "Report count must increment by 1");
     const foundReport = listData.data.find((r) => r.id === createdReport.id);
     assert.ok(foundReport, "Newly created report must be present in listing");
     assert.equal(foundReport.filename, createdReport.filename);
@@ -97,7 +98,8 @@ async function runReportsTests() {
     assert.equal(failRes.status, 400, "Invalid workflow call must return 400");
     const postFailList = await fetch(`${BASE_URL}/api/v1/reports`);
     const postFailData = await postFailList.json();
-    assert.equal(postFailData.data.length, initialCount + 1, "Report count must not change on failed call");
+    const postFailTotal = postFailData.total !== undefined ? postFailData.total : postFailData.data.length;
+    assert.equal(postFailTotal, initialTotal + 1, "Report count must not change on failed call");
     console.log("    ✓ Failed request did not create any phantom reports");
 
     console.log("\n==============================================");
@@ -108,7 +110,9 @@ async function runReportsTests() {
   }
 }
 
-runReportsTests().catch((err) => {
+runReportsTests().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error("Reports test failed:", err);
   process.exit(1);
 });

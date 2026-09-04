@@ -96,6 +96,8 @@ export async function runInspectionWorkflow(input, options = {}) {
         task,
         organizationId,
         userId: options.userId || null,
+        extractionAttempts: 1,
+        maxExtractionAttempts: 2,
         metadata: {
             input,
             ingestOptions: options.ingestOptions || {},
@@ -141,12 +143,13 @@ export async function runInspectionWorkflow(input, options = {}) {
                         executionEvents.publish(runId, "validation", {
                             runId,
                             validator: "validate_risk",
-                            valid: stateSnapshot.riskValidation?.valid,
+                            valid: stateSnapshot.riskValidation?.isValid ?? stateSnapshot.riskValidation?.valid,
                         });
                     } else if (nodeName === "validate_citations") {
                         executionEvents.publish(runId, "validation", {
                             runId,
                             validator: "validate_citations",
+                            valid: stateSnapshot.citationValidation?.isValid ?? true,
                             citationsCount: stateSnapshot.citations?.length || 0,
                         });
                     } else if (nodeName === "insufficient_evidence") {

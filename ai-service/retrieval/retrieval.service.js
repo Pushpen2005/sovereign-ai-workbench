@@ -115,11 +115,18 @@ export async function searchSimilarChunks(
         }
 
         // Filter by documentId when provided
-        if (documentId !== undefined) {
+        if (documentId !== undefined && documentId !== null) {
             must.push({
                 key: "documentId",
                 match: {
                     value: documentId.trim(),
+                },
+            });
+        } else if (allowedDocumentIds && allowedDocumentIds.size > 0) {
+            must.push({
+                key: "documentId",
+                match: {
+                    any: Array.from(allowedDocumentIds),
                 },
             });
         }
@@ -130,6 +137,16 @@ export async function searchSimilarChunks(
                 key: "documentType",
                 match: {
                     value: filters.documentType.trim(),
+                },
+            });
+        }
+
+        // Filter by organizationId when provided
+        if (filters.organizationId !== undefined && filters.organizationId !== null) {
+            must.push({
+                key: "organizationId",
+                match: {
+                    value: String(filters.organizationId).trim(),
                 },
             });
         }
@@ -188,6 +205,15 @@ export async function searchSimilarChunks(
 
             pageEndOffset:
                 result.payload?.pageEndOffset,
+
+            startOffset:
+                result.payload?.pageStartOffset ?? result.payload?.startOffset,
+
+            endOffset:
+                result.payload?.pageEndOffset ?? result.payload?.endOffset,
+
+            organizationId:
+                result.payload?.organizationId || null,
         }));
 
         return allowedDocumentIds

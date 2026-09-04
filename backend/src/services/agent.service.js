@@ -20,7 +20,8 @@ import {
 } from "./agentTools/toolRegistry.js";
 import { runAgentWorkflow } from "./agent-orchestrator.service.js";
 
-const DEFAULT_MAX_STEPS = 8;
+const DEFAULT_MAX_STEPS = 5;
+const MAX_ALLOWED_STEPS = 6;
 const DEFAULT_TIMEOUT_MS = 60000; // 60 seconds
 
 export class AgentRuntimeError extends Error {
@@ -229,6 +230,10 @@ export async function runLegacyAgentLoop({
     }
 
     const cleanGoal = goal.trim();
+    const cleanMaxSteps = Math.min(
+        Number.isInteger(maxSteps) && maxSteps > 0 ? maxSteps : DEFAULT_MAX_STEPS,
+        MAX_ALLOWED_STEPS
+    );
     const startTime = Date.now();
     const steps = [];
     const collectedSources = [];

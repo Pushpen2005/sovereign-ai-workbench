@@ -132,7 +132,9 @@ async function runChatTests() {
   }
 }
 
-runChatTests().catch((err) => {
+runChatTests().then(() => {
+  process.exit(0);
+}).catch((err) => {
   console.error("Chat persistence test failed:", err);
   process.exit(1);
 });

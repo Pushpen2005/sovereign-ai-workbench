@@ -15,7 +15,7 @@ export function useAgentExecution() {
   const [runId, setRunId] = useState(null);
   const [model, setModel] = useState('llama3.2:3b');
   const [currentStep, setCurrentStep] = useState(0);
-  const [maxSteps, setMaxSteps] = useState(8);
+  const [maxSteps, setMaxSteps] = useState(5);
   const [timeline, setTimeline] = useState([]);
   const [finalAnswer, setFinalAnswer] = useState('');
   const [sources, setSources] = useState([]);

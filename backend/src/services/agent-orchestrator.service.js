@@ -26,7 +26,8 @@ import {
 import { executionEvents } from "./execution-events.service.js";
 import { DEFAULT_ORGANIZATION_ID } from "../config/organization.js";
 
-const DEFAULT_MAX_STEPS = 8;
+const DEFAULT_MAX_STEPS = 5;
+const MAX_ALLOWED_STEPS = 6;
 const DEFAULT_TIMEOUT_MS = 60000;
 
 /**
@@ -63,7 +64,10 @@ export async function runAgentWorkflow(input, options = {}) {
     const cleanGoal = goal.trim();
     const cleanRunId = runId || randomUUID();
     const cleanOrgId = organizationId || DEFAULT_ORGANIZATION_ID;
-    const cleanMaxSteps = Number.isInteger(maxSteps) && maxSteps > 0 ? maxSteps : DEFAULT_MAX_STEPS;
+    const cleanMaxSteps = Math.min(
+        Number.isInteger(maxSteps) && maxSteps > 0 ? maxSteps : DEFAULT_MAX_STEPS,
+        MAX_ALLOWED_STEPS
+    );
     const cleanTimeoutMs = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
     const startTime = Date.now();
 

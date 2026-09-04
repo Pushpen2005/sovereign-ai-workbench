@@ -1,13 +1,13 @@
 /**
- * PR #23 — Model Router
+ * PR #23 / Phase 5 — Model Router
  *
- * Classifies every incoming request as DOCUMENT, CODING, or GENERAL
- * using a fast, deterministic keyword classifier (no LLM call overhead).
+ * Classifies incoming requests as DOCUMENT, CODING, VISION, or GENERAL
+ * using a fast, deterministic keyword classifier (< 1 ms overhead).
  * Selects the appropriate local Ollama model from the registry and
  * verifies it is installed before returning a routing decision.
  *
- * Model registry is driven entirely by environment variables so a second
- * model (e.g. qwen2.5-coder:7b) can be added without code changes.
+ * Enforces a strict server-side model allowlist to prevent unauthorized or
+ * external model invocation.
  */
 
 // ─── Task Types ───────────────────────────────────────────────────────────────
@@ -34,11 +34,12 @@ const CODING_KEYWORDS = [
     "debug", "fix this code", "fix this function", "fix this script",
     "correct this code", "this code doesn't work", "why is this code",
     // generate / create code
-    "generate code", "create a function", "create a script", "create a class",
+    "generate code", "generate python", "create a function", "create a script", "create a class",
     "implement a function", "implement an algorithm", "implement this in",
     // language / framework names combined with action
     "in python", "in javascript", "in typescript", "in java", "in c++",
     "in sql", "in bash", "in node", "in react",
+    "python script", "python code",
     // code-specific nouns
     "function that", "function to", "class that", "class to",
     "script that", "script to", "algorithm that", "algorithm to",
@@ -51,8 +52,21 @@ const CODING_KEYWORDS = [
 ];
 
 /**
+ * Vision-task indicators — signals the user wants visual inspection or image analysis.
+ */
+const VISION_KEYWORDS = [
+    "analyze this gauge image", "gauge image", "inspect this image",
+    "analyze this image", "look at this image", "in this image",
+    "from this image", "this picture", "this photo",
+    "engineering drawing", "analyze this drawing", "inspect this drawing",
+    "analyze this diagram", "inspect this diagram",
+    "visible in this image", "shown in this image", "image shows",
+    "analyze this photo", "inspect this photo",
+];
+
+/**
  * Document-task indicators — signals the user is asking about ingested content.
- * Used as the default when coding indicators are absent.
+ * Used as the default when coding and vision indicators are absent.
  */
 const DOCUMENT_KEYWORDS = [
     "what does", "what is", "what are", "explain", "summarize", "summary",
@@ -66,17 +80,18 @@ const DOCUMENT_KEYWORDS = [
     "temperature", "vibration", "corrosion", "thickness", "wear",
     "why did", "why is", "how does", "how do", "what happened",
     "risk", "severity", "recommendation", "approve", "sign off",
-    "approval note", "report", "audit",
+    "approval note", "report", "audit", "retrieved context",
 ];
 
 // ─── Classifier ───────────────────────────────────────────────────────────────
 
 /**
- * Classify a question as DOCUMENT, CODING, or GENERAL using keyword matching.
+ * Classify a question as DOCUMENT, CODING, VISION, or GENERAL using deterministic keyword matching.
  * No LLM call — O(n) string search, adds < 1 ms overhead.
  *
  * @param {string} question
- * @returns {"DOCUMENT" | "CODING" | "GENERAL"}
+ * @param {object} options
+ * @returns {"DOCUMENT" | "CODING" | "VISION" | "GENERAL"}
  */
 export function classifyTask(question, options = {}) {
     if (options && (options.hasImage || options.image)) {
@@ -89,14 +104,21 @@ export function classifyTask(question, options = {}) {
 
     const q = question.toLowerCase();
 
-    // Coding check first — explicit and unambiguous
+    // 1. Coding check first — explicit and unambiguous
     for (const kw of CODING_KEYWORDS) {
         if (q.includes(kw)) {
             return TASK_TYPE.CODING;
         }
     }
 
-    // Document check
+    // 2. Vision keyword check
+    for (const kw of VISION_KEYWORDS) {
+        if (q.includes(kw)) {
+            return TASK_TYPE.VISION;
+        }
+    }
+
+    // 3. Document check
     for (const kw of DOCUMENT_KEYWORDS) {
         if (q.includes(kw)) {
             return TASK_TYPE.DOCUMENT;
@@ -106,21 +128,18 @@ export function classifyTask(question, options = {}) {
     return TASK_TYPE.GENERAL;
 }
 
-// ─── Model Registry ───────────────────────────────────────────────────────────
+// ─── Model Registry & Allowlist ───────────────────────────────────────────────
 
 /**
  * Read the model registry from environment variables.
- * All values fall back to OLLAMA_MODEL (the existing default) so the
- * router is a no-op until a second model is configured.
+ * All values fall back to OLLAMA_MODEL so the router remains fully operational.
  */
-function getModelRegistry() {
+export function getModelRegistry() {
     const defaultModel  = process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
     const documentModel = process.env.DOCUMENT_MODEL  || defaultModel;
     const codingModel   = process.env.CODING_MODEL    || defaultModel;
     const visionModel   = process.env.VISION_MODEL    || "moondream";
 
-    // "true" or "1" enables silent fallback to DEFAULT_MODEL when CODING_MODEL
-    // is configured but not currently installed in Ollama.
     const codingFallbackEnabled =
         (process.env.CODING_MODEL_FALLBACK || "true").toLowerCase() !== "false";
 
@@ -135,16 +154,55 @@ function getModelRegistry() {
     };
 }
 
-// ─── Availability Check ───────────────────────────────────────────────────────
+/**
+ * Sovereign model allowlist.
+ * Explicitly blocks unauthorized or external model names.
+ *
+ * @returns {Set<string>}
+ */
+export function getAllowedModels() {
+    const registry = getModelRegistry();
+    const allowed = new Set([
+        registry.defaultModel,
+        registry[TASK_TYPE.DOCUMENT],
+        registry[TASK_TYPE.CODING],
+        registry[TASK_TYPE.VISION],
+        registry[TASK_TYPE.GENERAL],
+        "llama3.2:3b",
+        "llama3.2",
+        "moondream",
+        "moondream:latest",
+    ].filter(Boolean));
+
+    const extra = process.env.ALLOWED_MODELS;
+    if (extra) {
+        extra.split(",").map((s) => s.trim()).filter(Boolean).forEach((m) => allowed.add(m));
+    }
+
+    return allowed;
+}
 
 /**
- * Query the local Ollama API to determine whether a specific model is
- * currently installed.  Returns false on any network / parse error so
- * callers can implement fallback logic rather than crashing.
+ * Check whether a model name is permitted by the sovereign allowlist.
  *
  * @param {string} modelName
- * @returns {Promise<boolean>}
+ * @returns {boolean}
  */
+export function isModelAllowed(modelName) {
+    if (typeof modelName !== "string" || !modelName.trim()) return false;
+    const allowed = getAllowedModels();
+    const trimmed = modelName.trim();
+    const base = trimmed.split(":")[0];
+    for (const m of allowed) {
+        if (m === trimmed || m.split(":")[0] === base) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ─── Availability Check ───────────────────────────────────────────────────────
+
 async function fetchOllamaTags(ollamaUrl) {
     let res;
     try {
@@ -177,7 +235,6 @@ export async function checkModelAvailability(modelName) {
             ? data.models.map((m) => m.name)
             : [];
 
-        // Accept both "llama3.2:3b" and "llama3.2" as a match
         const base = modelName.split(":")[0];
         return installed.some(
             (m) => m === modelName || m.startsWith(base + ":")
@@ -190,7 +247,7 @@ export async function checkModelAvailability(modelName) {
 /**
  * Return the full list of locally installed Ollama model names.
  *
- * @returns {Promise<string[]>}
+ * @returns {Promise<Array<{name: string, size: number}>>}
  */
 export async function getAvailableModels() {
     const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
@@ -216,39 +273,58 @@ export async function getAvailableModels() {
  *
  * Returns a routing decision object:
  * {
- *   taskType:      "DOCUMENT" | "CODING" | "GENERAL"
+ *   taskType:      "DOCUMENT" | "CODING" | "VISION" | "GENERAL"
  *   selectedModel: string          — model name to use
  *   routingReason: string          — human-readable explanation
  *   isFallback:    boolean         — true when preferred model unavailable
- *   registryModel: string          — the configured (not necessarily installed) model
+ *   registryModel: string          — the configured model
+ *   latencyMs:     number          — decision duration in milliseconds
  * }
  *
  * @param {string} question
- * @returns {Promise<{taskType: string, selectedModel: string, routingReason: string, isFallback: boolean, registryModel: string}>}
+ * @param {object} options
+ * @returns {Promise<{taskType: string, selectedModel: string, routingReason: string, isFallback: boolean, registryModel: string, latencyMs: number}>}
  */
 export async function routeTask(question, options = {}) {
-    const taskType = classifyTask(question, options);
-    const registry = getModelRegistry();
+    const tStart = Date.now();
+    console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.started", task: options.hasImage ? "VISION" : "TEXT" })}`);
 
-    const registryModel = registry[taskType];
+    // Model allowlist check on client override
+    if (options.model) {
+        if (!isModelAllowed(options.model)) {
+            console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "model_not_allowed", model: options.model })}`);
+            throw new RouterError(
+                `Requested model '${options.model}' is not in the sovereign model allowlist.`
+            );
+        }
+    }
+
+    const taskType = classifyTask(question, options);
+    console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.classified", taskType, questionPreview: typeof question === 'string' ? question.slice(0, 50) : null })}`);
+
+    const registry = getModelRegistry();
+    const registryModel = options.model || registry[taskType];
     const defaultModel  = registry.defaultModel;
 
     // Check whether the configured model is installed
     const isAvailable = await checkModelAvailability(registryModel);
 
     if (isAvailable) {
+        const latencyMs = Date.now() - tStart;
+        console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: registryModel, latencyMs, isFallback: false })}`);
         return {
             taskType,
             selectedModel: registryModel,
             routingReason: routingReason(taskType, registryModel, false),
             isFallback:    false,
             registryModel,
+            latencyMs,
         };
     }
 
     // Model not installed ─────────────────────────────────────────────────────
     if (taskType === TASK_TYPE.VISION) {
-        // Vision tasks require a multimodal model; never silently fall back or auto-download
+        console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "vision_model_unavailable", model: registryModel })}`);
         throw new RouterError(
             `Configured local vision model '${registryModel}' is not available in Ollama. ` +
             `Run: ollama pull ${registryModel}`
@@ -256,7 +332,7 @@ export async function routeTask(question, options = {}) {
     }
 
     if (registryModel === defaultModel) {
-        // The registry model IS the default — if it's not available, hard error
+        console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "default_model_unavailable", model: registryModel })}`);
         throw new RouterError(
             `Configured local model '${registryModel}' is not available in Ollama. ` +
             `Run: ollama pull ${registryModel}`
@@ -268,6 +344,7 @@ export async function routeTask(question, options = {}) {
         const defaultAvailable = await checkModelAvailability(defaultModel);
 
         if (!defaultAvailable) {
+            console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "coding_and_fallback_unavailable", model: registryModel, fallback: defaultModel })}`);
             throw new RouterError(
                 `Configured coding model '${registryModel}' is unavailable and ` +
                 `fallback model '${defaultModel}' is also unavailable. ` +
@@ -275,16 +352,20 @@ export async function routeTask(question, options = {}) {
             );
         }
 
+        const latencyMs = Date.now() - tStart;
+        console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: defaultModel, latencyMs, isFallback: true })}`);
         return {
             taskType,
             selectedModel: defaultModel,
             routingReason: `Coding model '${registryModel}' is not installed. Falling back to '${defaultModel}'.`,
             isFallback:    true,
             registryModel,
+            latencyMs,
         };
     }
 
     // No fallback configured — return a clean error
+    console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "model_unavailable", model: registryModel })}`);
     throw new RouterError(
         `Configured local model '${registryModel}' is not available in Ollama. ` +
         `Run: ollama pull ${registryModel}  (or set CODING_MODEL_FALLBACK=true)`

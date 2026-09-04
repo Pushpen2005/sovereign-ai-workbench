@@ -157,11 +157,14 @@ export async function upsertChunks(chunks) {
                     documentId: chunk.documentId,
                     filename: chunk.filename,
                     documentType: chunk.documentType,
+                    organizationId: chunk.organizationId || null,
                     page: chunk.page,
                     text: chunk.text,
                     chunkIndex: chunk.chunkIndex,
                     pageStartOffset: chunk.pageStartOffset,
                     pageEndOffset: chunk.pageEndOffset,
+                    startOffset: chunk.pageStartOffset,
+                    endOffset: chunk.pageEndOffset,
                 },
             };
         });

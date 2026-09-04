@@ -9,6 +9,7 @@ import express from "express";
 import multer from "multer";
 import { imageUpload } from "../middleware/imageUpload.middleware.js";
 import { analyzeImage } from "../controllers/vision.controller.js";
+import { requireAuth } from "../middleware/auth.middleware.js";
 
 const router = express.Router();
 
@@ -42,6 +43,6 @@ function handleImageUpload(req, res, next) {
     });
 }
 
-router.post("/analyze", handleImageUpload, analyzeImage);
+router.post("/analyze", requireAuth, handleImageUpload, analyzeImage);
 
 export default router;

@@ -165,6 +165,13 @@ export function authRateLimiter(windowMs = 60000, maxRequests = 30) {
     const ip = req.ip || req.connection?.remoteAddress || "127.0.0.1";
     const now = Date.now();
 
+    // Evict expired entries if table grows to prevent memory leaks
+    if (rateLimitMap.size > 5000) {
+      for (const [key, val] of rateLimitMap.entries()) {
+        if (now > val.resetTime) rateLimitMap.delete(key);
+      }
+    }
+
     let record = rateLimitMap.get(ip);
     if (!record || now > record.resetTime) {
       record = { count: 1, resetTime: now + windowMs };

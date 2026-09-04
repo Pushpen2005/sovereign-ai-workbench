@@ -1,6 +1,7 @@
 import { answerQuestion } from "../../../ai-service/rag/rag.service.js";
 import { generateAnswer } from "../../../ai-service/llm/llm.service.js";
 import { resolveOrganizationId } from "../config/organization.js";
+import { query } from "../config/db.js";
 import {
   getOrCreateConversation,
   saveChatExchange,
@@ -8,7 +9,7 @@ import {
   getConversationWithMessages,
   getChatStats,
 } from "../services/chat.service.js";
-import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.js";
+import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/router/modelRouter.js";
 
 /**
  * POST /api/v1/chat/ask
@@ -20,7 +21,15 @@ import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.j
  */
 export async function askQuestion(req, res, next) {
   try {
-    const { question, documentId, conversationId } = req.body || {};
+    const { question, documentId, conversationId, model } = req.body || {};
+
+    // Enforce strict authentication when configured or requested
+    if ((process.env.ENFORCE_AUTH === "true" || req.headers["x-require-auth"] === "true") && !req.user) {
+      return res.status(401).json({
+        success: false,
+        message: "Authorization header with Bearer token is required",
+      });
+    }
 
     if (typeof question !== "string" || !question.trim()) {
       return res.status(400).json({
@@ -40,12 +49,51 @@ export async function askQuestion(req, res, next) {
       });
     }
 
+    // Enforce sovereign model allowlist
+    if (model) {
+      if (!isModelAllowed(model)) {
+        return res.status(400).json({
+          success: false,
+          message: `Model '${model}' is not in the sovereign model allowlist.`,
+        });
+      }
+    }
+
     const organizationId = resolveOrganizationId(req);
+
+    // Document Authorization & Scoping
+    let allowedDocumentIds = undefined;
+    if (documentId) {
+      const docCheck = await query(
+        "SELECT id, organization_id FROM documents WHERE id = $1",
+        [documentId.trim()]
+      );
+      if (docCheck.rows.length === 0) {
+        return res.status(404).json({
+          success: false,
+          message: `Document '${documentId}' not found`,
+        });
+      }
+      if (docCheck.rows[0].organization_id !== organizationId) {
+        return res.status(403).json({
+          success: false,
+          message: "Forbidden: document belongs to another organization",
+        });
+      }
+      allowedDocumentIds = [documentId.trim()];
+    } else {
+      // General RAG search across caller's organization
+      const orgDocs = await query(
+        "SELECT id FROM documents WHERE organization_id = $1",
+        [organizationId]
+      );
+      allowedDocumentIds = orgDocs.rows.map((row) => row.id);
+    }
 
     // ── PR #23: Route the question to the appropriate local model ────────────
     let routing;
     try {
-      routing = await routeTask(question.trim());
+      routing = await routeTask(question.trim(), { model });
     } catch (routerErr) {
       if (routerErr instanceof RouterError) {
         return res.status(503).json({
@@ -83,6 +131,8 @@ ${question.trim()}`;
       // 2. Execute RAG pipeline with the router-selected model
       result = await answerQuestion(question.trim(), {
         documentId: documentId?.trim() || undefined,
+        allowedDocumentIds,
+        organizationId,
         model: routing.selectedModel,
       });
     }
@@ -110,6 +160,7 @@ ${question.trim()}`;
       selectedModel: routing.selectedModel,
       routingReason: routing.routingReason,
       isFallback:    routing.isFallback,
+      timings:       result.timings || null,
     });
   } catch (error) {
     next(error);
