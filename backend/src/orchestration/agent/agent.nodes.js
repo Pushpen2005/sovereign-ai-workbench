@@ -66,6 +66,26 @@ export function routeAgentDecision(state) {
 }
 
 /**
+ * Conditional router after validate_tool_result.
+ * Decides whether to continue tool loop to reason or terminate safely.
+ */
+export function routeToolResultNext(state) {
+    if (state.stoppedReason === "timeout" || state.stoppedReason === "max_steps_reached") {
+        return "safe_failure";
+    }
+
+    if (state.currentStep >= state.maxSteps) {
+        return "safe_failure";
+    }
+
+    if (Date.now() - (state.startTime || Date.now()) >= state.timeoutMs) {
+        return "safe_failure";
+    }
+
+    return "reason";
+}
+
+/**
  * Factory creating node implementations with dependency injection support for tests.
  *
  * @param {object} [customServices] Optional overrides for testing
@@ -296,11 +316,19 @@ export function createAgentNodes(customServices = {}) {
             detailsText,
         };
 
+        let stoppedReason = state.stoppedReason || null;
+        if (state.currentStep >= state.maxSteps) {
+            stoppedReason = "max_steps_reached";
+        } else if (Date.now() - (state.startTime || Date.now()) >= state.timeoutMs) {
+            stoppedReason = "timeout";
+        }
+
         return {
             steps: [traceStep],
             stepHistory: [historyEntry],
             sources: newSources,
             deliverable: newDeliverable,
+            stoppedReason,
             currentNode: "validate_tool_result",
             executionOrder,
         };
