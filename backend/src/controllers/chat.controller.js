@@ -9,7 +9,7 @@ import {
   getConversationWithMessages,
   getChatStats,
 } from "../services/chat.service.js";
-import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.js";
+import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/router/modelRouter.js";
 
 /**
  * POST /api/v1/chat/ask
@@ -21,7 +21,7 @@ import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.j
  */
 export async function askQuestion(req, res, next) {
   try {
-    const { question, documentId, conversationId } = req.body || {};
+    const { question, documentId, conversationId, model } = req.body || {};
 
     // Enforce strict authentication when configured or requested
     if ((process.env.ENFORCE_AUTH === "true" || req.headers["x-require-auth"] === "true") && !req.user) {
@@ -47,6 +47,16 @@ export async function askQuestion(req, res, next) {
         success: false,
         message: "documentId must be a valid string",
       });
+    }
+
+    // Enforce sovereign model allowlist
+    if (model) {
+      if (!isModelAllowed(model)) {
+        return res.status(400).json({
+          success: false,
+          message: `Model '${model}' is not in the sovereign model allowlist.`,
+        });
+      }
     }
 
     const organizationId = resolveOrganizationId(req);
@@ -83,7 +93,7 @@ export async function askQuestion(req, res, next) {
     // ── PR #23: Route the question to the appropriate local model ────────────
     let routing;
     try {
-      routing = await routeTask(question.trim());
+      routing = await routeTask(question.trim(), { model });
     } catch (routerErr) {
       if (routerErr instanceof RouterError) {
         return res.status(503).json({

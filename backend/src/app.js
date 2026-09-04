@@ -22,8 +22,46 @@ import authRouter from "./routes/auth.routes.js";
 import { optionalAuth } from "./middleware/auth.middleware.js";
 
 const app = express();
-app.use(cors());
-app.use(express.json());
+
+// Security Headers Middleware
+app.use((req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.removeHeader("X-Powered-By");
+    next();
+});
+
+// Configurable CORS with safe local development fallbacks
+const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(",").map((o) => o.trim()).filter(Boolean)
+    : [
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:3000",
+    ];
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, curl, server-to-server)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+            return callback(null, true);
+        }
+        return callback(null, false);
+    },
+    credentials: true,
+    methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-organization-id"],
+    optionsSuccessStatus: 204,
+}));
+
+// Hardened body parser limit (2 MB max) to prevent memory exhaustion
+app.use(express.json({ limit: "2mb" }));
 
 // Authentication routes (public)
 app.use("/api/v1/auth", authRouter);
@@ -70,6 +108,7 @@ app.get('/api/v1/router/models', async (req, res) => {
     const defaultModel  = process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
     const documentModel = process.env.DOCUMENT_MODEL  || defaultModel;
     const codingModel   = process.env.CODING_MODEL    || defaultModel;
+    const visionModel   = process.env.VISION_MODEL    || "moondream";
 
     const installedModels = await getAvailableModels();
 
@@ -77,6 +116,7 @@ app.get('/api/v1/router/models', async (req, res) => {
         registry: {
             [TASK_TYPE.DOCUMENT]: documentModel,
             [TASK_TYPE.CODING]:   codingModel,
+            [TASK_TYPE.VISION]:   visionModel,
             [TASK_TYPE.GENERAL]:  defaultModel,
         },
         installedModels,
@@ -95,10 +135,12 @@ app.get('/api/v1/sovereignty', async (req, res) => {
     const qdrantUrl  = process.env.QDRANT_URL  || "http://localhost:6333";
     const ollamaUrl  = process.env.OLLAMA_URL  || "http://localhost:11434";
     const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:3b";
+    const visionModel = process.env.VISION_MODEL || "moondream";
 
     let qdrantReachable  = false;
     let ollamaReachable  = false;
     let ollamaModelLoaded = false;
+    let visionModelLoaded = false;
 
     try {
         const qRes = await fetch(`${qdrantUrl}/collections`, { signal: AbortSignal.timeout(3000) });
@@ -106,12 +148,24 @@ app.get('/api/v1/sovereignty', async (req, res) => {
     } catch { /* unreachable */ }
 
     try {
-        const oRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
-        if (oRes.ok) {
+        let oRes;
+        try {
+            oRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+        } catch (fetchErr) {
+            if (ollamaUrl.includes("host.docker.internal")) {
+                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
+                oRes = await fetch(`${fallbackUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+            } else {
+                throw fetchErr;
+            }
+        }
+        if (oRes && oRes.ok) {
             ollamaReachable = true;
             const tags = await oRes.json();
             ollamaModelLoaded = Array.isArray(tags.models) &&
                 tags.models.some(m => m.name && m.name.startsWith(ollamaModel.split(":")[0]));
+            visionModelLoaded = Array.isArray(tags.models) &&
+                tags.models.some(m => m.name && m.name.startsWith(visionModel.split(":")[0]));
         }
     } catch { /* unreachable */ }
 
@@ -139,6 +193,15 @@ app.get('/api/v1/sovereignty', async (req, res) => {
                 endpointType:     "local",
                 reachable:        ollamaReachable,
                 modelLoaded:      ollamaModelLoaded,
+                cloudDependency:  false,
+            },
+            vision: {
+                provider:         "ollama (multimodal)",
+                model:            visionModel,
+                endpoint:         ollamaUrl,
+                endpointType:     "local",
+                reachable:        ollamaReachable,
+                modelLoaded:      visionModelLoaded,
                 cloudDependency:  false,
             },
             embeddings: {
@@ -177,6 +240,7 @@ app.get('/api/v1/sovereignty', async (req, res) => {
         sovereignty: {
             noExternalAiApis:        externalApiKeys.length === 0,
             allInferenceLocal:       ollamaReachable,
+            allVisionLocal:          ollamaReachable && visionModelLoaded,
             allEmbeddingsLocal:      true,
             allOcrLocal:             true,
             allStorageLocal:         qdrantReachable,
