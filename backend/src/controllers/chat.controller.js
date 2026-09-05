@@ -10,6 +10,7 @@ import {
   getChatStats,
 } from "../services/chat.service.js";
 import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/router/modelRouter.js";
+import { telemetryService } from "../services/telemetry.service.js";
 
 /**
  * POST /api/v1/chat/ask
@@ -104,6 +105,101 @@ export async function askQuestion(req, res, next) {
       question: question.trim(),
     });
 
+    const isStream = Boolean(
+      req.query.stream === "true" ||
+      req.body?.stream === true ||
+      req.headers.accept === "text/event-stream"
+    );
+
+    if (isStream) {
+      res.writeHead(200, {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.flushHeaders?.();
+
+      res.write(`event: metadata\ndata: ${JSON.stringify({
+        taskType: routing.taskType,
+        selectedModel: routing.selectedModel,
+        local: routing.local ?? true,
+        isFallback: routing.isFallback,
+      })}\n\n`);
+
+      const onChunk = (chunk) => {
+        try {
+          res.write(`event: token\ndata: ${JSON.stringify({ token: chunk })}\n\n`);
+        } catch {}
+      };
+
+      let result;
+      if (routing.taskType === "CODING" && !documentId) {
+        const codingPrompt = `You are a skilled software engineering assistant.
+Provide clean, idiomatic, well-commented code that directly addresses the following user request.
+Do not require external documents or reference context.
+
+Request:
+${question.trim()}`;
+
+        const codeAnswer = await generateAnswer(codingPrompt, routing.selectedModel, { onChunk, stream: true });
+        result = {
+          answer: codeAnswer,
+          sources: [],
+          grounded: true,
+        };
+      } else {
+        result = await answerQuestion(question.trim(), {
+          documentId: documentId?.trim() || undefined,
+          allowedDocumentIds,
+          organizationId,
+          model: routing.selectedModel,
+          onChunk,
+          stream: true,
+        });
+      }
+
+      const exchange = await saveChatExchange({
+        conversationId: conversation.id,
+        organizationId,
+        question: question.trim(),
+        answer: result.answer,
+        sources: result.sources || [],
+        documentId: documentId?.trim() || null,
+      });
+
+      telemetryService.recordAiExecution({
+        runId: conversation.id,
+        organizationId,
+        taskType: routing.taskType,
+        selectedModel: routing.selectedModel,
+        local: routing.local ?? true,
+        status: "completed",
+        totalLatencyMs: result.timings?.totalMs || 0,
+        modelLatencyMs: result.timings?.generationMs || 0,
+        retrievalLatencyMs: result.timings?.searchMs || 0,
+      });
+
+      res.write(`event: completed\ndata: ${JSON.stringify({
+        success: true,
+        conversationId: conversation.id,
+        messageId: exchange.assistantMessage.id,
+        answer: result.answer,
+        grounded: result.grounded !== undefined ? result.grounded : (result.sources?.length > 0),
+        reason: result.reason || null,
+        sources: result.sources || [],
+        citations: result.citations || result.sources || [],
+        citationIntegrity: result.citationIntegrity || null,
+        claimGrounding: result.claimGrounding || null,
+        taskType: routing.taskType,
+        selectedModel: routing.selectedModel,
+        local: routing.local ?? true,
+        timings: result.timings || null,
+      })}\n\n`);
+
+      return res.end();
+    }
+
     let result;
     if (routing.taskType === "CODING" && !documentId) {
       // Direct code generation using the routed coding model (no document retrieval required)
@@ -139,6 +235,18 @@ ${question.trim()}`;
       documentId: documentId?.trim() || null,
     });
 
+    telemetryService.recordAiExecution({
+      runId: conversation.id,
+      organizationId,
+      taskType: routing.taskType,
+      selectedModel: routing.selectedModel,
+      local: routing.local ?? true,
+      status: "completed",
+      totalLatencyMs: result.timings?.totalMs || 0,
+      modelLatencyMs: result.timings?.generationMs || 0,
+      retrievalLatencyMs: result.timings?.searchMs || 0,
+    });
+
     return res.status(200).json({
       success: true,
       conversationId: conversation.id,
@@ -152,10 +260,11 @@ ${question.trim()}`;
       citationIntegrity: result.citationIntegrity || null,
       claimGrounding: result.claimGrounding || null,
       messageId: exchange.assistantMessage.id,
-      // ── PR #23 routing metadata ─────────────────────────────────────────
+      // ── PR #23 / Phase 8 routing metadata ──────────────────────────────
       taskType:      routing.taskType,
       selectedModel: routing.selectedModel,
       routingReason: routing.routingReason,
+      local:         routing.local ?? true,
       isFallback:    routing.isFallback,
       timings:       result.timings || null,
     });

@@ -385,9 +385,14 @@ export async function answerQuestion(question, options = {}) {
     // 10. Generate answer using local LLM (Ollama)
     const tGenStart = Date.now();
     const generateAnswerFn = options.generateAnswer ?? generateAnswer;
+    const generateOpts = {
+        ...(typeof options.onChunk === "function" ? { onChunk: options.onChunk } : {}),
+        ...(options.stream ? { stream: true } : {}),
+    };
     const answer = await generateAnswerFn(
         prompt,
-        options.model
+        options.model,
+        generateOpts
     );
     timings.generationMs = Date.now() - tGenStart;
     timings.totalMs = Date.now() - tStart;

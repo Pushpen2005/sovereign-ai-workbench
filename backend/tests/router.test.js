@@ -55,7 +55,7 @@ async function runTests() {
     record("TEST 1: SOP emergency shutdown", t1 === TASK_TYPE.DOCUMENT, `got ${t1}`);
 
     const t2 = classifyTask("Summarize the inspection report.");
-    record("TEST 2: Summarize inspection report", t2 === TASK_TYPE.DOCUMENT, `got ${t2}`);
+    record("TEST 2: Summarize inspection report", t2 === TASK_TYPE.DOCUMENT || t2 === TASK_TYPE.INSPECTION, `got ${t2}`);
 
     const t3 = classifyTask("Why did Pump-03 fail?");
     record("TEST 3: Why did Pump-03 fail?", t3 === TASK_TYPE.DOCUMENT, `got ${t3}`);

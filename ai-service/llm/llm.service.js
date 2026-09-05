@@ -53,11 +53,14 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
     }
 
     const selectedModel = model?.trim() || ollamaModel;
+    const keepAlive = process.env.OLLAMA_KEEP_ALIVE || "15m";
+    const isStreaming = typeof options.onChunk === "function" || options.stream === true;
 
     const requestBody = {
         model: selectedModel,
         prompt: prompt.trim(),
-        stream: false,
+        stream: isStreaming,
+        keep_alive: keepAlive,
     };
 
     if (options.format) {
@@ -101,6 +104,54 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
             throw new LLMError("LLM generation failed");
         }
 
+        if (isStreaming && response.body) {
+            let fullText = "";
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() || "";
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed) continue;
+                    try {
+                        const parsed = JSON.parse(trimmed);
+                        if (parsed.response) {
+                            fullText += parsed.response;
+                            if (typeof options.onChunk === "function") {
+                                options.onChunk(parsed.response);
+                            }
+                        }
+                    } catch {}
+                }
+            }
+
+            if (buffer.trim()) {
+                try {
+                    const parsed = JSON.parse(buffer.trim());
+                    if (parsed.response) {
+                        fullText += parsed.response;
+                        if (typeof options.onChunk === "function") {
+                            options.onChunk(parsed.response);
+                        }
+                    }
+                } catch {}
+            }
+
+            if (!fullText.trim()) {
+                throw new LLMError("LLM generation produced empty stream response");
+            }
+
+            return fullText.trim();
+        }
+
         const data = await response.json();
 
         if (
@@ -140,9 +191,46 @@ async function generateVisionAnswer(prompt, images, model, options = {}) {
     });
 }
 
+/**
+ * Pre-warms local Ollama models into memory without token generation.
+ *
+ * @param {string[]} [models]
+ * @returns {Promise<Array<{ model: string, success: boolean, durationMs: number }>>}
+ */
+async function warmLocalModels(models = ["llama3.2:3b", "moondream"]) {
+    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
+    const keepAlive = process.env.OLLAMA_KEEP_ALIVE || "15m";
+    const results = [];
+
+    for (const model of models) {
+        const t0 = Date.now();
+        try {
+            const res = await fetch(`${ollamaUrl}/api/generate`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive }),
+            });
+            results.push({
+                model,
+                success: res.ok,
+                durationMs: Date.now() - t0,
+            });
+        } catch (err) {
+            results.push({
+                model,
+                success: false,
+                durationMs: Date.now() - t0,
+                error: err.message,
+            });
+        }
+    }
+    return results;
+}
+
 export {
     generateAnswer,
     generateVisionAnswer,
+    warmLocalModels,
     LLMError,
 };
 
