@@ -61,7 +61,7 @@ async function runPhase5Tests() {
       { input: "Analyze this gauge image", expected: TASK_TYPE.VISION },
       { input: "Inspect this photo of the pump casing", expected: TASK_TYPE.VISION },
       { input: "Summarize this retrieved context", expected: TASK_TYPE.DOCUMENT },
-      { input: "According to the inspection report, what was the observed vibration?", expected: TASK_TYPE.DOCUMENT },
+      { input: "According to the equipment manual, what was the observed vibration?", expected: TASK_TYPE.DOCUMENT },
       { input: "Debug this function that connects to the database", expected: TASK_TYPE.CODING },
     ];
 
@@ -354,6 +354,11 @@ async function runPhase5Tests() {
     server.close();
 
     // Clean up test data
+    for (const oId of cleanupOrgIds) {
+      try {
+        await query("DELETE FROM agent_runs WHERE organization_id = $1", [oId]);
+      } catch {}
+    }
     for (const uId of cleanupUserIds) {
       try {
         await query("DELETE FROM users WHERE id = $1", [uId]);

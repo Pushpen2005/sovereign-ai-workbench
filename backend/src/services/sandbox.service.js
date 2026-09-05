@@ -13,7 +13,7 @@ import { randomUUID } from "crypto";
 
 const MAX_CODE_SIZE_BYTES = 64 * 1024;     // 64 KB
 const MAX_OUTPUT_BYTES    = 64 * 1024;     // 64 KB
-const DEFAULT_TIMEOUT_MS  = 5000;          // 5 seconds
+const DEFAULT_TIMEOUT_MS  = 8000;          // 8 seconds
 const MAX_TIMEOUT_MS      = 10000;         // 10 seconds max
 
 export class SandboxValidationError extends Error {

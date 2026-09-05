@@ -20,6 +20,9 @@ import visionRouter from "./routes/vision.routes.js";
 import agentRouter from "./routes/agent.routes.js";
 import authRouter from "./routes/auth.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
+import { telemetryService } from "./services/telemetry.service.js";
+import { getEmbeddingMetrics } from "../../ai-service/embeddings/embedding.service.js";
+import { checkDbConnection } from "./config/db.js";
 
 const app = express();
 
@@ -74,11 +77,72 @@ app.get('/', (req, res) => {
     });
 });
 
+const healthHandler = async (req, res) => {
+    const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
+    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
+    const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:5001";
+
+    let dbOk = false;
+    let qdrantOk = false;
+    let ollamaOk = false;
+    let aiServiceOk = false;
+
+    try {
+        const dbStatus = await checkDbConnection();
+        dbOk = Boolean(dbStatus && dbStatus.connected);
+    } catch {
+        dbOk = false;
+    }
+
+    try {
+        const qRes = await fetch(`${qdrantUrl}/collections`, { signal: AbortSignal.timeout(2000) });
+        qdrantOk = qRes.ok;
+    } catch {
+        qdrantOk = false;
+    }
+
+    try {
+        let oRes;
+        try {
+            oRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+        } catch (fetchErr) {
+            if (ollamaUrl.includes("host.docker.internal")) {
+                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
+                oRes = await fetch(`${fallbackUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+            } else {
+                throw fetchErr;
+            }
+        }
+        ollamaOk = Boolean(oRes && oRes.ok);
+    } catch {
+        ollamaOk = false;
+    }
+
+    try {
+        const aRes = await fetch(`${aiServiceUrl}/health`, { signal: AbortSignal.timeout(2000) });
+        aiServiceOk = aRes.ok;
+    } catch {
+        aiServiceOk = false;
+    }
+
+    res.status(200).json({
+        status: "ok",
+        backend: "healthy",
+        database: dbOk ? "healthy" : "unreachable",
+        qdrant: qdrantOk ? "healthy" : "unreachable",
+        ollama: ollamaOk ? "healthy" : "unreachable",
+        aiService: aiServiceOk ? "healthy" : "unreachable",
+        timestamp: new Date().toISOString(),
+    });
+};
+
 app.get('/api/v1/health', (req, res) => {
     res.status(200).json({
         status: "ok"
     });
 });
+
+app.get('/health', healthHandler);
 
 // Private operational routes — strictly protected by authentication boundary
 app.use('/api/v1', router);
@@ -100,26 +164,34 @@ app.use("/api/v1/agent", requireAuth, agentRouter);
  */
 import {
     getAvailableModels,
+    getRouterDiagnostic,
     classifyTask,
     TASK_TYPE,
 } from "../../ai-service/router/modelRouter.js";
 
 app.get('/api/v1/router/models', async (req, res) => {
-    const defaultModel  = process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
-    const documentModel = process.env.DOCUMENT_MODEL  || defaultModel;
-    const codingModel   = process.env.CODING_MODEL    || defaultModel;
-    const visionModel   = process.env.VISION_MODEL    || "moondream";
+    const defaultModel    = process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
+    const documentModel   = process.env.MODEL_DOCUMENT   || process.env.DOCUMENT_MODEL  || defaultModel;
+    const inspectionModel = process.env.MODEL_INSPECTION || process.env.INSPECTION_MODEL || defaultModel;
+    const codingModel     = process.env.MODEL_CODING     || process.env.CODING_MODEL    || defaultModel;
+    const visionModel     = process.env.MODEL_VISION     || process.env.VISION_MODEL    || "moondream";
 
     const installedModels = await getAvailableModels();
+    const diagnostic = await getRouterDiagnostic();
 
     res.status(200).json({
         registry: {
-            [TASK_TYPE.DOCUMENT]: documentModel,
-            [TASK_TYPE.CODING]:   codingModel,
-            [TASK_TYPE.VISION]:   visionModel,
-            [TASK_TYPE.GENERAL]:  defaultModel,
+            [TASK_TYPE.DOCUMENT_ANALYSIS]: documentModel,
+            [TASK_TYPE.INSPECTION]:        inspectionModel,
+            [TASK_TYPE.CODING]:            codingModel,
+            [TASK_TYPE.VISION]:            visionModel,
+            [TASK_TYPE.GENERAL_CHAT]:      defaultModel,
+            // Aliases for backward compatibility
+            DOCUMENT:                      documentModel,
+            GENERAL:                       defaultModel,
         },
         installedModels,
+        diagnostic,
         ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
     });
 });
@@ -182,9 +254,32 @@ app.get('/api/v1/sovereignty', async (req, res) => {
         ollamaModelLoaded &&
         externalApiKeys.length === 0;
 
+    const perfSummary = telemetryService.getPerformanceSummary();
+
     res.status(200).json({
         status: isFullySovereign ? "sovereign" : "degraded",
         auditTimestamp: new Date().toISOString(),
+        telemetry: {
+            configured: {
+                llmModel: ollamaModel,
+                visionModel: visionModel,
+                embeddingModel: "Xenova/all-MiniLM-L6-v2",
+                qdrantEndpoint: qdrantUrl,
+                ollamaEndpoint: ollamaUrl,
+            },
+            available: {
+                llm: ollamaReachable && ollamaModelLoaded,
+                vision: ollamaReachable && visionModelLoaded,
+                embeddings: true,
+                vectorDb: qdrantReachable,
+                ocr: true,
+            },
+            actuallyUsed: {
+                totalExecutions: perfSummary.totalExecutions,
+                modelsActive: Object.keys(perfSummary.modelsBreakdown),
+                tasksExecuted: Object.keys(perfSummary.tasksBreakdown).filter(k => perfSummary.tasksBreakdown[k] > 0),
+            },
+        },
         components: {
             llm: {
                 provider:         "ollama",
@@ -248,6 +343,65 @@ app.get('/api/v1/sovereignty', async (req, res) => {
             networkFirewallNote:     "Code-level sovereignty verified. No application code calls external AI APIs. Network-layer isolation requires additional iptables/firewall rules for true air-gap.",
         },
     });
+});
+
+/**
+ * Technical Performance Diagnostic Endpoint
+ * GET /api/v1/system/performance
+ *
+ * Reports technical latency percentiles (P50, P95), component warmup status,
+ * and workflow profiles with zero tenant data exposure.
+ */
+app.get('/api/v1/system/performance', async (req, res) => {
+    try {
+        const summary = telemetryService.getPerformanceSummary();
+        const routerDiag = await getRouterDiagnostic();
+        const embeddingMetrics = getEmbeddingMetrics();
+
+        res.status(200).json({
+            success: true,
+            local: true,
+            timestamp: new Date().toISOString(),
+            summary,
+            models: routerDiag.models,
+            embeddings: embeddingMetrics,
+            workflows: {
+                rag: {
+                    local: true,
+                    vectorDb: "Qdrant",
+                    dimensions: embeddingMetrics.dimensions,
+                    embeddingWarm: embeddingMetrics.isWarm,
+                },
+                inspection: {
+                    local: true,
+                    parallelSopRetrieval: true,
+                    deterministicCalculator: true,
+                    approvalNoteDocx: true,
+                },
+                coding: {
+                    local: true,
+                    sandbox: "Docker ephemeral",
+                    networkIsolation: "none",
+                    readOnlyRoot: true,
+                },
+                vision: {
+                    local: true,
+                    model: "moondream",
+                    provider: "ollama",
+                },
+                ocr: {
+                    local: true,
+                    engine: "Tesseract 5.x",
+                    fastPathPdfText: true,
+                },
+            },
+        });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: `Performance diagnostic failed: ${err.message}`,
+        });
+    }
 });
 
 app.use((err, req, res, next) => {

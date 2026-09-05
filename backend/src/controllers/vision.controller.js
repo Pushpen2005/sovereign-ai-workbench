@@ -1,23 +1,32 @@
 /**
- * PR #25 — Multimodal Vision Controller
+ * PR #25 / Phase 10 — Multimodal Vision Controller
  *
  * Handles:
  *   POST /api/v1/vision/analyze
  *
- * Ingests an uploaded image in-memory, validates magic bytes, routes through
- * Model Router (TASK_TYPE.VISION), and invokes the local Ollama vision model.
+ * Ingests an uploaded image, validates magic bytes, decodes dimensions,
+ * routes through Model Router (TASK_TYPE.VISION), and executes structured
+ * industrial visual analysis with authoritative tenant isolation.
  */
 
-import { generateVisionAnswer, LLMError } from "../../../ai-service/llm/llm.service.js";
-import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/router/modelRouter.js";
-import { validateImageMagicBytes } from "../middleware/imageUpload.middleware.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
+import {
+    runVisionWorkflow,
+    parseStructuredObservations,
+} from "../services/vision-agent.service.js";
+import {
+    validateImageMagicBytes,
+    VISION_ERROR_CODES,
+    VisionValidationError,
+} from "../middleware/imageUpload.middleware.js";
+import { isModelAllowed, RouterError } from "../../../ai-service/router/modelRouter.js";
 
 const DEFAULT_VISION_PROMPT =
-    "Analyze this industrial image. Describe visible equipment, components, physical conditions, and identify any obvious abnormalities or defects. Only report observations supported by the image.";
+    "Read the visible equipment and gauge values. Report only what is visually supported by the image, and identify anything that cannot be determined.";
 
 /**
- * Extracts structured sections (summary, observations, abnormalities, limitations)
- * from the vision model's response text.
+ * Backward-compatibility wrapper for existing test suites.
+ * Delegates to parseStructuredObservations.
  *
  * @param {string} text
  * @returns {{ summary: string, observations: string[], abnormalities: string[], limitations: string[] }}
@@ -50,7 +59,7 @@ export function extractStructuredVisionAnalysis(text) {
         } else if (lower.includes("abnormal") || lower.includes("defect") || lower.includes("damage") || lower.includes("issue:")) {
             currentSection = "abnormalities";
             continue;
-        } else if (lower.includes("limitation") || lower.includes("uncertain") || lower.includes("caveat") || lower.includes("note:")) {
+        } else if (lower.includes("limitation") || lower.includes("uncertain") || lower.includes("caveat") || lower.includes("note:") || lower.includes("not_visible")) {
             currentSection = "limitations";
             continue;
         }
@@ -69,7 +78,6 @@ export function extractStructuredVisionAnalysis(text) {
         }
     }
 
-    // If summary is empty, use first observation or first line
     if (!summary && lines.length > 0) {
         summary = lines[0].replace(/^[-*•\d.]+\s*/, "");
     }
@@ -89,28 +97,35 @@ export function extractStructuredVisionAnalysis(text) {
  */
 export async function analyzeImage(req, res, next) {
     try {
-        // 1. Validate file presence and non-empty buffer
+        // 1. Authoritative Organization Identity
+        const organizationId = resolveAuthenticatedOrganization(req);
+        const userId = req.user?.id || req.user?.userId || req.user?.sub || null;
+
+        // 2. Validate file presence and non-empty buffer
         if (!req.file || !req.file.buffer || req.file.buffer.length === 0) {
             return res.status(400).json({
                 success: false,
+                code: VISION_ERROR_CODES.INVALID_IMAGE,
                 message: "Image file is required and cannot be empty (form field: 'image')",
             });
         }
 
-        // 2. Binary magic bytes validation
+        // 3. Binary magic bytes validation
         const isValidMagic = validateImageMagicBytes(req.file.buffer);
         if (!isValidMagic) {
             return res.status(400).json({
                 success: false,
+                code: VISION_ERROR_CODES.UNSUPPORTED_IMAGE_FORMAT,
                 message: "Invalid image format. The file content does not match a valid PNG, JPEG, or WebP image signature.",
             });
         }
 
-        // 3. Model allowlist validation
+        // 4. Model allowlist validation
         if (req.body?.model) {
             if (!isModelAllowed(req.body.model)) {
                 return res.status(400).json({
                     success: false,
+                    code: VISION_ERROR_CODES.MODEL_UNAVAILABLE,
                     message: `Model '${req.body.model}' is not in the sovereign model allowlist.`,
                 });
             }
@@ -120,111 +135,59 @@ export async function analyzeImage(req, res, next) {
             ? req.body.prompt.trim()
             : DEFAULT_VISION_PROMPT;
 
-        // 4. Route through Model Router
-        let routing;
-        try {
-            routing = await routeTask(prompt, { hasImage: true, model: req.body?.model });
-        } catch (routerErr) {
-            if (routerErr instanceof RouterError) {
-                return res.status(503).json({
-                    success: false,
-                    message: routerErr.message,
-                    code: "MODEL_UNAVAILABLE",
-                });
-            }
-            throw routerErr;
-        }
-
         console.log(`[VISION-AUDIT] ${JSON.stringify({
             event: "vision.started",
-            userId: req.user?.id || null,
-            organizationId: req.user?.organizationId || null,
-            model: routing.selectedModel,
+            userId,
+            organizationId,
             sizeBytes: req.file.size,
         })}`);
 
-        // 5. Prepare base64 representation
-        const base64Image = req.file.buffer.toString("base64");
+        // 5. Execute Vision Agent Workflow
+        const result = await runVisionWorkflow({
+            imageBuffer: req.file.buffer,
+            originalName: req.file.originalname,
+            mimeType: req.file.mimetype,
+            prompt,
+            organizationId,
+            userId,
+            expectedReading: req.body?.expectedReading || null,
+            requestedModel: req.body?.model || null,
+            customRunId: req.body?.runId || null,
+        });
 
-        const systemVisionPrompt = `You are an expert industrial visual inspection AI.
-Analyze the provided image thoroughly and objectively.
-
-Follow these critical grounding rules:
-1. ONLY describe what is visibly evident in the image. Do not invent or assume unseen components.
-2. Distinguish clearly between direct visual observations and interpretations.
-3. Identify visible equipment, components, tags/labels, and physical condition.
-4. Note any visible abnormalities (cracks, corrosion, leaks, wear, misalignment, deformation).
-5. Explicitly state limitations (e.g. angle, lighting, resolution, occluded parts).
-6. Do not fabricate safety certifications or engineering approvals.
-
-User Inquiry:
-${prompt}`;
-
-        const startTime = Date.now();
-
-        // 6. Invoke local Ollama vision endpoint
-        let rawAnswer;
-        try {
-            rawAnswer = await generateVisionAnswer(
-                systemVisionPrompt,
-                base64Image,
-                routing.selectedModel
-            );
-        } catch (err) {
-            console.warn(`[VISION-AUDIT] ${JSON.stringify({
-                event: "vision.failed",
-                userId: req.user?.id || null,
-                organizationId: req.user?.organizationId || null,
-                model: routing.selectedModel,
-                error: err.message,
-            })}`);
-
-            if (err instanceof LLMError) {
-                if (err.message.includes("Model unavailable") || err.message.includes("does not support multimodal")) {
-                    return res.status(503).json({
-                        success: false,
-                        message: `Local vision model '${routing.selectedModel}' is not installed or does not support multimodal vision. Run: ollama pull ${routing.selectedModel}`,
-                        code: "MODEL_UNAVAILABLE",
-                    });
-                }
-                return res.status(502).json({
-                    success: false,
-                    message: `Local Ollama vision inference failed: ${err.message}`,
-                });
-            }
-            throw err;
-        }
-
-        const durationMs = Date.now() - startTime;
-        const structured = extractStructuredVisionAnalysis(rawAnswer);
-
-        console.log(`[VISION-AUDIT] ${JSON.stringify({
-            event: "vision.completed",
-            userId: req.user?.id || null,
-            organizationId: req.user?.organizationId || null,
-            model: routing.selectedModel,
-            durationMs,
-        })}`);
+        // For backward compatibility with PR #25 responses:
+        const legacyStructured = extractStructuredVisionAnalysis(result.analysis);
 
         return res.status(200).json({
             success: true,
-            taskType: routing.taskType,
-            model: routing.selectedModel,
-            analysis: rawAnswer,
-            structured,
-            governance: "Visual AI analysis is advisory decision support. It does not replace certified engineer inspection or statutory sign-off.",
-            processing: {
-                local: true,
-                provider: "ollama",
-                durationMs,
-                image: {
-                    originalName: req.file.originalname,
-                    mimeType: req.file.mimetype,
-                    sizeBytes: req.file.size,
-                },
-            },
+            taskType: result.taskType,
+            model: result.selectedModel,
+            analysis: result.analysis,
+            structured: legacyStructured,
+            observations: result.observations,
+            inferred: result.inferred,
+            limitations: result.limitations,
+            verification: result.verification,
+            governance: result.governance,
+            processing: result.processing,
         });
     } catch (error) {
+        if (error instanceof VisionValidationError) {
+            const statusMap = {
+                [VISION_ERROR_CODES.MODEL_UNAVAILABLE]: 503,
+                [VISION_ERROR_CODES.IMAGE_TOO_LARGE]: 400,
+                [VISION_ERROR_CODES.UNSUPPORTED_IMAGE_FORMAT]: 400,
+                [VISION_ERROR_CODES.INVALID_IMAGE]: 400,
+                [VISION_ERROR_CODES.IMAGE_DECODE_FAILED]: 400,
+            };
+            const statusCode = statusMap[error.code] || 400;
+
+            return res.status(statusCode).json({
+                success: false,
+                code: error.code || "VISION_ERROR",
+                message: error.message,
+            });
+        }
         next(error);
     }
 }

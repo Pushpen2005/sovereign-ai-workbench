@@ -8,6 +8,12 @@
 
 import { generateAnswer } from "../../../ai-service/llm/llm.service.js";
 import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.js";
+import { resolveAuthenticatedOrganization } from "../config/organization.js";
+import {
+    runCodingWorkflow,
+    CodingAgentError,
+    CODING_ERROR_CODES,
+} from "../services/coding-agent.service.js";
 import {
     executeInSandbox,
     SandboxValidationError,
@@ -135,6 +141,83 @@ export async function executeCode(req, res, next) {
             return res.status(400).json({
                 success: false,
                 message: error.message,
+            });
+        }
+        next(error);
+    }
+}
+
+/**
+ * POST /api/v1/coding/workflow
+ *
+ * Exposes the full 7-stage coding agent workflow:
+ *   classify_task -> select_model -> generate_code -> validate_code ->
+ *   execute_sandbox -> verify_result -> return_result
+ *
+ * Enforces authoritative organizationId resolution.
+ */
+export async function runCodingWorkflowHandler(req, res, next) {
+    try {
+        const organizationId = resolveAuthenticatedOrganization(req);
+        const userId = req.user?.id || req.user?.userId || req.user?.sub || null;
+
+        const { prompt, request, expected, timeoutMs, customRunId } = req.body || {};
+        const codingRequest = prompt || request;
+
+        if (typeof codingRequest !== "string" || !codingRequest.trim()) {
+            return res.status(400).json({
+                success: false,
+                code: CODING_ERROR_CODES.CODE_VALIDATION_FAILED,
+                message: "Valid prompt or request string is required",
+            });
+        }
+
+        const result = await runCodingWorkflow({
+            request: codingRequest,
+            organizationId,
+            userId,
+            expected,
+            timeoutMs,
+            customRunId,
+        });
+
+        return res.status(200).json({
+            success: true,
+            taskType: result.taskType,
+            selectedModel: result.selectedModel,
+            local: result.local,
+            language: result.language,
+            generatedCode: result.generatedCode,
+            execution: result.execution,
+            verification: result.verification,
+        });
+    } catch (error) {
+        if (error instanceof CodingAgentError) {
+            const statusMap = {
+                [CODING_ERROR_CODES.MODEL_UNAVAILABLE]: 503,
+                [CODING_ERROR_CODES.CODE_VALIDATION_FAILED]: 400,
+                [CODING_ERROR_CODES.EXECUTION_TIMEOUT]: 408,
+                [CODING_ERROR_CODES.RESOURCE_LIMIT_EXCEEDED]: 413,
+                [CODING_ERROR_CODES.EXECUTION_FAILED]: 422,
+                [CODING_ERROR_CODES.VERIFICATION_FAILED]: 422,
+            };
+            const statusCode = statusMap[error.code] || 400;
+
+            return res.status(statusCode).json({
+                success: false,
+                code: error.code,
+                message: error.message,
+                execution: error.details?.state ? {
+                    status: error.details.state.executionStatus,
+                    exitCode: error.details.state.exitCode,
+                    stdout: error.details.state.stdout,
+                    stderr: error.details.state.stderr,
+                    durationMs: error.details.state.durationMs,
+                } : undefined,
+                verification: error.details?.verification || {
+                    verified: false,
+                    reason: error.message,
+                },
             });
         }
         next(error);

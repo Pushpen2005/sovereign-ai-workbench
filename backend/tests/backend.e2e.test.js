@@ -119,6 +119,18 @@ async function run() {
 
         // ─── 2. PDF Upload (17.2) ────────────────────────────────────────────
         console.log("\n  [2] Testing POST /api/v1/inspection/upload...");
+        const loginRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                email: process.env.DEMO_USER_EMAIL || "engineer@example.com",
+                password: process.env.DEMO_USER_PASSWORD || "DemoPassword123!",
+            }),
+        });
+        const loginData = await loginRes.json();
+        const token = loginData.data?.token;
+        const authHeaders = { Authorization: `Bearer ${token}` };
+
         const samplePdfBuffer = buildMinimalPdf([
             [
                 "INDUSTRIAL INSPECTION REPORT",
@@ -140,6 +152,7 @@ async function run() {
 
         const uploadRes = await fetch(`${baseUrl}/api/v1/inspection/upload`, {
             method: "POST",
+            headers: authHeaders,
             body: uploadFormData,
         });
 
@@ -163,6 +176,7 @@ async function run() {
         );
         const badFileRes = await fetch(`${baseUrl}/api/v1/inspection/upload`, {
             method: "POST",
+            headers: authHeaders,
             body: badFileForm,
         });
         assert.equal(badFileRes.status, 400, "Non-PDF file must be rejected with HTTP 400");
@@ -170,6 +184,7 @@ async function run() {
         const emptyForm = new FormData();
         const emptyRes = await fetch(`${baseUrl}/api/v1/inspection/upload`, {
             method: "POST",
+            headers: authHeaders,
             body: emptyForm,
         });
         assert.equal(emptyRes.status, 400, "Missing file must be rejected with HTTP 400");
@@ -179,7 +194,7 @@ async function run() {
         console.log("\n  [4] Testing POST /api/v1/inspection/ingest...");
         const ingestRes = await fetch(`${baseUrl}/api/v1/inspection/ingest`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...authHeaders, "Content-Type": "application/json" },
             body: JSON.stringify({
                 documentId: uploadedDocId,
                 filename: uploadedFilename,
@@ -240,7 +255,7 @@ async function run() {
         console.log("\n  [6] Testing POST /api/v1/inspection/analyze...");
         const analyzeRes = await fetch(`${baseUrl}/api/v1/inspection/analyze`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...authHeaders, "Content-Type": "application/json" },
             body: JSON.stringify({
                 documentId: uploadedDocId,
                 task: "Analyze this inspection report and extract all significant findings.",
@@ -272,7 +287,7 @@ async function run() {
 
         const riskRes = await fetch(`${baseUrl}/api/v1/inspection/risk`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...authHeaders, "Content-Type": "application/json" },
             body: JSON.stringify({
                 documentId: uploadedDocId,
                 finding: sampleFinding,
@@ -303,7 +318,7 @@ async function run() {
         console.log("\n  [8] Testing POST /api/v1/inspection/approval-note...");
         const docxRes = await fetch(`${baseUrl}/api/v1/inspection/approval-note`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...authHeaders, "Content-Type": "application/json" },
             body: JSON.stringify({
                 subject: "Inspection Report Analysis — Pump-03",
                 findings: [sampleFinding],
@@ -322,7 +337,7 @@ async function run() {
 
         // Test safe download
         console.log("    → Testing GET download endpoint...");
-        const downloadRes = await fetch(`${baseUrl}${docxData.downloadUrl}`);
+        const downloadRes = await fetch(`${baseUrl}${docxData.downloadUrl}`, { headers: authHeaders });
         assert.equal(downloadRes.status, 200, "Download must return HTTP 200");
         const docxBuffer = await downloadRes.arrayBuffer();
         assert.ok(docxBuffer.byteLength > 1000, "Downloaded DOCX must be non-empty");
@@ -340,6 +355,7 @@ async function run() {
 
         const workflowRes = await fetch(`${baseUrl}/api/v1/inspection/workflow`, {
             method: "POST",
+            headers: authHeaders,
             body: workflowForm,
         });
 
@@ -362,7 +378,7 @@ async function run() {
         // Ingest without input
         const badIngest = await fetch(`${baseUrl}/api/v1/inspection/ingest`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...authHeaders, "Content-Type": "application/json" },
             body: JSON.stringify({}),
         });
         assert.equal(badIngest.status, 400);
@@ -370,7 +386,7 @@ async function run() {
         // Analyze without documentId
         const badAnalyze = await fetch(`${baseUrl}/api/v1/inspection/analyze`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...authHeaders, "Content-Type": "application/json" },
             body: JSON.stringify({ task: "Analyze" }),
         });
         assert.equal(badAnalyze.status, 400);
@@ -378,13 +394,15 @@ async function run() {
         // Risk without finding
         const badRisk = await fetch(`${baseUrl}/api/v1/inspection/risk`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: { ...authHeaders, "Content-Type": "application/json" },
             body: JSON.stringify({ documentId: "123" }),
         });
         assert.equal(badRisk.status, 400);
 
         // Download non-existent file
-        const badDownload = await fetch(`${baseUrl}/api/v1/inspection/download/nonexistent.docx`);
+        const badDownload = await fetch(`${baseUrl}/api/v1/inspection/download/nonexistent.docx`, {
+            headers: authHeaders,
+        });
         assert.equal(badDownload.status, 404);
 
         console.log("    ✓ Negative scenarios handled cleanly with proper HTTP status codes");

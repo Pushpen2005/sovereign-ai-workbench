@@ -548,18 +548,32 @@ export function createInspectionNodes(customAdapters = {}) {
             const updatedFindings = [];
 
             if (Array.isArray(state.findings) && state.findings.length > 0) {
-                for (const rawFinding of state.findings) {
-                    const finding = { ...rawFinding };
-                    const sopChunks = await adapters.runSopRetrieval(finding, sopOptions);
-                    const findingChunks = [];
+                const findingsWithSop = await Promise.all(
+                    state.findings.map(async (rawFinding) => {
+                        const finding = { ...rawFinding };
+                        const sopChunks = await adapters.runSopRetrieval(finding, sopOptions);
+                        const findingChunks = [];
 
-                    if (Array.isArray(sopChunks)) {
-                        for (const chunk of sopChunks) {
-                            // Enforce strict tenant boundary: Discard chunks belonging to another company
-                            if (state.organizationId && chunk.organizationId && chunk.organizationId !== state.organizationId) {
-                                continue;
+                        if (Array.isArray(sopChunks)) {
+                            for (const chunk of sopChunks) {
+                                // Enforce strict tenant boundary: Discard chunks belonging to another company
+                                if (state.organizationId && chunk.organizationId && chunk.organizationId !== state.organizationId) {
+                                    continue;
+                                }
+                                findingChunks.push(chunk);
                             }
-                            findingChunks.push(chunk);
+                        }
+
+                        // Store isolated SOP evidence strictly on this finding
+                        finding.sopEvidence = findingChunks;
+                        return finding;
+                    })
+                );
+
+                for (const finding of findingsWithSop) {
+                    updatedFindings.push(finding);
+                    if (Array.isArray(finding.sopEvidence)) {
+                        for (const chunk of finding.sopEvidence) {
                             const key = `${chunk.documentId}:${chunk.page}:${chunk.chunkIndex}`;
                             if (!seenKeys.has(key)) {
                                 seenKeys.add(key);
@@ -567,10 +581,6 @@ export function createInspectionNodes(customAdapters = {}) {
                             }
                         }
                     }
-
-                    // Store isolated SOP evidence strictly on this finding
-                    finding.sopEvidence = findingChunks;
-                    updatedFindings.push(finding);
                 }
             } else {
                 // Fallback query if 0 findings extracted (clean inspection)

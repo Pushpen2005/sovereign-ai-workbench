@@ -11,14 +11,27 @@ async function runChatTests() {
   const BASE_URL = process.env.TEST_BASE_URL || `http://127.0.0.1:${port}`;
 
   try {
+    // Authenticate demo user for protected chat endpoints
+    const loginRes = await fetch(`${BASE_URL}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: process.env.DEMO_USER_EMAIL || "engineer@example.com",
+        password: process.env.DEMO_USER_PASSWORD || "DemoPassword123!",
+      }),
+    });
+    const loginData = await loginRes.json();
+    const token = loginData.data?.token;
+    const authHeaders = { Authorization: `Bearer ${token}` };
+
     // 1. Initial history and stats check
     console.log("[1] Checking initial chat history and stats...");
-    const initHistRes = await fetch(`${BASE_URL}/api/v1/chat/history`);
+    const initHistRes = await fetch(`${BASE_URL}/api/v1/chat/history`, { headers: authHeaders });
     assert.equal(initHistRes.status, 200);
     const initHistData = await initHistRes.json();
     const startConvCount = initHistData.data.length;
 
-    const initStatsRes = await fetch(`${BASE_URL}/api/v1/chat/stats`);
+    const initStatsRes = await fetch(`${BASE_URL}/api/v1/chat/stats`, { headers: authHeaders });
     assert.equal(initStatsRes.status, 200);
     const initStatsData = await initStatsRes.json();
     const startQueryCount = initStatsData.data.queries;
@@ -29,7 +42,7 @@ async function runChatTests() {
     const q1 = "What is the normal operating limit for bearing temperature?";
     const ask1Res = await fetch(`${BASE_URL}/api/v1/chat/ask`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...authHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({ question: q1 }),
     });
     assert.equal(ask1Res.status, 200);
@@ -48,7 +61,7 @@ async function runChatTests() {
     const q2 = "What should be done if temperature exceeds the limit?";
     const ask2Res = await fetch(`${BASE_URL}/api/v1/chat/ask`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...authHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({ question: q2, conversationId: convId }),
     });
     assert.equal(ask2Res.status, 200);
@@ -59,7 +72,7 @@ async function runChatTests() {
 
     // 4. Verify conversation messages
     console.log(`\n[4] Verifying GET /api/v1/chat/conversations/${convId}/messages...`);
-    const msgRes = await fetch(`${BASE_URL}/api/v1/chat/conversations/${convId}/messages`);
+    const msgRes = await fetch(`${BASE_URL}/api/v1/chat/conversations/${convId}/messages`, { headers: authHeaders });
     assert.equal(msgRes.status, 200);
     const msgData = await msgRes.json();
     assert.equal(msgData.success, true);
@@ -78,7 +91,7 @@ async function runChatTests() {
 
     // 5. Verify conversation appears in history
     console.log("\n[5] Verifying conversation in GET /api/v1/chat/history...");
-    const histRes = await fetch(`${BASE_URL}/api/v1/chat/history`);
+    const histRes = await fetch(`${BASE_URL}/api/v1/chat/history`, { headers: authHeaders });
     assert.equal(histRes.status, 200);
     const histData = await histRes.json();
     assert.equal(histData.data.length, startConvCount + 1, "Conversations must increment by 1");
@@ -89,7 +102,7 @@ async function runChatTests() {
 
     // 6. Verify stats endpoint reflects queries
     console.log("\n[6] Verifying GET /api/v1/chat/stats...");
-    const statsRes = await fetch(`${BASE_URL}/api/v1/chat/stats`);
+    const statsRes = await fetch(`${BASE_URL}/api/v1/chat/stats`, { headers: authHeaders });
     assert.equal(statsRes.status, 200);
     const statsData = await statsRes.json();
     assert.equal(statsData.data.queries, startQueryCount + 2, "Query count must increment by exactly 2");
@@ -99,23 +112,27 @@ async function runChatTests() {
     // 7. Organization isolation
     console.log("\n[7] Verifying organization isolation...");
     const foreignOrgRes = await fetch(`${BASE_URL}/api/v1/chat/conversations/${convId}/messages`, {
-      headers: { "x-organization-id": "00000000-0000-0000-0000-999999999999" },
+      headers: { ...authHeaders, "x-organization-id": "00000000-0000-0000-0000-999999999999" },
     });
-    assert.equal(foreignOrgRes.status, 404, "Foreign organization must not access conversation");
+    assert.ok([403, 404].includes(foreignOrgRes.status), "Foreign organization header must be blocked with 403/404");
 
     const foreignHistRes = await fetch(`${BASE_URL}/api/v1/chat/history`, {
-      headers: { "x-organization-id": "00000000-0000-0000-0000-999999999999" },
+      headers: { ...authHeaders, "x-organization-id": "00000000-0000-0000-0000-999999999999" },
     });
-    const foreignHistData = await foreignHistRes.json();
-    const leakedConv = foreignHistData.data.find((c) => c.id === convId);
-    assert.strictEqual(leakedConv, undefined, "Foreign organization must not see conversation in history");
+    if (foreignHistRes.status === 200) {
+      const foreignHistData = await foreignHistRes.json();
+      const leakedConv = foreignHistData.data?.find((c) => c.id === convId);
+      assert.strictEqual(leakedConv, undefined, "Foreign organization must not see conversation in history");
+    } else {
+      assert.ok([403, 404].includes(foreignHistRes.status), "Foreign organization access denied");
+    }
     console.log("    ✓ Organization isolation confirmed");
 
     // 8. Negative test: non-existent conversation in ask
     console.log("\n[8] Verifying ask with invalid conversationId...");
     const badAskRes = await fetch(`${BASE_URL}/api/v1/chat/ask`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { ...authHeaders, "Content-Type": "application/json" },
       body: JSON.stringify({
         question: "Hello?",
         conversationId: "00000000-0000-0000-0000-000000000000",
