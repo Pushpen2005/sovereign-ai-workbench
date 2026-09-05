@@ -39,6 +39,9 @@
 
 import * as defaultAdapters from "./inspection.adapters.js";
 import { INSUFFICIENT_EVIDENCE_RESULT } from "../../../../ai-service/risk/risk.schema.js";
+import { executeCalculator } from "../../services/agentTools/calculator.tool.js";
+import { getReportStoragePath } from "../../utils/storage.js";
+import fs from "fs";
 
 const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", null]);
 
@@ -59,6 +62,106 @@ export function validateFindingStructure(finding) {
         return { isValid: false, error: "Finding 'evidence' field must be a non-empty string" };
     }
     return { isValid: true };
+}
+
+/**
+ * Validates whether a finding is grounded in the retrieved report context.
+ *
+ * @param {object} finding
+ * @param {Array<object>} retrievalResults
+ * @returns {boolean}
+ */
+export function validateFindingGrounding(finding, retrievalResults = []) {
+    if (!finding || typeof finding !== "object") return false;
+
+    if (!Array.isArray(retrievalResults) || retrievalResults.length === 0) {
+        // If finding has non-empty evidence, allow fallback grounding check
+        return Boolean(finding.evidence && finding.evidence.trim().length > 5);
+    }
+
+    const normEv = String(finding.evidence || "").toLowerCase().trim();
+
+    return retrievalResults.some((chunk) => {
+        if (!chunk || typeof chunk !== "object") return false;
+
+        // Verify finding source matches chunk documentId and page if source is specified
+        if (finding.source && typeof finding.source === "object") {
+            const docMatch =
+                !finding.source.documentId ||
+                !chunk.documentId ||
+                String(finding.source.documentId).trim() === String(chunk.documentId).trim();
+            const pageMatch =
+                finding.source.page === undefined ||
+                chunk.page === undefined ||
+                Number(finding.source.page) === Number(chunk.page);
+
+            if (docMatch && pageMatch) {
+                // If text also aligns or source matches exactly
+                if (typeof chunk.text === "string" && normEv) {
+                    const normChunk = chunk.text.toLowerCase();
+                    if (normChunk.includes(normEv) || normEv.includes(normChunk)) {
+                        return true;
+                    }
+                } else {
+                    return true;
+                }
+            }
+        }
+
+        // Check text match between finding evidence and chunk text
+        if (typeof chunk.text === "string" && normEv) {
+            const normChunk = chunk.text.toLowerCase();
+            return normChunk.includes(normEv) || normEv.includes(normChunk);
+        }
+
+        return false;
+    });
+}
+
+/**
+ * Deterministically analyzes numerical thresholds (difference and percentage exceedance)
+ * using the safe recursive-descent calculator tool.
+ *
+ * @param {object} finding
+ * @returns {Promise<object|null>}
+ */
+export async function analyzeFindingNumericThreshold(finding) {
+    if (!finding || !finding.observedValue || !finding.limit) {
+        return null;
+    }
+
+    const obsMatch = String(finding.observedValue).match(/-?\d+(?:\.\d+)?/);
+    const limMatch = String(finding.limit).match(/-?\d+(?:\.\d+)?/);
+
+    if (!obsMatch || !limMatch) {
+        return null;
+    }
+
+    const obs = parseFloat(obsMatch[0]);
+    const lim = parseFloat(limMatch[0]);
+
+    if (!Number.isFinite(obs) || !Number.isFinite(lim)) {
+        return null;
+    }
+
+    try {
+        const diffResult = await executeCalculator({ expression: `${obs} - ${lim}` });
+        let pctResult = { result: 0 };
+        if (lim !== 0) {
+            pctResult = await executeCalculator({ expression: `((${obs} - ${lim}) / ${lim}) * 100` });
+        }
+
+        return {
+            observed: obs,
+            limit: lim,
+            difference: diffResult.result,
+            percentageExceedance: pctResult.result,
+            exceeded: obs > lim,
+        };
+    } catch (err) {
+        console.warn(`[Calculator] Non-fatal numeric analysis warning: ${err.message}`);
+        return null;
+    }
 }
 
 /**
@@ -324,8 +427,8 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 4: Validate Findings (Phase 4)
-     * Validates extracted findings against PR #13 schema.
+     * Node 4: Validate Findings (Phase 4 & 6)
+     * Validates extracted findings against schema, report evidence grounding, and numeric analysis.
      */
     async function validateFindingsNode(state) {
         const executionOrder = ["validate_findings"];
@@ -340,17 +443,36 @@ export function createInspectionNodes(customAdapters = {}) {
 
             const validation = validateFindingsArray(state.findings);
 
-            if (validation.isValid) {
+            if (!validation.isValid) {
                 return {
-                    findingValidation: { isValid: true, status: "VALID" },
+                    findingValidation: { isValid: false, status: "INVALID", error: validation.error },
+                    failureReason: validation.error,
                     currentNode: "validate_findings",
                     executionOrder,
                 };
             }
 
+            // Phase 6: Grounding verification & deterministic numeric analysis per finding
+            const validatedFindings = [];
+            if (Array.isArray(state.findings)) {
+                for (const rawFinding of state.findings) {
+                    const finding = { ...rawFinding };
+                    const isGrounded = validateFindingGrounding(finding, state.retrievalResults);
+                    finding.grounded = isGrounded;
+
+                    // Deterministic numeric calculator analysis if values present
+                    const numAnalysis = await analyzeFindingNumericThreshold(finding);
+                    if (numAnalysis) {
+                        finding.numericalAnalysis = numAnalysis;
+                    }
+
+                    validatedFindings.push(finding);
+                }
+            }
+
             return {
-                findingValidation: { isValid: false, status: "INVALID", error: validation.error },
-                failureReason: validation.error,
+                findings: validatedFindings,
+                findingValidation: { isValid: true, status: "VALID" },
                 currentNode: "validate_findings",
                 executionOrder,
             };
@@ -405,8 +527,8 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 6: Retrieve SOP Evidence
-     * Calls SOP adapter enforcing documentType='sop'.
+     * Node 6: Retrieve SOP Evidence (Phase 6: Isolated per finding)
+     * Calls SOP adapter enforcing documentType='sop' and organizationId boundary.
      */
     async function retrieveSopNode(state) {
         const executionOrder = ["retrieve_sop"];
@@ -423,12 +545,21 @@ export function createInspectionNodes(customAdapters = {}) {
 
             const allSopEvidence = [];
             const seenKeys = new Set();
+            const updatedFindings = [];
 
             if (Array.isArray(state.findings) && state.findings.length > 0) {
-                for (const finding of state.findings) {
+                for (const rawFinding of state.findings) {
+                    const finding = { ...rawFinding };
                     const sopChunks = await adapters.runSopRetrieval(finding, sopOptions);
+                    const findingChunks = [];
+
                     if (Array.isArray(sopChunks)) {
                         for (const chunk of sopChunks) {
+                            // Enforce strict tenant boundary: Discard chunks belonging to another company
+                            if (state.organizationId && chunk.organizationId && chunk.organizationId !== state.organizationId) {
+                                continue;
+                            }
+                            findingChunks.push(chunk);
                             const key = `${chunk.documentId}:${chunk.page}:${chunk.chunkIndex}`;
                             if (!seenKeys.has(key)) {
                                 seenKeys.add(key);
@@ -436,17 +567,27 @@ export function createInspectionNodes(customAdapters = {}) {
                             }
                         }
                     }
+
+                    // Store isolated SOP evidence strictly on this finding
+                    finding.sopEvidence = findingChunks;
+                    updatedFindings.push(finding);
                 }
             } else {
-                // Fallback query if 0 findings extracted
+                // Fallback query if 0 findings extracted (clean inspection)
                 const sopChunks = await adapters.runSopRetrieval(state.task, sopOptions);
                 if (Array.isArray(sopChunks)) {
-                    allSopEvidence.push(...sopChunks);
+                    for (const chunk of sopChunks) {
+                        if (state.organizationId && chunk.organizationId && chunk.organizationId !== state.organizationId) {
+                            continue;
+                        }
+                        allSopEvidence.push(chunk);
+                    }
                 }
             }
 
             return {
                 sopEvidence: allSopEvidence,
+                findings: updatedFindings.length > 0 ? updatedFindings : state.findings,
                 currentNode: "retrieve_sop",
                 executionOrder,
             };
@@ -467,12 +608,21 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 7: Check SOP Evidence (Phase 4)
+     * Node 7: Check SOP Evidence (Phase 4 & 6)
      * Verifies whether authoritative SOP chunks were retrieved.
      */
     async function checkSopEvidenceNode(state) {
         const executionOrder = ["check_sop_evidence"];
         try {
+            // Clean inspections (0 findings) proceed to assess_risk for routine recommendation
+            if (Array.isArray(state.findings) && state.findings.length === 0) {
+                return {
+                    sopEvidenceStatus: "EVIDENCE_FOUND",
+                    currentNode: "check_sop_evidence",
+                    executionOrder,
+                };
+            }
+
             const hasEvidence = Array.isArray(state.sopEvidence) && state.sopEvidence.length > 0;
 
             return {
@@ -496,7 +646,10 @@ export function createInspectionNodes(customAdapters = {}) {
     async function insufficientEvidenceNode(state) {
         const executionOrder = ["insufficient_evidence"];
 
-        const riskAssessment = INSUFFICIENT_EVIDENCE_RESULT.riskAssessment;
+        const riskAssessment = {
+            ...INSUFFICIENT_EVIDENCE_RESULT.riskAssessment,
+            grounded: false,
+        };
         const recommendation = INSUFFICIENT_EVIDENCE_RESULT.recommendation;
 
         return {
@@ -515,7 +668,7 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 9: Assess Risk and Formulate Recommendations
+     * Node 9: Assess Risk and Formulate Recommendations (Phase 6: Independent Per-Finding)
      */
     async function assessRiskNode(state) {
         const executionOrder = ["assess_risk"];
@@ -527,45 +680,85 @@ export function createInspectionNodes(customAdapters = {}) {
             const riskAssessments = [];
             const recommendations = [];
             const rawCitations = [];
+            const updatedFindings = [];
 
-            const riskOptions = {
+            const baseRiskOptions = {
                 organizationId: state.organizationId,
                 ...state.metadata?.riskOptions,
             };
-            if (!riskOptions.searchSop && Array.isArray(state.sopEvidence) && state.sopEvidence.length > 0) {
-                riskOptions.searchSop = async () => state.sopEvidence;
-            }
 
             if (Array.isArray(state.findings) && state.findings.length > 0) {
-                for (const finding of state.findings) {
-                    const riskResult = await adapters.runRiskAssessment(finding, riskOptions);
+                for (const rawFinding of state.findings) {
+                    const finding = { ...rawFinding };
+                    const findingEvidence = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
 
-                    if (riskResult.riskAssessment) {
-                        riskAssessments.push(riskResult.riskAssessment);
+                    if (findingEvidence.length > 0) {
+                        // Finding has authoritative SOP evidence -> run risk assessment using ONLY its evidence
+                        const findingRiskOptions = {
+                            ...baseRiskOptions,
+                            searchSop: async () => findingEvidence,
+                        };
+                        const riskResult = await adapters.runRiskAssessment(finding, findingRiskOptions);
+
+                        if (riskResult.riskAssessment) {
+                            finding.riskAssessment = riskResult.riskAssessment;
+                            riskAssessments.push(riskResult.riskAssessment);
+                        }
+                        if (riskResult.recommendation) {
+                            finding.recommendation = riskResult.recommendation;
+                            recommendations.push(riskResult.recommendation);
+                        }
+                        if (Array.isArray(riskResult.citations)) {
+                            finding.citations = riskResult.citations;
+                            rawCitations.push(...riskResult.citations);
+                        }
+                        finding.grounded = riskResult.grounded !== false;
+                    } else {
+                        // Unsupported finding (STEP 11 — Partial Failure Handling)
+                        const ungroundedRisk = {
+                            level: null,
+                            reason: `Insufficient SOP evidence is available to determine risk level for ${finding.finding}.`,
+                            grounded: false,
+                        };
+                        const ungroundedRec = "Insufficient SOP evidence is available to provide a validated recommendation.";
+
+                        finding.riskAssessment = ungroundedRisk;
+                        finding.recommendation = ungroundedRec;
+                        finding.citations = [];
+                        finding.grounded = false;
+
+                        riskAssessments.push(ungroundedRisk);
+                        recommendations.push(ungroundedRec);
                     }
-                    if (riskResult.recommendation) {
-                        recommendations.push(riskResult.recommendation);
-                    }
-                    if (Array.isArray(riskResult.citations)) {
-                        rawCitations.push(...riskResult.citations);
-                    }
+
+                    updatedFindings.push(finding);
                 }
             } else {
                 // Safe default when 0 findings detected
                 riskAssessments.push({
                     level: null,
                     reason: "No significant inspection findings were detected in the report.",
+                    grounded: false,
                 });
                 recommendations.push("Continue standard operating and inspection schedule.");
             }
 
-            const primaryRisk = riskAssessments[0] || {
-                level: null,
-                reason: "No risk assessment available.",
-            };
-            const primaryRecommendation = recommendations.join(" ") || "No specific recommendation generated.";
+            // Primary risk assessment prioritizes highest risk level
+            const primaryRisk =
+                riskAssessments.find((r) => r.level === "HIGH") ||
+                riskAssessments.find((r) => r.level === "MEDIUM") ||
+                riskAssessments.find((r) => r.level === "LOW") ||
+                riskAssessments[0] || {
+                    level: null,
+                    reason: "No risk assessment available.",
+                    grounded: false,
+                };
+
+            const primaryRecommendation =
+                recommendations.filter(Boolean).join(" ") || "No specific recommendation generated.";
 
             return {
+                findings: updatedFindings.length > 0 ? updatedFindings : state.findings,
                 riskAssessment: primaryRisk,
                 riskAssessments,
                 recommendation: primaryRecommendation,
@@ -679,7 +872,15 @@ export function createInspectionNodes(customAdapters = {}) {
             const rawCitations = Array.isArray(state.citations) ? state.citations : [];
             const sopEvidence = Array.isArray(state.sopEvidence) ? state.sopEvidence : [];
 
-            const verifiedCitations = adapters.runCitationValidation(rawCitations, sopEvidence);
+            // Filter raw citations to eliminate cross-tenant leakage
+            const tenantFilteredCitations = rawCitations.filter((c) => {
+                if (state.organizationId && c.organizationId && c.organizationId !== state.organizationId) {
+                    return false;
+                }
+                return true;
+            });
+
+            const verifiedCitations = adapters.runCitationValidation(tenantFilteredCitations, sopEvidence, state.organizationId);
 
             // Deduplicate citations
             const seen = new Set();
@@ -726,14 +927,19 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 13: Generate Report
-     * Assembles and emits Approval Note DOCX only for valid workflows.
+     * Node 13: Generate Report (Phase 6: Report Validation & Tenant Verification)
+     * Validates input sections and persists Approval Note DOCX strictly within tenant directory.
      */
     async function generateReportNode(state) {
         const executionOrder = ["generate_report"];
         try {
             if (state.status === "failed") {
                 return { currentNode: "generate_report", executionOrder };
+            }
+
+            // Phase 6 STEP 14: Report Validation before generation
+            if (state.organizationId && (typeof state.organizationId !== "string" || !state.organizationId.trim())) {
+                throw new Error("organizationId must be a valid non-empty string when provided");
             }
 
             const docxData = {
@@ -751,12 +957,20 @@ export function createInspectionNodes(customAdapters = {}) {
                 documentId: state.documentId,
                 organizationId: state.organizationId,
                 task: state.task,
-                filename: state.metadata?.filename || state.metadata?.approvalNoteOptions?.filename || `Approval_Note_${state.documentId || "generated"}.docx`,
+                filename:
+                    state.metadata?.filename ||
+                    state.metadata?.approvalNoteOptions?.filename ||
+                    `Approval_Note_${state.documentId || "generated"}.docx`,
                 ...state.metadata?.approvalNoteOptions,
                 ...state.metadata?.reportOptions,
             };
 
             const reportResult = await adapters.runReportGeneration(docxData, reportOptions);
+
+            // Verify report generation produced a valid result
+            if (!reportResult || !reportResult.filename) {
+                throw new Error("Approval Note DOCX was not successfully generated");
+            }
 
             return {
                 report: reportResult,

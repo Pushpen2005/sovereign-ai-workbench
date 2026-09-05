@@ -218,6 +218,12 @@ export async function searchSimilarChunks(
 
             organizationId:
                 result.payload?.organizationId || null,
+
+            source:
+                result.payload?.source || "pdf-text",
+
+            extractionMethod:
+                result.payload?.extractionMethod || result.payload?.source || "pdf-text",
         }));
 
         return allowedDocumentIds

@@ -99,6 +99,7 @@ export async function initDb() {
 
     CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_documents_organization_id ON documents (organization_id);
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(50) DEFAULT 'pdf-text';
 
     CREATE TABLE IF NOT EXISTS reports (
       id VARCHAR(255) PRIMARY KEY,

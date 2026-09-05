@@ -291,7 +291,11 @@ export async function ingestInspectionReport(filePath, options = {}) {
     const generateEmbeddingFn = options.generateEmbedding ?? generateEmbedding;
     const upsertChunksFn = options.upsertChunks ?? upsertChunks;
 
-    const { pages } = await extractPdfTextFn(filePath);
+    const { pages, extractionMethod } = await extractPdfTextFn(filePath, {
+        organizationId: options.organizationId,
+        forceOcr: options.forceOcr,
+        onProgress: options.onProgress,
+    });
     const rawChunks = chunkTextFn(pages, documentId);
 
     if (rawChunks.length === 0) {
@@ -303,6 +307,7 @@ export async function ingestInspectionReport(filePath, options = {}) {
         filename,
         documentType: options.documentType || INSPECTION_DOCUMENT_TYPE,
         organizationId: options.organizationId.trim(),
+        extractionMethod: chunk.extractionMethod || extractionMethod || "pdf-text",
     }));
 
     const chunksWithVectors = [];
@@ -320,6 +325,7 @@ export async function ingestInspectionReport(filePath, options = {}) {
         documentId,
         filename,
         chunksStored: chunksWithVectors.length,
+        extractionMethod: extractionMethod || "pdf-text",
     };
 }
 

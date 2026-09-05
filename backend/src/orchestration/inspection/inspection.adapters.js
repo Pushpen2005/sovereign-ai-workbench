@@ -209,8 +209,8 @@ export async function runRiskAssessment(finding, options = {}) {
  * @param {Array<object>} retrievedSopChunks Authoritative retrieved SOP chunks
  * @returns {Array<object>} Verified citations
  */
-export function runCitationValidation(rawCitations, retrievedSopChunks) {
-    return filterValidCitations(rawCitations, retrievedSopChunks);
+export function runCitationValidation(rawCitations, retrievedSopChunks, organizationId) {
+    return filterValidCitations(rawCitations, retrievedSopChunks, organizationId);
 }
 
 /**

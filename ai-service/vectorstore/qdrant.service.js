@@ -188,6 +188,8 @@ export async function upsertChunks(chunks) {
                     pageEndOffset: chunk.pageEndOffset,
                     startOffset: chunk.pageStartOffset,
                     endOffset: chunk.pageEndOffset,
+                    source: chunk.source || "pdf-text",
+                    extractionMethod: chunk.extractionMethod || chunk.source || "pdf-text",
                 },
             };
         });

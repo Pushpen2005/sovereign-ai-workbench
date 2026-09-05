@@ -121,7 +121,28 @@ export function createInspectionGraph(customNodes = null, compileOptions = {}) {
     return graph.compile(compileOptions);
 }
 
+let _compiledGraph = null;
+
 /**
- * Pre-compiled default instance for production execution.
+ * Lazily gets or initializes the compiled inspection graph.
  */
-export const compiledInspectionGraph = createInspectionGraph();
+export function getCompiledInspectionGraph() {
+    if (!_compiledGraph) {
+        _compiledGraph = createInspectionGraph();
+    }
+    return _compiledGraph;
+}
+
+/**
+ * Pre-compiled default instance for production execution with lazy initialization.
+ */
+export const compiledInspectionGraph = new Proxy({}, {
+    get(target, prop) {
+        const graph = getCompiledInspectionGraph();
+        const value = graph[prop];
+        if (typeof value === "function") {
+            return value.bind(graph);
+        }
+        return value;
+    },
+});
