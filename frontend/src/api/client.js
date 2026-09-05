@@ -67,6 +67,26 @@ axiosInstance.interceptors.response.use(
         data?.message ||
         data?.error ||
         `HTTP ${status}: ${error.response.statusText}`;
+
+      // Session Expiry Interception: Clear token and safely redirect to login with notification
+      const reqUrl = error.config?.url || '';
+      const isAuthEndpoint = reqUrl.includes('/api/v1/auth/login') || reqUrl.includes('/api/v1/auth/register');
+
+      if (status === 401 && !isAuthEndpoint) {
+        try {
+          localStorage.removeItem('sovereign_auth_token');
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('auth:session-expired'));
+            const currentPath = window.location.pathname;
+            if (currentPath !== '/login' && currentPath !== '/register') {
+              window.location.href = '/login?expired=true';
+            }
+          }
+        } catch {
+          // Non-blocking in non-browser or storage-restricted contexts
+        }
+      }
+
       return Promise.reject(new ApiError(message, status, data));
     }
     if (error.request) {

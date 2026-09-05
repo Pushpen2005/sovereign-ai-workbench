@@ -36,6 +36,7 @@ import { telemetryService } from "./telemetry.service.js";
 // Error Codes
 export const CODING_ERROR_CODES = Object.freeze({
     MODEL_UNAVAILABLE: "MODEL_UNAVAILABLE",
+    MODEL_NOT_ALLOWED: "MODEL_NOT_ALLOWED",
     CODE_VALIDATION_FAILED: "CODE_VALIDATION_FAILED",
     EXECUTION_TIMEOUT: "EXECUTION_TIMEOUT",
     EXECUTION_FAILED: "EXECUTION_FAILED",
@@ -238,6 +239,7 @@ export async function runCodingWorkflow({
     expected = null,
     timeoutMs = 5000,
     customRunId = null,
+    model = null,
     options = {},
 }) {
     if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
@@ -329,14 +331,17 @@ export async function runCodingWorkflow({
         emitProgress("model_selected", { taskType: classified });
         let routing;
         try {
-            routing = await routeTask(cleanRequest);
+            routing = await routeTask(cleanRequest, { model: model || options?.model || options?.requestedModel });
             state.selectedModel = routing.selectedModel;
             state.local = routing.local !== false;
         } catch (routerErr) {
             if (routerErr instanceof RouterError) {
+                const errCode = routerErr.code === "MODEL_NOT_ALLOWED"
+                    ? CODING_ERROR_CODES.MODEL_NOT_ALLOWED
+                    : CODING_ERROR_CODES.MODEL_UNAVAILABLE;
                 throw new CodingAgentError(
                     `Model routing error: ${routerErr.message}`,
-                    CODING_ERROR_CODES.MODEL_UNAVAILABLE,
+                    errCode,
                     { reason: routerErr.reason }
                 );
             }

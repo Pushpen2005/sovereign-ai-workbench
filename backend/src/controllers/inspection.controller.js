@@ -392,9 +392,10 @@ export async function runWorkflow(req, res, next) {
         }
 
         const primaryRisk =
-            Array.isArray(workflowResult.riskAssessments) && workflowResult.riskAssessments.length > 0
+            workflowResult.riskAssessment?.level ||
+            (Array.isArray(workflowResult.riskAssessments) && workflowResult.riskAssessments.length > 0
                 ? workflowResult.riskAssessments[0]?.level || null
-                : null;
+                : null);
 
         const reportTitle = `Approval Note — ${workflowResult.filename || workflowResult.documentId}`;
 
@@ -426,7 +427,9 @@ export async function runWorkflow(req, res, next) {
                 filename: workflowResult.filename,
                 chunksStored: workflowResult.chunksStored,
                 findings: workflowResult.findings,
+                riskAssessment: workflowResult.riskAssessment || workflowResult.riskAssessments?.[0] || null,
                 riskAssessments: workflowResult.riskAssessments,
+                recommendation: workflowResult.recommendation || workflowResult.recommendations?.[0] || null,
                 recommendations: workflowResult.recommendations,
                 citations: workflowResult.citations,
                 approvalNote: approvalNoteData,
@@ -456,13 +459,101 @@ export async function streamInspectionRun(req, res, next) {
             });
         }
         if (authCheck.notFound) {
+            // Register upcoming run for requesting organization so client can connect before or concurrently with workflow start
+            executionEvents.registerRunOwner(runId, organizationId, "inspection");
+        }
+
+        executionEvents.subscribe(runId, req, res, { organizationId });
+    } catch (error) {
+        next(error);
+    }
+}
+
+/**
+ * Retrieves state and metadata for an inspection run.
+ */
+export async function getInspectionRun(req, res, next) {
+    try {
+        const organizationId = resolveAuthenticatedOrganization(req);
+        const { runId } = req.params;
+
+        const authCheck = await executionEvents.verifyOrHydrateRunOwner(runId, organizationId);
+        if (authCheck.forbidden) {
+            return res.status(403).json({
+                success: false,
+                message: authCheck.message || "Forbidden: Inspection run belongs to another organization.",
+            });
+        }
+        if (authCheck.notFound) {
             return res.status(404).json({
                 success: false,
                 message: authCheck.message || `Inspection run '${runId}' not found.`,
             });
         }
 
-        executionEvents.subscribe(runId, req, res, { organizationId });
+        const runQuery = await query(
+            "SELECT run_id, organization_id, user_id, goal, model, status, stopped_reason, error, created_at, started_at, completed_at FROM agent_runs WHERE run_id = $1 AND organization_id = $2",
+            [runId, organizationId]
+        );
+
+        const run = runQuery.rows[0] || null;
+
+        // Extract intermediate deliverables from buffered event history if available
+        const history = executionEvents.getBufferedEvents(runId);
+        let findings = [];
+        let sopEvidence = [];
+        let riskAssessment = null;
+        let recommendation = null;
+        let reportFilename = null;
+        let currentStage = null;
+
+        for (const record of history) {
+            if (record.event === "workflow_stage" && record.data?.stage) {
+                currentStage = record.data.stage;
+            } else if (record.event === "findings_extracted" && record.data?.findings) {
+                findings = record.data.findings;
+            } else if (record.event === "sop_matched" && record.data?.sopEvidence) {
+                sopEvidence = record.data.sopEvidence;
+            } else if (record.event === "risk_assessed") {
+                if (record.data?.riskAssessment) riskAssessment = record.data.riskAssessment;
+                if (record.data?.recommendation) recommendation = record.data.recommendation;
+            } else if (record.event === "report_generated" && record.data?.reportFilename) {
+                reportFilename = record.data.reportFilename;
+            } else if (record.event === "run_completed" && record.data?.reportFilename) {
+                reportFilename = record.data.reportFilename;
+            }
+        }
+
+        // Fetch associated report if already generated
+        let report = null;
+        const reportQuery = await query(
+            "SELECT id, organization_id, title, filename, risk_level, status, created_at FROM reports WHERE organization_id = $1 ORDER BY created_at DESC LIMIT 1",
+            [organizationId]
+        );
+        if (reportQuery.rows.length > 0) {
+            report = reportQuery.rows[0];
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                runId,
+                status: run?.status || (reportFilename ? "completed" : "running"),
+                stage: currentStage,
+                goal: run?.goal || null,
+                model: run?.model || "llama3.2:3b",
+                stoppedReason: run?.stopped_reason || null,
+                error: run?.error || null,
+                createdAt: run?.created_at || null,
+                completedAt: run?.completed_at || null,
+                findings,
+                sopEvidence,
+                riskAssessment,
+                recommendation,
+                reportFilename: reportFilename || report?.filename || null,
+                report,
+            },
+        });
     } catch (error) {
         next(error);
     }

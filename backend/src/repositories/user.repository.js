@@ -15,9 +15,11 @@ export async function findUserByEmail(email) {
   if (!email || typeof email !== "string") return null;
 
   const sql = `
-    SELECT id, organization_id, name, email, password_hash, role, created_at, updated_at
-    FROM users
-    WHERE lower(email) = lower($1)
+    SELECT u.id, u.organization_id, u.name, u.email, u.password_hash, u.role, u.created_at, u.updated_at,
+           o.name as organization_name
+    FROM users u
+    LEFT JOIN organizations o ON u.organization_id = o.id
+    WHERE lower(u.email) = lower($1)
     LIMIT 1;
   `;
 
@@ -35,9 +37,11 @@ export async function findUserById(id) {
   if (!id || typeof id !== "string") return null;
 
   const sql = `
-    SELECT id, organization_id, name, email, password_hash, role, created_at, updated_at
-    FROM users
-    WHERE id = $1
+    SELECT u.id, u.organization_id, u.name, u.email, u.password_hash, u.role, u.created_at, u.updated_at,
+           o.name as organization_name
+    FROM users u
+    LEFT JOIN organizations o ON u.organization_id = o.id
+    WHERE u.id = $1
     LIMIT 1;
   `;
 

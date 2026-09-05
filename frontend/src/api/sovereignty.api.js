@@ -31,3 +31,30 @@ export function getSovereigntyStatus() {
 export function getSystemHealth() {
   return get('/api/v1/health');
 }
+
+/**
+ * Fetches configured model registry and local model availability from Model Router.
+ *
+ * @returns {Promise<{
+ *   registry: object,
+ *   installedModels: Array<{name: string, size: number}>,
+ *   diagnostic: object,
+ *   ollamaUrl: string
+ * }>}
+ */
+export function getModelGovernanceStatus() {
+  return get('/api/v1/router/models');
+}
+
+/**
+ * Fetches machine-readable security and sovereignty status.
+ *
+ * @returns {Promise<{
+ *   sovereignty: object,
+ *   timestamp: string
+ * }>}
+ */
+export function getSecurityStatus() {
+  return get('/api/v1/security/status');
+}
+

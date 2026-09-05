@@ -369,6 +369,7 @@ async function runPhase5Tests() {
         await query("DELETE FROM organizations WHERE id = $1", [oId]);
       } catch {}
     }
+    process.exit(0);
   }
 }
 

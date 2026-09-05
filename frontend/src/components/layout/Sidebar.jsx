@@ -14,6 +14,7 @@
 import React, { useEffect, useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAppState, useAppActions } from '../../state/appState.jsx';
+import { useAuth } from '../../state/authState.jsx';
 import { fetchChatHistory } from '../../api/chat.api.js';
 
 const PRIMARY_NAV = [
@@ -41,6 +42,7 @@ const DEFAULT_RECENT_CHATS = [
 export function Sidebar() {
   const { sidebarOpen } = useAppState();
   const { toggleSidebar } = useAppActions();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [recentChats, setRecentChats] = useState(DEFAULT_RECENT_CHATS);
 
@@ -121,6 +123,19 @@ export function Sidebar() {
           )}
         </div>
 
+        {/* Tenant / Organization Badge */}
+        {sidebarOpen && (
+          <div className="mx-3 mt-3 px-3 py-2 bg-slate-900/90 border border-slate-800 rounded-lg text-xs shadow-inner">
+            <div className="flex items-center justify-between text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-0.5">
+              <span>Workspace</span>
+              <span className="text-emerald-400 text-[9px] font-mono font-semibold">● ON-PREM</span>
+            </div>
+            <div className="font-semibold text-white truncate text-xs" title={user?.organizationName || "MRPL Demo Organization"}>
+              {user?.organizationName || "MRPL Demo Organization"}
+            </div>
+          </div>
+        )}
+
         {/* Action Button: + New Chat */}
         <div className="p-3 border-b border-slate-900">
           <button
@@ -164,7 +179,7 @@ export function Sidebar() {
             </ul>
           </nav>
 
-          {/* Recent Conversations (like ChatGPT) */}
+          {/* Recent Conversations */}
           {sidebarOpen && (
             <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800/60">
               <div className="px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -186,7 +201,7 @@ export function Sidebar() {
             </div>
           )}
 
-          {/* Secondary / Tools */}
+          {/* Secondary / Workspaces */}
           {sidebarOpen && (
             <div className="flex flex-col gap-1 pt-2 border-t border-slate-800/60">
               <div className="px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -216,7 +231,7 @@ export function Sidebar() {
           )}
         </div>
 
-        {/* System Status Cluster (Bottom) */}
+        {/* System Status Cluster */}
         {sidebarOpen && (
           <div className="p-3 border-t border-slate-800/70 bg-slate-950/60 flex flex-col gap-2 text-[11px]">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
@@ -243,16 +258,28 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* User Profile & Settings */}
-        <div className="p-2 border-t border-slate-800/70 flex items-center justify-between">
-          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-md hover:bg-slate-900 cursor-pointer w-full transition-colors">
-            <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-[10px] font-bold text-slate-200">
-              U
+        {/* User Profile & Tenant Context */}
+        <div className="p-2.5 border-t border-slate-800/70 bg-slate-950">
+          <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg bg-slate-900/70 border border-slate-800 w-full">
+            <div className="w-7 h-7 rounded-full bg-emerald-700/80 border border-emerald-500/40 flex items-center justify-center text-xs font-bold text-white shadow-sm shrink-0">
+              {(user?.name || 'U').charAt(0).toUpperCase()}
             </div>
             {sidebarOpen && (
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-slate-200 truncate">Plant Engineer</p>
-                <p className="text-[10px] text-slate-400 truncate">On-Premises</p>
+                <div className="flex items-center justify-between gap-1">
+                  <p className="text-xs font-semibold text-white truncate">{user?.name || 'Demo User'}</p>
+                  <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                    {user?.role || 'member'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400">
+                  <span className="flex items-center gap-1 text-emerald-400">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    <span>Authenticated</span>
+                  </span>
+                  <span className="text-slate-600">·</span>
+                  <span className="text-slate-400 truncate">On-Prem</span>
+                </div>
               </div>
             )}
           </div>

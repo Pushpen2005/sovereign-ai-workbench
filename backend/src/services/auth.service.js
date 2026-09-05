@@ -91,6 +91,7 @@ export async function registerUser({
 
   // Resolve organization
   let resolvedOrgId = DEFAULT_ORGANIZATION_ID;
+  let resolvedOrgName = "Demo Organization";
 
   if (organizationId && typeof organizationId === "string" && organizationId.trim()) {
     const org = await findOrganizationById(organizationId.trim());
@@ -98,6 +99,7 @@ export async function registerUser({
       throw new AuthError("Specified organization does not exist", 400);
     }
     resolvedOrgId = org.id;
+    resolvedOrgName = org.name;
   } else if (organizationName && typeof organizationName === "string" && organizationName.trim()) {
     const orgName = organizationName.trim();
     let org = await findOrganizationByName(orgName);
@@ -105,6 +107,12 @@ export async function registerUser({
       org = await createOrganization({ id: randomUUID(), name: orgName });
     }
     resolvedOrgId = org.id;
+    resolvedOrgName = org.name;
+  } else {
+    const defaultOrg = await findOrganizationById(DEFAULT_ORGANIZATION_ID);
+    if (defaultOrg) {
+      resolvedOrgName = defaultOrg.name;
+    }
   }
 
   const passwordHash = hashPassword(password);
@@ -122,6 +130,7 @@ export async function registerUser({
   const safeUser = {
     id: newUser.id,
     organizationId: newUser.organization_id,
+    organizationName: resolvedOrgName,
     name: newUser.name,
     email: newUser.email,
     role: newUser.role,
@@ -168,6 +177,7 @@ export async function loginUser({ email, password }) {
   const safeUser = {
     id: user.id,
     organizationId: user.organization_id,
+    organizationName: user.organization_name || "Demo Organization",
     name: user.name,
     email: user.email,
     role: user.role,
@@ -201,6 +211,7 @@ export async function getCurrentUser(userId) {
   return {
     id: user.id,
     organizationId: user.organization_id,
+    organizationName: user.organization_name || "Demo Organization",
     name: user.name,
     email: user.email,
     role: user.role,

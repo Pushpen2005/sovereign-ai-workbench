@@ -80,6 +80,8 @@ const VISION_KEYWORDS = [
     "analyze this gauge image", "gauge image", "inspect this image",
     "analyze this image", "look at this image", "in this image",
     "from this image", "this picture", "this photo",
+    "equipment image", "analyze this equipment image", "inspect this equipment image",
+    "image for visible defects", "visible defects", "image for visible",
     "engineering drawing", "analyze this drawing", "inspect this drawing",
     "analyze this diagram", "inspect this diagram",
     "visible in this image", "shown in this image", "image shows",
@@ -243,11 +245,14 @@ export function getAllowedModels() {
  */
 export function isModelAllowed(modelName) {
     if (typeof modelName !== "string" || !modelName.trim()) return false;
-    const allowed = getAllowedModels();
     const trimmed = modelName.trim();
-    const base = trimmed.split(":")[0];
+    // Strictly reject path traversal, slashes, backslashes, or illegal characters
+    if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("..") || /[^a-zA-Z0-9_.:-]/.test(trimmed)) {
+        return false;
+    }
+    const allowed = getAllowedModels();
     for (const m of allowed) {
-        if (m === trimmed || m.split(":")[0] === base) {
+        if (m === trimmed || m.split(":")[0] === trimmed || (m === trimmed.split(":")[0] && !trimmed.includes(":"))) {
             return true;
         }
     }

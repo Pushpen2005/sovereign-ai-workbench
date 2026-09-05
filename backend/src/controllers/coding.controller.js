@@ -7,7 +7,7 @@
  */
 
 import { generateAnswer } from "../../../ai-service/llm/llm.service.js";
-import { routeTask, RouterError } from "../../../ai-service/router/modelRouter.js";
+import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/router/modelRouter.js";
 import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import {
     runCodingWorkflow,
@@ -48,7 +48,7 @@ export function cleanGeneratedCode(raw) {
  */
 export async function generateCode(req, res, next) {
     try {
-        const { prompt } = req.body || {};
+        const { prompt, model } = req.body || {};
 
         if (typeof prompt !== "string" || !prompt.trim()) {
             return res.status(400).json({
@@ -57,12 +57,29 @@ export async function generateCode(req, res, next) {
             });
         }
 
+        if (model) {
+            if (!isModelAllowed(model)) {
+                return res.status(400).json({
+                    success: false,
+                    code: "MODEL_NOT_ALLOWED",
+                    message: `Model '${model}' is not in the sovereign model allowlist.`,
+                });
+            }
+        }
+
         // 1. Route through Model Router
         let routing;
         try {
-            routing = await routeTask(prompt.trim());
+            routing = await routeTask(prompt.trim(), { model });
         } catch (routerErr) {
             if (routerErr instanceof RouterError) {
+                if (routerErr.code === "MODEL_NOT_ALLOWED") {
+                    return res.status(400).json({
+                        success: false,
+                        code: "MODEL_NOT_ALLOWED",
+                        message: routerErr.message,
+                    });
+                }
                 return res.status(503).json({
                     success: false,
                     message: routerErr.message,
@@ -161,7 +178,7 @@ export async function runCodingWorkflowHandler(req, res, next) {
         const organizationId = resolveAuthenticatedOrganization(req);
         const userId = req.user?.id || req.user?.userId || req.user?.sub || null;
 
-        const { prompt, request, expected, timeoutMs, customRunId } = req.body || {};
+        const { prompt, request, expected, timeoutMs, customRunId, model } = req.body || {};
         const codingRequest = prompt || request;
 
         if (typeof codingRequest !== "string" || !codingRequest.trim()) {
@@ -172,6 +189,16 @@ export async function runCodingWorkflowHandler(req, res, next) {
             });
         }
 
+        if (model) {
+            if (!isModelAllowed(model)) {
+                return res.status(400).json({
+                    success: false,
+                    code: "MODEL_NOT_ALLOWED",
+                    message: `Model '${model}' is not in the sovereign model allowlist.`,
+                });
+            }
+        }
+
         const result = await runCodingWorkflow({
             request: codingRequest,
             organizationId,
@@ -179,6 +206,7 @@ export async function runCodingWorkflowHandler(req, res, next) {
             expected,
             timeoutMs,
             customRunId,
+            model,
         });
 
         return res.status(200).json({
@@ -194,6 +222,7 @@ export async function runCodingWorkflowHandler(req, res, next) {
     } catch (error) {
         if (error instanceof CodingAgentError) {
             const statusMap = {
+                [CODING_ERROR_CODES.MODEL_NOT_ALLOWED]: 400,
                 [CODING_ERROR_CODES.MODEL_UNAVAILABLE]: 503,
                 [CODING_ERROR_CODES.CODE_VALIDATION_FAILED]: 400,
                 [CODING_ERROR_CODES.EXECUTION_TIMEOUT]: 408,

@@ -67,7 +67,9 @@ export function Topbar() {
           <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
             <div className="text-right hidden md:block">
               <p className="text-xs font-semibold text-slate-800 leading-tight">{user.name}</p>
-              <p className="text-[10px] font-mono text-slate-500 uppercase">{user.role || 'Engineer'}</p>
+              <p className="text-[10px] font-mono text-slate-500">
+                <span className="font-semibold text-emerald-700">{user.organizationName || 'MRPL Demo Org'}</span> · {user.role || 'Member'}
+              </p>
             </div>
             <button
               onClick={handleLogout}

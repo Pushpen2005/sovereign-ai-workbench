@@ -1,3 +1,5 @@
+import { isModelAllowed } from "../router/modelRouter.js";
+
 const OLLAMA_URL = process.env.OLLAMA_URL;
 const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
 
@@ -5,6 +7,11 @@ class LLMError extends Error {
     constructor(message, options = {}) {
         super(message, options);
         this.name = "LLMError";
+        this.code = options.code || "LLM_ERROR";
+        this.model = options.model;
+        if (options.statusCode) {
+            this.statusCode = options.statusCode;
+        }
     }
 }
 
@@ -26,6 +33,9 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         options = maybeOptions || {};
     } else if (modelOrOptions && typeof modelOrOptions === "object") {
         options = modelOrOptions;
+        model = options.model;
+    } else if ((modelOrOptions === undefined || modelOrOptions === null) && maybeOptions && typeof maybeOptions === "object") {
+        options = maybeOptions;
         model = options.model;
     }
 
@@ -53,8 +63,22 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
     }
 
     const selectedModel = model?.trim() || ollamaModel;
-    const keepAlive = process.env.OLLAMA_KEEP_ALIVE || "15m";
+
+    // Defense-in-depth sovereign allowlist enforcement: block unauthorized model execution
+    if (!isModelAllowed(selectedModel)) {
+        const err = new LLMError(
+            `Model '${selectedModel}' is not in the sovereign model allowlist.`,
+            { code: "MODEL_NOT_ALLOWED", model: selectedModel, statusCode: 400 }
+        );
+        err.code = "MODEL_NOT_ALLOWED";
+        err.statusCode = 400;
+        throw err;
+    }
+    const keepAlive = options.keep_alive || process.env.OLLAMA_KEEP_ALIVE || "30m";
     const isStreaming = typeof options.onChunk === "function" || options.stream === true;
+    const taskName = options.task || "general";
+    const startTime = Date.now();
+    const inputChars = prompt.length;
 
     const requestBody = {
         model: selectedModel,
@@ -71,7 +95,32 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         requestBody.images = options.images;
     }
 
+    // Configure low-variance, deterministic parameters for structured/JSON tasks
+    const ollamaOptions = {};
+    if (typeof options.temperature === "number") {
+        ollamaOptions.temperature = options.temperature;
+    } else if (options.format === "json") {
+        ollamaOptions.temperature = 0.1;
+    }
+
+    if (typeof options.top_p === "number") {
+        ollamaOptions.top_p = options.top_p;
+    }
+
+    if (typeof options.num_predict === "number") {
+        ollamaOptions.num_predict = options.num_predict;
+    } else if (typeof options.maxTokens === "number") {
+        ollamaOptions.num_predict = options.maxTokens;
+    }
+
+    if (Object.keys(ollamaOptions).length > 0) {
+        requestBody.options = ollamaOptions;
+    }
+
     try {
+        const timeoutMs = typeof options.timeoutMs === "number" ? options.timeoutMs : 60000;
+        const abortSignal = options.signal || AbortSignal.timeout(timeoutMs);
+
         let response;
         try {
             response = await fetch(`${ollamaUrl}/api/generate`, {
@@ -80,6 +129,7 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
                     "Content-Type": "application/json",
                 },
                 body: JSON.stringify(requestBody),
+                signal: abortSignal,
             });
         } catch (fetchErr) {
             if (ollamaUrl.includes("host.docker.internal")) {
@@ -90,6 +140,7 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
                         "Content-Type": "application/json",
                     },
                     body: JSON.stringify(requestBody),
+                    signal: abortSignal,
                 });
             } else {
                 throw fetchErr;
@@ -149,6 +200,12 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
                 throw new LLMError("LLM generation produced empty stream response");
             }
 
+            const durationMs = Date.now() - startTime;
+            console.log(
+                `[LLM] task=${taskName} model=${selectedModel} status=success ` +
+                `input_chars=${inputChars} output_chars=${fullText.length} duration_ms=${durationMs}`
+            );
+
             return fullText.trim();
         }
 
@@ -162,11 +219,34 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
             throw new LLMError("LLM generation failed");
         }
 
+        const durationMs = Date.now() - startTime;
+        const outputChars = data.response.length;
+        const promptTokens = data.prompt_eval_count ?? "N/A";
+        const evalTokens = data.eval_count ?? "N/A";
+        const loadDurationMs = data.load_duration ? Math.round(data.load_duration / 1e6) : "N/A";
+
+        console.log(
+            `[LLM] task=${taskName} model=${selectedModel} status=success ` +
+            `input_chars=${inputChars} output_chars=${outputChars} ` +
+            `prompt_tokens=${promptTokens} eval_tokens=${evalTokens} ` +
+            `load_ms=${loadDurationMs} duration_ms=${durationMs}`
+        );
+
         return data.response.trim();
 
     } catch (error) {
+        const durationMs = Date.now() - startTime;
+        console.error(
+            `[LLM] task=${taskName} model=${selectedModel} status=failure ` +
+            `input_chars=${inputChars} duration_ms=${durationMs} error=${error.message}`
+        );
+
         if (error instanceof LLMError) {
             throw error;
+        }
+
+        if (error.name === "TimeoutError" || error.message?.includes("timed out") || error.message?.includes("The operation was aborted")) {
+            throw new LLMError("Inference timed out", { cause: error, code: "TIMEOUT", statusCode: 408 });
         }
 
         if (error instanceof TypeError) {

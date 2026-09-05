@@ -161,18 +161,50 @@ export async function runInspectionWorkflow(input, options = {}) {
                         });
                     }
 
-                    if (nodeName === "validate_findings") {
+                    if (nodeName === "extract_findings" && stateSnapshot.findings?.length > 0) {
+                        executionEvents.publish(runId, "findings_extracted", {
+                            runId,
+                            findings: stateSnapshot.findings,
+                        });
+                    } else if (nodeName === "validate_findings") {
                         executionEvents.publish(runId, "validation", {
                             runId,
                             validator: "validate_findings",
                             valid: stateSnapshot.findingValidation?.valid ?? stateSnapshot.findingValidation?.isValid,
                             findingsCount: stateSnapshot.findings?.length || 0,
                         });
+                        if (stateSnapshot.findings?.length > 0) {
+                            executionEvents.publish(runId, "findings_extracted", {
+                                runId,
+                                findings: stateSnapshot.findings,
+                            });
+                        }
+                    } else if (nodeName === "retrieve_sop" && stateSnapshot.sopEvidence?.length > 0) {
+                        executionEvents.publish(runId, "sop_matched", {
+                            runId,
+                            sopEvidence: stateSnapshot.sopEvidence.map((c) => ({
+                                documentId: c.documentId,
+                                filename: c.filename,
+                                page: c.page,
+                                chunkIndex: c.chunkIndex,
+                                score: c.score,
+                                text: typeof c.text === "string" ? c.text.slice(0, 400) : "",
+                            })),
+                        });
                     } else if (nodeName === "check_sop_evidence") {
                         executionEvents.publish(runId, "validation", {
                             runId,
                             validator: "check_sop_evidence",
                             status: stateSnapshot.sopEvidenceStatus,
+                        });
+                    } else if (nodeName === "assess_risk") {
+                        executionEvents.publish(runId, "risk_assessed", {
+                            runId,
+                            riskAssessment: stateSnapshot.riskAssessment || stateSnapshot.riskAssessments?.[0] || null,
+                            riskAssessments: stateSnapshot.riskAssessments || [],
+                            recommendation: stateSnapshot.recommendation || stateSnapshot.recommendations?.[0] || null,
+                            recommendations: stateSnapshot.recommendations || [],
+                            citations: stateSnapshot.citations || [],
                         });
                     } else if (nodeName === "validate_risk") {
                         executionEvents.publish(runId, "validation", {
@@ -191,8 +223,14 @@ export async function runInspectionWorkflow(input, options = {}) {
                         executionEvents.publish(runId, "workflow_stage", {
                             runId,
                             node: "generate_report",
-                            stage: "Validating report",
+                            stage: "Generating approval note",
                         });
+                        if (stateSnapshot.report?.filename) {
+                            executionEvents.publish(runId, "report_generated", {
+                                runId,
+                                reportFilename: stateSnapshot.report.filename,
+                            });
+                        }
                     } else if (nodeName === "insufficient_evidence") {
                         executionEvents.publish(runId, "run_stopped", {
                             runId,
@@ -313,7 +351,9 @@ export async function runInspectionWorkflow(input, options = {}) {
         filename: finalState.ingestionResult?.filename || filename || `${finalState.documentId}.pdf`,
         chunksStored: finalState.ingestionResult?.chunksStored ?? 0,
         findings: finalState.findings || [],
+        riskAssessment: finalState.riskAssessment || riskAssessments[0] || null,
         riskAssessments,
+        recommendation: finalState.recommendation || recommendations[0] || null,
         recommendations,
         citations: uniqueCitations,
         approvalNote,
