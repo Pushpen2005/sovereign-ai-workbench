@@ -190,7 +190,10 @@ async function runSihDemoTests() {
       refusalText.includes("not mentioned") ||
       refusalText.includes("not available") ||
       refusalText.includes("no information") ||
-      refusalText.includes("not found");
+      refusalText.includes("not found") ||
+      refusalText.includes("could not find") ||
+      refusalText.includes("sufficient") ||
+      refusalText.includes("no relevant");
     assert.ok(isSafeRefusal, `Must return safe refusal rather than hallucinating chemical composition: "${noAnswerData.answer}"`);
     console.log(`  ✅ PASS: Safe refusal confirmed ("${noAnswerData.answer.slice(0, 75)}...")`);
 

@@ -22,6 +22,7 @@ import authRouter from "./routes/auth.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
 import { telemetryService } from "./services/telemetry.service.js";
 import { getEmbeddingMetrics } from "../../ai-service/embeddings/embedding.service.js";
+import { checkDbConnection } from "./config/db.js";
 
 const app = express();
 
@@ -76,11 +77,72 @@ app.get('/', (req, res) => {
     });
 });
 
+const healthHandler = async (req, res) => {
+    const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
+    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
+    const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:5001";
+
+    let dbOk = false;
+    let qdrantOk = false;
+    let ollamaOk = false;
+    let aiServiceOk = false;
+
+    try {
+        const dbStatus = await checkDbConnection();
+        dbOk = Boolean(dbStatus && dbStatus.connected);
+    } catch {
+        dbOk = false;
+    }
+
+    try {
+        const qRes = await fetch(`${qdrantUrl}/collections`, { signal: AbortSignal.timeout(2000) });
+        qdrantOk = qRes.ok;
+    } catch {
+        qdrantOk = false;
+    }
+
+    try {
+        let oRes;
+        try {
+            oRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+        } catch (fetchErr) {
+            if (ollamaUrl.includes("host.docker.internal")) {
+                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
+                oRes = await fetch(`${fallbackUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+            } else {
+                throw fetchErr;
+            }
+        }
+        ollamaOk = Boolean(oRes && oRes.ok);
+    } catch {
+        ollamaOk = false;
+    }
+
+    try {
+        const aRes = await fetch(`${aiServiceUrl}/health`, { signal: AbortSignal.timeout(2000) });
+        aiServiceOk = aRes.ok;
+    } catch {
+        aiServiceOk = false;
+    }
+
+    res.status(200).json({
+        status: "ok",
+        backend: "healthy",
+        database: dbOk ? "healthy" : "unreachable",
+        qdrant: qdrantOk ? "healthy" : "unreachable",
+        ollama: ollamaOk ? "healthy" : "unreachable",
+        aiService: aiServiceOk ? "healthy" : "unreachable",
+        timestamp: new Date().toISOString(),
+    });
+};
+
 app.get('/api/v1/health', (req, res) => {
     res.status(200).json({
         status: "ok"
     });
 });
+
+app.get('/health', healthHandler);
 
 // Private operational routes — strictly protected by authentication boundary
 app.use('/api/v1', router);
