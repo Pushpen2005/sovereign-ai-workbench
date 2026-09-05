@@ -41,6 +41,8 @@ export {
     routeCitationsValidation,
     validateFindingStructure,
     validateFindingsArray,
+    validateFindingGrounding,
+    analyzeFindingNumericThreshold,
     validateRiskStructure,
     validateCitationsStructure,
 } from "./inspection.nodes.js";

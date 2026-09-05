@@ -64,24 +64,26 @@ export async function runInspectionWorkflow(input, options = {}) {
         options.ingestOptions?.organizationId ||
         null;
 
+    if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
+        throw new Error("organizationId is mandatory in workflow options for tenant isolation");
+    }
+
     const runId = options.runId || randomUUID();
 
     // 1. Register tenant ownership for run (in-memory cache & PostgreSQL)
-    if (organizationId) {
-        try {
-            executionEvents.registerRunOwner(runId, organizationId, "inspection");
-            await createAgentRun({
-                runId,
-                userId: options.userId || null,
-                organizationId,
-                goal: task,
-                model: "inspection-workflow",
-                status: "in_progress",
-                startedAt: new Date(),
-            });
-        } catch (dbErr) {
-            console.warn("[InspectionOrchestrator] Warning: Failed to persist inspection run initiation:", dbErr.message);
-        }
+    try {
+        executionEvents.registerRunOwner(runId, organizationId, "inspection");
+        await createAgentRun({
+            runId,
+            userId: options.userId || null,
+            organizationId,
+            goal: task,
+            model: "inspection-workflow",
+            status: "in_progress",
+            startedAt: new Date(),
+        });
+    } catch (dbErr) {
+        console.warn("[InspectionOrchestrator] Warning: Failed to persist inspection run initiation:", dbErr.message);
     }
 
     // 2. Publish run_started SSE event
@@ -119,6 +121,21 @@ export async function runInspectionWorkflow(input, options = {}) {
         },
     };
 
+    // Stage labels conforming to Phase 6 Step 17
+    const STAGE_LABELS = {
+        ingest: "Reading inspection report",
+        retrieve: "Reading inspection report",
+        extract_findings: "Extracting findings",
+        validate_findings: "Validating findings",
+        retry_extraction: "Retrying findings extraction",
+        retrieve_sop: "Searching SOP",
+        check_sop_evidence: "Validating SOP evidence",
+        assess_risk: "Assessing risk",
+        validate_risk: "Preparing recommendation",
+        validate_citations: "Validating citations",
+        generate_report: "Generating approval note",
+    };
+
     // 3. Stream compiled LangGraph StateGraph snapshots in real-time
     let finalState = { ...initialState };
     let executionError = null;
@@ -136,11 +153,19 @@ export async function runInspectionWorkflow(input, options = {}) {
                     executionEvents.publish(runId, "node_started", { runId, node: nodeName });
                     executionEvents.publish(runId, "node_completed", { runId, node: nodeName });
 
+                    if (STAGE_LABELS[nodeName]) {
+                        executionEvents.publish(runId, "workflow_stage", {
+                            runId,
+                            node: nodeName,
+                            stage: STAGE_LABELS[nodeName],
+                        });
+                    }
+
                     if (nodeName === "validate_findings") {
                         executionEvents.publish(runId, "validation", {
                             runId,
                             validator: "validate_findings",
-                            valid: stateSnapshot.findingValidation?.valid,
+                            valid: stateSnapshot.findingValidation?.valid ?? stateSnapshot.findingValidation?.isValid,
                             findingsCount: stateSnapshot.findings?.length || 0,
                         });
                     } else if (nodeName === "check_sop_evidence") {
@@ -161,6 +186,12 @@ export async function runInspectionWorkflow(input, options = {}) {
                             validator: "validate_citations",
                             valid: stateSnapshot.citationValidation?.isValid ?? true,
                             citationsCount: stateSnapshot.citations?.length || 0,
+                        });
+                    } else if (nodeName === "generate_report") {
+                        executionEvents.publish(runId, "workflow_stage", {
+                            runId,
+                            node: "generate_report",
+                            stage: "Validating report",
                         });
                     } else if (nodeName === "insufficient_evidence") {
                         executionEvents.publish(runId, "run_stopped", {

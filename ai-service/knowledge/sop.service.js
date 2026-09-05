@@ -63,7 +63,10 @@ export async function ingestSop(filePath, options = {}) {
     const filename = path.basename(filePath);
 
     // --- Extraction (page-aware, OCR fallback included) ---
-    const { pages } = await extractPdfText(filePath);
+    const { pages, extractionMethod } = await extractPdfText(filePath, {
+        organizationId: options.organizationId,
+        forceOcr: options.forceOcr,
+    });
 
     // --- Chunking ---
     // chunkText skips empty pages internally.
@@ -83,6 +86,7 @@ export async function ingestSop(filePath, options = {}) {
         filename,
         documentType: SOP_DOCUMENT_TYPE,
         organizationId: options.organizationId || null,
+        extractionMethod: chunk.extractionMethod || extractionMethod || "pdf-text",
     }));
 
     // --- Embed and attach vector to each chunk ---
@@ -104,6 +108,7 @@ export async function ingestSop(filePath, options = {}) {
         documentId,
         filename,
         chunksStored: chunksWithVectors.length,
+        extractionMethod: extractionMethod || "pdf-text",
     };
 }
 

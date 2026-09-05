@@ -82,6 +82,7 @@ export async function uploadDocument(req, res, next) {
       originalFilename: result.originalFilename,
       status: result.status,
       chunksStored: result.chunksStored,
+      extractionMethod: result.extractionMethod || "pdf-text",
     });
   } catch (error) {
     next(error);

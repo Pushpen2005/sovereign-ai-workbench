@@ -81,6 +81,8 @@ function chunkText(pages, documentId) {
                 text: text.slice(start, end),
                 pageStartOffset: start,
                 pageEndOffset: end,
+                source: pageData.source || "pdf-text",
+                extractionMethod: pageData.extractionMethod || pageData.source || "pdf-text",
             });
 
             chunkIndex++;

@@ -46,6 +46,7 @@ export async function getAllDocuments(organizationId) {
     originalFilename: row.original_filename,
     status: row.status,
     chunksStored: row.chunks_stored,
+    extractionMethod: row.extraction_method || "pdf-text",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
@@ -77,6 +78,7 @@ export async function getDocumentById(id, organizationId) {
     originalFilename: row.original_filename,
     status: row.status,
     chunksStored: row.chunks_stored,
+    extractionMethod: row.extraction_method || "pdf-text",
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -224,11 +226,14 @@ export async function processAndIngestDocument(
 
     const chunksStored =
       ingestResult?.chunksStored || 0;
+    const extractionMethod =
+      ingestResult?.extractionMethod || "pdf-text";
 
     // 3. If successful, update PostgreSQL
     await updateDocument(documentId, {
       status: "Indexed",
       chunksStored,
+      extractionMethod,
     });
 
     return {
@@ -238,6 +243,7 @@ export async function processAndIngestDocument(
       originalFilename,
       status: "Indexed",
       chunksStored,
+      extractionMethod,
     };
   } catch (error) {
     // 4. If processing fails, update PostgreSQL
