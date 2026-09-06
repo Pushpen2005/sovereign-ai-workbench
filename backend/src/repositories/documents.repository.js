@@ -13,6 +13,7 @@ export async function createDocument({
   organizationId,
   filename,
   originalFilename,
+  documentType = "inspection",
   status = "Processing",
   chunksStored = 0,
   extractionMethod = "pdf-text",
@@ -23,17 +24,19 @@ export async function createDocument({
       organization_id,
       filename,
       original_filename,
+      document_type,
       status,
       chunks_stored,
       extraction_method,
       created_at,
       updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
       organization_id = EXCLUDED.organization_id,
       filename = EXCLUDED.filename,
       original_filename = EXCLUDED.original_filename,
+      document_type = COALESCE(EXCLUDED.document_type, documents.document_type),
       status = EXCLUDED.status,
       chunks_stored = EXCLUDED.chunks_stored,
       extraction_method = COALESCE(EXCLUDED.extraction_method, documents.extraction_method),
@@ -46,6 +49,7 @@ export async function createDocument({
     organizationId,
     filename,
     originalFilename,
+    documentType,
     status,
     chunksStored,
     extractionMethod,
@@ -124,23 +128,33 @@ export async function getDocumentById(
  * For multi-tenant security, this should eventually
  * accept organizationId and filter by it.
  */
-export async function getAllDocuments(organizationId) {
+export async function getAllDocuments(organizationId, documentType = null) {
+  const values = [organizationId];
+  let whereClause = "WHERE organization_id = $1";
+
+  if (documentType && typeof documentType === "string" && documentType.trim() !== "") {
+    whereClause += " AND document_type = $2";
+    values.push(documentType.trim().toLowerCase());
+  }
+
   const sql = `
     SELECT
       id,
       organization_id,
       filename,
       original_filename,
+      document_type,
       status,
       chunks_stored,
+      extraction_method,
       created_at,
       updated_at
     FROM documents
-    WHERE organization_id = $1
+    ${whereClause}
     ORDER BY created_at DESC;
   `;
 
-  const res = await query(sql, [organizationId]);
+  const res = await query(sql, values);
 
   return res.rows;
 }
@@ -153,6 +167,7 @@ export async function upsertDocument({
   organizationId,
   filename,
   originalFilename,
+  documentType = "inspection",
   status = "Processing",
   chunksStored = 0,
 }) {
@@ -162,16 +177,18 @@ export async function upsertDocument({
       organization_id,
       filename,
       original_filename,
+      document_type,
       status,
       chunks_stored,
       created_at,
       updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
     ON CONFLICT (id) DO UPDATE SET
       organization_id = EXCLUDED.organization_id,
       filename = EXCLUDED.filename,
       original_filename = EXCLUDED.original_filename,
+      document_type = COALESCE(EXCLUDED.document_type, documents.document_type),
       status = EXCLUDED.status,
       chunks_stored = EXCLUDED.chunks_stored,
       updated_at = NOW()
@@ -183,6 +200,7 @@ export async function upsertDocument({
     organizationId,
     filename,
     originalFilename,
+    documentType,
     status,
     chunksStored,
   ];

@@ -19,4 +19,14 @@ app.listen(PORT, async () => {
   } catch (err) {
     console.error("PostgreSQL database initialization warning:", err.message);
   }
+
+  // Non-blocking pre-warming of local LLM to eliminate ~4.5s cold-start penalty
+  try {
+    const { warmLocalModels } = await import("../ai-service/llm/llm.service.js");
+    warmLocalModels(["llama3.2:3b"]).then((results) => {
+      console.log(`[LLM-WARM] Pre-warming completed: ${JSON.stringify(results)}`);
+    }).catch((err) => {
+      console.warn(`[LLM-WARM] Pre-warming warning: ${err.message}`);
+    });
+  } catch {}
 });

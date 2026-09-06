@@ -1,18 +1,32 @@
-import React, { useState } from "react";
-import { Link, useNavigate, useLocation } from "react-router-dom";
+import React, { useState, useEffect } from "react";
+import { Link, useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../state/authState.jsx";
 
 export function LoginPage() {
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [localError, setLocalError] = useState(null);
+  const [localError, setLocalError] = useState(() => {
+    if (searchParams.get("expired") === "true") {
+      return "Your session has expired. Please sign in again.";
+    }
+    return null;
+  });
 
   const { login } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
   const from = location.state?.from?.pathname || "/dashboard";
+
+  useEffect(() => {
+    function onExpired() {
+      setLocalError("Your session has expired. Please sign in again.");
+    }
+    window.addEventListener("auth:session-expired", onExpired);
+    return () => window.removeEventListener("auth:session-expired", onExpired);
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();

@@ -241,7 +241,7 @@ async function runGoldenPathTests() {
     // ----------------------------------------------------
     console.log("\n[5] Validating SOP Retrieval & Qdrant Filter");
     const sopQuery = "bearing temperature limit";
-    const sopChunks = await searchSop(sopQuery, { limit: 5 });
+    const sopChunks = await searchSop(sopQuery, { limit: 5, organizationId: demoOrgId });
     assert.ok(Array.isArray(sopChunks), "SOP search must return an array");
     assert.ok(sopChunks.length > 0, "Must retrieve matching SOP chunks from Demo_Maintenance_SOP.pdf");
 
@@ -293,7 +293,9 @@ async function runGoldenPathTests() {
     console.log("\n[9] Validating Generated Approval Note DOCX");
     assert.ok(data.approvalNote, "Approval Note deliverable metadata must exist");
     assert.ok(data.approvalNote.filename, "Approval Note must have a filename");
-    const docxPath = path.join(GENERATED_DIR, data.approvalNote.filename);
+    const tenantDocxPath = path.join(GENERATED_DIR, demoOrgId, data.approvalNote.filename);
+    const legacyDocxPath = path.join(GENERATED_DIR, data.approvalNote.filename);
+    const docxPath = fs.existsSync(tenantDocxPath) ? tenantDocxPath : legacyDocxPath;
     assert.ok(fs.existsSync(docxPath), `DOCX file must physically exist at: ${docxPath}`);
     const docxStats = fs.statSync(docxPath);
     assert.ok(docxStats.size > 1000, `DOCX file must have substantial content (size: ${docxStats.size} bytes)`);

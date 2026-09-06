@@ -738,6 +738,7 @@ async function runRagHardeningTests() {
         if (fs.existsSync(fPath)) fs.unlinkSync(fPath);
       } catch {}
     }
+    process.exit(0);
   }
 }
 

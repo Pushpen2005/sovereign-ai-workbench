@@ -46,15 +46,21 @@ Build and deploy a self-hosted, air-gap-capable AI workbench that:
 |---|---|
 | **Overall Completion Status** | **Fully Operational — All Core Workflows Live** |
 | **AI Ingestion & Extraction Engine** | ✅ Operational — PDF extraction, OCR fallback, chunking, embeddings, Qdrant indexing |
-| **Vector Storage (Qdrant)** | ✅ Operational — `documents` collection with **30,969 points** (persistent volume) |
-| **Local LLM Runtime (Ollama)** | ✅ Operational — `llama3.2:3b` (1.9 GB) on `host.docker.internal:11434` |
-| **PostgreSQL Metadata Storage** | ✅ Operational — 4 orgs, 48 documents, 30 reports, 10 agent runs, 21 agent steps |
+| **Vector Storage (Qdrant)** | ✅ Operational — `documents` collection with **32,836 points** (persistent volume) |
+| **Local LLM Runtime (Ollama)** | ✅ Operational — `llama3.2:3b` (2.0 GB) and `moondream:latest` (1.7 GB) local execution |
+| **PostgreSQL Metadata Storage** | ✅ Operational — Multi-tenant schema, users, documents, reports, runs, audit logs |
 | **Frontend UI Workbench** | ✅ Operational — All pages connected to live backend APIs (no mock data) |
-| **Chat History Persistence** | ✅ Operational — Conversations & messages stored in PostgreSQL |
-| **Reports Persistence** | ✅ Operational — Generated Approval Notes tracked in PostgreSQL |
+| **Coding Sandbox** | ✅ Operational — Docker isolated container execution (`--network none`, non-root, read-only) |
+| **Model Router & Governance** | ✅ Operational — Strict allowlist enforcement; cloud API bypass strictly blocked |
 | **Inspection Workflow (E2E)** | ✅ Operational — PDF → findings → SOP → risk → DOCX verified end-to-end |
-| **Docker Compose Orchestration** | ✅ Operational — 6-service stack (`docker compose up -d`) with health checks and persistent volumes |
-| **Sovereignty Verification** | ✅ Audited — `GET /api/v1/sovereignty` endpoint returns real-time local-component manifest |
+| **Docker Compose Orchestration** | ✅ Operational — 6-service stack (`./scripts/deploy-local.sh`) with health checks & persistent volumes |
+| **Sovereignty Verification** | ✅ Audited — `npm run audit:sovereignty` verifies 100% local components & 0 external cloud keys |
+| **Physical Clean-Room Deployment** | ⚠️ **NOT VERIFIED** — Air-gap architecture verified locally; isolated secondary machine deployment unverified |
+
+> **Evaluation Guides**:  
+> - [DEMO.md](DEMO.md): Quick start, demo credentials, and walkthrough.  
+> - [JUDGE_DEMO.md](JUDGE_DEMO.md): 5–7 minute script for evaluators and judges.  
+> - [DEPLOYMENT.md](DEPLOYMENT.md): Two-stage on-premise & air-gapped runbook with image & model packaging.
 
 ---
 

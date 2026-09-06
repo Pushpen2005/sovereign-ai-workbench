@@ -121,3 +121,13 @@ export function runWorkflow(input, task = '') {
 
   throw new Error('Valid document file or documentId is required to run workflow');
 }
+
+/**
+ * Retrieve state and metadata for an inspection run.
+ * @param {string} runId
+ * @returns {Promise<{ success: boolean, data: object }>}
+ */
+export function getInspectionRun(runId) {
+  return axiosInstance.get(`/api/v1/inspection/runs/${encodeURIComponent(runId)}`).then((r) => r.data);
+}
+

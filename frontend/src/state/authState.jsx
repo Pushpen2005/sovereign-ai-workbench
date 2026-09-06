@@ -51,8 +51,23 @@ export function AuthProvider({ children }) {
 
     loadCurrentUser();
 
+    function handleSessionExpired() {
+      if (isMounted) {
+        setToken(null);
+        setUser(null);
+        setError("Your session has expired. Please sign in again.");
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("auth:session-expired", handleSessionExpired);
+    }
+
     return () => {
       isMounted = false;
+      if (typeof window !== "undefined") {
+        window.removeEventListener("auth:session-expired", handleSessionExpired);
+      }
     };
   }, []);
 

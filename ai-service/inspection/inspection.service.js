@@ -181,15 +181,19 @@ export async function analyzeInspectionReport(input, options = {}) {
         const queries = resolveInspectionRetrievalQueries(task, options, input);
         const chunkMap = new Map();
 
-        for (const q of queries) {
-            const queryEmbedding = await generateEmbeddingFn(q);
-            const candidates = await searchSimilarChunksFn(
-                queryEmbedding,
-                candidateLimit,
-                documentId,
-                searchFilterOptions
-            );
+        const queryResults = await Promise.all(
+            queries.map(async (q) => {
+                const queryEmbedding = await generateEmbeddingFn(q);
+                return searchSimilarChunksFn(
+                    queryEmbedding,
+                    candidateLimit,
+                    documentId,
+                    searchFilterOptions
+                );
+            })
+        );
 
+        for (const candidates of queryResults) {
             if (Array.isArray(candidates)) {
                 for (const chunk of candidates) {
                     const key = `${chunk.documentId || ""}:${chunk.page ?? ""}:${chunk.chunkIndex ?? ""}`;
@@ -225,7 +229,12 @@ export async function analyzeInspectionReport(input, options = {}) {
 
     // Attempt 1: Standard structured extraction with format: "json"
     try {
-        const rawResponse = await generateAnswerFn(prompt, options.model, { format: "json" });
+        const rawResponse = await generateAnswerFn(prompt, options.model, {
+            format: "json",
+            task: "inspection_finding",
+            temperature: 0.1,
+            num_predict: 768,
+        });
         parsedResponse = parseInspectionLlmResponse(rawResponse);
     } catch (err) {
         lastError = err;
@@ -237,7 +246,12 @@ export async function analyzeInspectionReport(input, options = {}) {
         console.log("[Inspection] Retrying structured extraction (attempt 2 of 2)...");
         try {
             const retryPrompt = buildInspectionRetryPrompt(task, context, lastError?.message);
-            const retryRawResponse = await generateAnswerFn(retryPrompt, options.model, { format: "json" });
+            const retryRawResponse = await generateAnswerFn(retryPrompt, options.model, {
+                format: "json",
+                task: "inspection_finding_retry",
+                temperature: 0.1,
+                num_predict: 768,
+            });
             parsedResponse = parseInspectionLlmResponse(retryRawResponse);
             console.log("[Inspection] Structured extraction succeeded on attempt 2");
         } catch (retryErr) {
@@ -302,10 +316,14 @@ export async function ingestInspectionReport(filePath, options = {}) {
         throw new Error(`No text content could be extracted from: ${filename}`);
     }
 
+    const canonicalDocType = typeof options.documentType === "string" && options.documentType.trim()
+        ? options.documentType.trim().toLowerCase()
+        : INSPECTION_DOCUMENT_TYPE;
+
     const chunksWithMeta = rawChunks.map((chunk) => ({
         ...chunk,
         filename,
-        documentType: options.documentType || INSPECTION_DOCUMENT_TYPE,
+        documentType: canonicalDocType,
         organizationId: options.organizationId.trim(),
         extractionMethod: chunk.extractionMethod || extractionMethod || "pdf-text",
     }));

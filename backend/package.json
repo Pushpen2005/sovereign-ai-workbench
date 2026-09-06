@@ -18,6 +18,13 @@
   "scripts": {
     "test": "node tests/backend.e2e.test.js && node tests/reports.test.js && node tests/chat.test.js && node tests/inspection.structured.test.js",
     "test:auth": "node tests/auth.test.js",
+    "test:phase7": "node tests/auth.phase7.test.js",
+    "test:phase8": "node tests/sovereignty.phase8.test.js",
+    "test:phase9": "node tests/deployment.phase9.test.js",
+    "audit:sovereignty": "node scripts/audit.sovereignty.js",
+    "demo:security": "node tests/demo.phase7.auth.js",
+    "demo:vision": "node tests/demo.phase6.vision.js",
+    "test:final-e2e": "node tests/final.evaluation.e2e.test.js",
     "test:golden-path": "node tests/inspection.golden-path.test.js",
     "test:rag": "node tests/rag.hardening.test.js",
     "test:vision": "node tests/vision.e2e.test.js",

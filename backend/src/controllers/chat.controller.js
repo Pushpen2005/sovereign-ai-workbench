@@ -89,6 +89,13 @@ export async function askQuestion(req, res, next) {
       routing = await routeTask(question.trim(), { model });
     } catch (routerErr) {
       if (routerErr instanceof RouterError) {
+        if (routerErr.code === "MODEL_NOT_ALLOWED") {
+          return res.status(400).json({
+            success: false,
+            message: routerErr.message,
+            code: "MODEL_NOT_ALLOWED",
+          });
+        }
         return res.status(503).json({
           success: false,
           message: routerErr.message,

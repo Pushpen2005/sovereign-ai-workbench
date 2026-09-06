@@ -32,18 +32,32 @@ import { ingestInspectionFile } from "./inspection.service.js";
 /**
  * Get all documents belonging to an organization.
  */
-export async function getAllDocuments(organizationId) {
+export async function getAllDocuments(organizationId, documentType = null) {
   if (!organizationId || typeof organizationId !== "string") {
     throw new Error("Invalid organization ID");
   }
 
-  const rows = await fetchAllDocuments(organizationId.trim());
+  let filterType = null;
+  if (documentType !== null && documentType !== undefined && String(documentType).trim() !== "") {
+    const ALLOWED_DOCUMENT_TYPES = ["sop", "inspection", "other"];
+    const lower = String(documentType).trim().toLowerCase();
+    if (!ALLOWED_DOCUMENT_TYPES.includes(lower)) {
+      const err = new Error(`Invalid documentType '${documentType}'. Allowed values: ${ALLOWED_DOCUMENT_TYPES.join(", ")}`);
+      err.status = 400;
+      err.statusCode = 400;
+      throw err;
+    }
+    filterType = lower;
+  }
+
+  const rows = await fetchAllDocuments(organizationId.trim(), filterType);
 
   return rows.map((row) => ({
     documentId: row.id,
     organizationId: row.organization_id,
     filename: row.filename,
     originalFilename: row.original_filename,
+    documentType: row.document_type || null,
     status: row.status,
     chunksStored: row.chunks_stored,
     extractionMethod: row.extraction_method || "pdf-text",
@@ -76,6 +90,7 @@ export async function getDocumentById(id, organizationId) {
     organizationId: row.organization_id,
     filename: row.filename,
     originalFilename: row.original_filename,
+    documentType: row.document_type || null,
     status: row.status,
     chunksStored: row.chunks_stored,
     extractionMethod: row.extraction_method || "pdf-text",
@@ -192,6 +207,8 @@ export async function processAndIngestDocument(
     originalFilename = filename;
   }
 
+  const documentType = options.documentType || "inspection";
+
   // 1. Create PostgreSQL record with status "Processing"
   try {
     await upsertDocument({
@@ -199,6 +216,7 @@ export async function processAndIngestDocument(
       organizationId,
       filename,
       originalFilename,
+      documentType,
       status: "Processing",
       chunksStored: 0,
     });
@@ -222,6 +240,7 @@ export async function processAndIngestDocument(
         documentId,
         organizationId,
         filename: originalFilename,
+        documentType,
       });
 
     const chunksStored =
@@ -241,6 +260,7 @@ export async function processAndIngestDocument(
       organizationId,
       filename,
       originalFilename,
+      documentType,
       status: "Indexed",
       chunksStored,
       extractionMethod,

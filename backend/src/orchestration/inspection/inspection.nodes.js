@@ -698,50 +698,79 @@ export function createInspectionNodes(customAdapters = {}) {
             };
 
             if (Array.isArray(state.findings) && state.findings.length > 0) {
-                for (const rawFinding of state.findings) {
-                    const finding = { ...rawFinding };
-                    const findingEvidence = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
+                // Bounded concurrency (limit 2) for independent finding risk evaluations
+                const maxConcurrency = Math.min(2, state.findings.length);
+                const assessedFindings = new Array(state.findings.length);
 
-                    if (findingEvidence.length > 0) {
-                        // Finding has authoritative SOP evidence -> run risk assessment using ONLY its evidence
-                        const findingRiskOptions = {
-                            ...baseRiskOptions,
-                            searchSop: async () => findingEvidence,
+                let nextIndex = 0;
+                const workers = Array.from({ length: maxConcurrency }, async () => {
+                    while (nextIndex < state.findings.length) {
+                        const idx = nextIndex++;
+                        const rawFinding = state.findings[idx];
+                        const finding = { ...rawFinding };
+                        const findingEvidence = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
+
+                        let itemRiskAssessment = null;
+                        let itemRecommendation = null;
+                        let itemCitations = [];
+
+                        if (findingEvidence.length > 0) {
+                            // Finding has authoritative SOP evidence -> run risk assessment using ONLY its evidence
+                            const findingRiskOptions = {
+                                ...baseRiskOptions,
+                                searchSop: async () => findingEvidence,
+                            };
+                            const riskResult = await adapters.runRiskAssessment(finding, findingRiskOptions);
+
+                            if (riskResult.riskAssessment) {
+                                finding.riskAssessment = riskResult.riskAssessment;
+                                itemRiskAssessment = riskResult.riskAssessment;
+                            }
+                            if (riskResult.recommendation) {
+                                finding.recommendation = riskResult.recommendation;
+                                itemRecommendation = riskResult.recommendation;
+                            }
+                            if (Array.isArray(riskResult.citations)) {
+                                finding.citations = riskResult.citations;
+                                itemCitations = riskResult.citations;
+                            }
+                            finding.grounded = riskResult.grounded !== false;
+                        } else {
+                            // Unsupported finding (STEP 11 — Partial Failure Handling)
+                            const ungroundedRisk = {
+                                level: null,
+                                reason: `Insufficient SOP evidence is available to determine risk level for ${finding.finding}.`,
+                                grounded: false,
+                            };
+                            const ungroundedRec = "Insufficient SOP evidence is available to provide a validated recommendation.";
+
+                            finding.riskAssessment = ungroundedRisk;
+                            finding.recommendation = ungroundedRec;
+                            finding.citations = [];
+                            finding.grounded = false;
+
+                            itemRiskAssessment = ungroundedRisk;
+                            itemRecommendation = ungroundedRec;
+                        }
+
+                        assessedFindings[idx] = {
+                            finding,
+                            riskAssessment: itemRiskAssessment,
+                            recommendation: itemRecommendation,
+                            citations: itemCitations,
                         };
-                        const riskResult = await adapters.runRiskAssessment(finding, findingRiskOptions);
-
-                        if (riskResult.riskAssessment) {
-                            finding.riskAssessment = riskResult.riskAssessment;
-                            riskAssessments.push(riskResult.riskAssessment);
-                        }
-                        if (riskResult.recommendation) {
-                            finding.recommendation = riskResult.recommendation;
-                            recommendations.push(riskResult.recommendation);
-                        }
-                        if (Array.isArray(riskResult.citations)) {
-                            finding.citations = riskResult.citations;
-                            rawCitations.push(...riskResult.citations);
-                        }
-                        finding.grounded = riskResult.grounded !== false;
-                    } else {
-                        // Unsupported finding (STEP 11 — Partial Failure Handling)
-                        const ungroundedRisk = {
-                            level: null,
-                            reason: `Insufficient SOP evidence is available to determine risk level for ${finding.finding}.`,
-                            grounded: false,
-                        };
-                        const ungroundedRec = "Insufficient SOP evidence is available to provide a validated recommendation.";
-
-                        finding.riskAssessment = ungroundedRisk;
-                        finding.recommendation = ungroundedRec;
-                        finding.citations = [];
-                        finding.grounded = false;
-
-                        riskAssessments.push(ungroundedRisk);
-                        recommendations.push(ungroundedRec);
                     }
+                });
 
-                    updatedFindings.push(finding);
+                await Promise.all(workers);
+
+                for (const item of assessedFindings) {
+                    if (item) {
+                        updatedFindings.push(item.finding);
+                        if (item.riskAssessment) riskAssessments.push(item.riskAssessment);
+                        if (item.recommendation) recommendations.push(item.recommendation);
+                        if (item.citations && item.citations.length > 0) rawCitations.push(...item.citations);
+                    }
                 }
             } else {
                 // Safe default when 0 findings detected
@@ -767,10 +796,15 @@ export function createInspectionNodes(customAdapters = {}) {
             const primaryRecommendation =
                 recommendations.filter(Boolean).join(" ") || "No specific recommendation generated.";
 
+            const orderedRiskAssessments = [
+                primaryRisk,
+                ...riskAssessments.filter((r) => r !== primaryRisk),
+            ];
+
             return {
                 findings: updatedFindings.length > 0 ? updatedFindings : state.findings,
                 riskAssessment: primaryRisk,
-                riskAssessments,
+                riskAssessments: orderedRiskAssessments,
                 recommendation: primaryRecommendation,
                 recommendations,
                 citations: rawCitations,

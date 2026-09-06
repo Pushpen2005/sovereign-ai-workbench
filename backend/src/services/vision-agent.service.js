@@ -320,7 +320,7 @@ export async function runVisionWorkflow({
         if (requestedModel && !isModelAllowed(requestedModel)) {
             throw new VisionValidationError(
                 `Model '${requestedModel}' is not in the sovereign model allowlist`,
-                VISION_ERROR_CODES.MODEL_UNAVAILABLE
+                VISION_ERROR_CODES.MODEL_NOT_ALLOWED
             );
         }
 
@@ -329,9 +329,12 @@ export async function runVisionWorkflow({
             routing = await routeTask(cleanPrompt, { hasImage: true, model: requestedModel });
         } catch (routerErr) {
             if (routerErr instanceof RouterError) {
+                const code = routerErr.code === "MODEL_NOT_ALLOWED"
+                    ? VISION_ERROR_CODES.MODEL_NOT_ALLOWED
+                    : VISION_ERROR_CODES.MODEL_UNAVAILABLE;
                 throw new VisionValidationError(
                     `Vision model unavailable: ${routerErr.message}`,
-                    VISION_ERROR_CODES.MODEL_UNAVAILABLE
+                    code
                 );
             }
             throw routerErr;
@@ -366,13 +369,20 @@ export async function runVisionWorkflow({
             rawModelOutput = await generateVisionAnswer(
                 fullPrompt,
                 base64Image,
-                routing.selectedModel
+                routing.selectedModel,
+                {
+                    maxTokens: 512,
+                    timeoutMs: 45000,
+                }
             );
         } catch (err) {
             if (err instanceof LLMError) {
+                const code = err.code === "TIMEOUT"
+                    ? VISION_ERROR_CODES.TIMEOUT
+                    : VISION_ERROR_CODES.MODEL_UNAVAILABLE;
                 throw new VisionValidationError(
                     `Local vision model '${routing.selectedModel}' failed during inference: ${err.message}`,
-                    VISION_ERROR_CODES.MODEL_UNAVAILABLE
+                    code
                 );
             }
             throw err;

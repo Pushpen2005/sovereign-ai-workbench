@@ -125,7 +125,7 @@ export async function analyzeImage(req, res, next) {
             if (!isModelAllowed(req.body.model)) {
                 return res.status(400).json({
                     success: false,
-                    code: VISION_ERROR_CODES.MODEL_UNAVAILABLE,
+                    code: "MODEL_NOT_ALLOWED",
                     message: `Model '${req.body.model}' is not in the sovereign model allowlist.`,
                 });
             }
@@ -175,6 +175,8 @@ export async function analyzeImage(req, res, next) {
         if (error instanceof VisionValidationError) {
             const statusMap = {
                 [VISION_ERROR_CODES.MODEL_UNAVAILABLE]: 503,
+                [VISION_ERROR_CODES.MODEL_NOT_ALLOWED]: 400,
+                [VISION_ERROR_CODES.TIMEOUT]: 408,
                 [VISION_ERROR_CODES.IMAGE_TOO_LARGE]: 400,
                 [VISION_ERROR_CODES.UNSUPPORTED_IMAGE_FORMAT]: 400,
                 [VISION_ERROR_CODES.INVALID_IMAGE]: 400,

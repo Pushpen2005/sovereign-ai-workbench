@@ -77,6 +77,9 @@ export function formatSopChunksContext(chunks) {
 
     return chunks
         .map((chunk, index) => {
+            const cleanText = typeof chunk.text === "string"
+                ? chunk.text.trim().replace(/\n{3,}/g, "\n\n")
+                : "";
             return [
                 `--- SOP SOURCE ${index + 1} ---`,
                 `documentId: ${chunk.documentId ?? "null"}`,
@@ -84,7 +87,7 @@ export function formatSopChunksContext(chunks) {
                 `page: ${chunk.page ?? "null"}`,
                 `chunkIndex: ${chunk.chunkIndex ?? "null"}`,
                 "text:",
-                chunk.text ?? "",
+                cleanText,
             ].join("\n");
         })
         .join("\n\n");

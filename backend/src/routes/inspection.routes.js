@@ -5,6 +5,7 @@ import {
     assessRisk,
     downloadApprovalNote,
     generateApprovalNoteDocx,
+    getInspectionRun,
     ingestInspection,
     runWorkflow,
     streamInspectionRun,
@@ -49,7 +50,12 @@ router.post(
     runWorkflow
 );
 
-// Phase 7 — Live SSE Event Stream for Inspection Run
+// Phase 7 / Phase 3 — Inspection Run State & Live SSE Event Stream
+router.get(
+    "/runs/:runId",
+    getInspectionRun
+);
+
 router.get(
     "/runs/:runId/stream",
     streamInspectionRun

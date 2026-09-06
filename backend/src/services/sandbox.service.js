@@ -83,6 +83,8 @@ export async function executeInSandbox({
         "--pids-limit", "64",
         "--read-only",
         "--security-opt", "no-new-privileges",
+        "--cap-drop", "ALL",
+        "--ipc", "none",
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
         "-e", "PYTHONUNBUFFERED=1",
         "python:3.11-alpine",
@@ -156,9 +158,16 @@ export async function executeInSandbox({
                     try {
                         execSync(`docker kill ${containerName}`, { stdio: "ignore" });
                     } catch {}
+                    try {
+                        if (child && !child.killed) child.kill("SIGKILL");
+                        child.stdout.destroy();
+                    } catch {}
                 }
             } else {
                 stdoutTruncated = true;
+                try {
+                    child.stdout.destroy();
+                } catch {}
             }
         });
 
@@ -168,9 +177,19 @@ export async function executeInSandbox({
                 if (stderr.length >= MAX_OUTPUT_BYTES) {
                     stderr = stderr.slice(0, MAX_OUTPUT_BYTES);
                     stderrTruncated = true;
+                    try {
+                        execSync(`docker kill ${containerName}`, { stdio: "ignore" });
+                    } catch {}
+                    try {
+                        if (child && !child.killed) child.kill("SIGKILL");
+                        child.stderr.destroy();
+                    } catch {}
                 }
             } else {
                 stderrTruncated = true;
+                try {
+                    child.stderr.destroy();
+                } catch {}
             }
         });
 
@@ -245,6 +264,8 @@ function getSandboxMetadata(timeoutMs) {
         cpuLimit: 1,
         pidLimit: 64,
         readOnlyRoot: true,
+        capabilitiesDropped: "ALL",
+        ipc: "none",
         image: "python:3.11-alpine",
     };
 }
