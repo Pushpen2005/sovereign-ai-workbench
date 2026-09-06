@@ -16,7 +16,20 @@ import { resolveAuthenticatedOrganization } from "../config/organization.js";
 export async function getDocuments(req, res, next) {
   try {
     const organizationId = resolveAuthenticatedOrganization(req);
-    const documents = await getAllDocuments(organizationId);
+    const { documentType } = req.query;
+
+    if (documentType !== undefined && documentType !== null && String(documentType).trim() !== "") {
+      const ALLOWED_DOCUMENT_TYPES = ["sop", "inspection", "other"];
+      const lower = String(documentType).trim().toLowerCase();
+      if (!ALLOWED_DOCUMENT_TYPES.includes(lower)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid documentType '${documentType}'. Allowed values: ${ALLOWED_DOCUMENT_TYPES.join(", ")}`,
+        });
+      }
+    }
+
+    const documents = await getAllDocuments(organizationId, documentType);
     return res.status(200).json({
       success: true,
       documents,

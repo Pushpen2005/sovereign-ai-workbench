@@ -361,10 +361,11 @@ async function runTests() {
       };
       const canonical = getCanonicalDocumentType(doc);
       assert.equal(canonical, "sop", "Canonical type must be 'sop'");
-      assert.equal(getDisplayDocumentType(doc), "SOP", "Display type must be 'SOP'");
+      assert.ok(["SOP", "SOPs / Knowledge Base"].includes(getDisplayDocumentType(doc)), "Display type must be 'SOP' or 'SOPs / Knowledge Base'");
 
       assert.equal(matchesFilter(doc, "All"), true, "Must appear in 'All'");
       assert.equal(matchesFilter(doc, "SOPs"), true, "Must appear under 'SOPs'");
+      assert.equal(matchesFilter(doc, "SOPs / Knowledge Base"), true, "Must appear under 'SOPs / Knowledge Base'");
       assert.equal(matchesFilter(doc, "Inspection Reports"), false, "Must NOT appear under 'Inspection Reports'");
       assert.equal(matchesFilter(doc, "Other"), false, "Must NOT appear under 'Other'");
       console.log("  ✓ PASS Test 10: Document with documentType='sop' correctly appears under SOPs even if filename lacks 'sop'");
@@ -386,10 +387,11 @@ async function runTests() {
       };
       const canonical = getCanonicalDocumentType(doc);
       assert.equal(canonical, "inspection", "Canonical type must strictly be 'inspection' from authoritative metadata");
-      assert.equal(getDisplayDocumentType(doc), "Inspection Report", "Display type must be 'Inspection Report'");
+      assert.ok(["Inspection Report", "Inspection Reports"].includes(getDisplayDocumentType(doc)), "Display type must be 'Inspection Report(s)'");
 
       assert.equal(matchesFilter(doc, "All"), true, "Must appear in 'All'");
       assert.equal(matchesFilter(doc, "SOPs"), false, "Must NOT appear under 'SOPs'");
+      assert.equal(matchesFilter(doc, "SOPs / Knowledge Base"), false, "Must NOT appear under 'SOPs / Knowledge Base'");
       assert.equal(matchesFilter(doc, "Inspection Reports"), true, "Must appear under 'Inspection Reports'");
       assert.equal(matchesFilter(doc, "Other"), false, "Must NOT appear under 'Other'");
       console.log("  ✓ PASS Test 11: Authoritative metadata successfully overrides misleading filename!");

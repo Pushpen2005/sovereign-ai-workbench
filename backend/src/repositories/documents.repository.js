@@ -128,7 +128,15 @@ export async function getDocumentById(
  * For multi-tenant security, this should eventually
  * accept organizationId and filter by it.
  */
-export async function getAllDocuments(organizationId) {
+export async function getAllDocuments(organizationId, documentType = null) {
+  const values = [organizationId];
+  let whereClause = "WHERE organization_id = $1";
+
+  if (documentType && typeof documentType === "string" && documentType.trim() !== "") {
+    whereClause += " AND document_type = $2";
+    values.push(documentType.trim().toLowerCase());
+  }
+
   const sql = `
     SELECT
       id,
@@ -142,11 +150,11 @@ export async function getAllDocuments(organizationId) {
       created_at,
       updated_at
     FROM documents
-    WHERE organization_id = $1
+    ${whereClause}
     ORDER BY created_at DESC;
   `;
 
-  const res = await query(sql, [organizationId]);
+  const res = await query(sql, values);
 
   return res.rows;
 }

@@ -239,7 +239,13 @@ export function DocumentsPage() {
                 </div>
               ) : (
                 <div className="text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mt-1">
-                  Target Category: <span className="font-bold text-slate-900">{activeFilter}</span> ({activeFilter === 'SOPs' ? 'sop' : activeFilter === 'Inspection Reports' ? 'inspection' : 'other'})
+                  Target Category: <span className="font-bold text-slate-900">{activeFilter}</span> (
+                  {activeFilter === 'SOPs' || activeFilter === 'SOPs / Knowledge Base'
+                    ? 'sop'
+                    : activeFilter === 'Inspection Reports'
+                    ? 'inspection'
+                    : 'other'}
+                  )
                 </div>
               )}
               <p className="text-[11px] text-slate-400 max-w-sm">
@@ -261,7 +267,7 @@ export function DocumentsPage() {
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Filters */}
         <div className="flex items-center gap-1">
-          {['All', 'Inspection Reports', 'SOPs', 'Other'].map((f) => (
+          {['All', 'Inspection Reports', 'SOPs / Knowledge Base', 'Other'].map((f) => (
             <button
               key={f}
               type="button"
@@ -302,7 +308,9 @@ export function DocumentsPage() {
             <span className="text-3xl">📂</span>
             <p className="text-sm font-semibold text-slate-700">No documents found</p>
             <p className="text-xs text-slate-400 max-w-sm">
-              Upload an inspection report or SOP PDF to begin building your confidential knowledge base.
+              {activeFilter === 'All'
+                ? 'Upload an inspection report or SOP PDF to begin building your confidential knowledge base.'
+                : `No documents found in ${activeFilter}. Upload a document to this category to populate it.`}
             </p>
           </div>
         ) : (
