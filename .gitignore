@@ -23,3 +23,5 @@ backend/src/uploads/*
 !backend/src/uploads/.gitkeep
 backend/generated/*
 !backend/generated/.gitkeep
+backups/
+*.tar.gz
