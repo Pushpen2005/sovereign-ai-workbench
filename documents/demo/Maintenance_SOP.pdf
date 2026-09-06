@@ -1,0 +1,78 @@
+%PDF-1.4
+4 0 obj
+<< /Length 674 >>
+stream
+BT
+/F1 11 Tf
+14.5 TL
+50 750 Td
+(SYNTHETIC DEMONSTRATION DATA -- FOR EVALUATION ONLY) Tj
+T* (REFINERY STANDARD OPERATING PROCEDURE) Tj
+T* (Document ID: SOP-MAINT-001 \(Version 2.4\)) Tj
+T* (Title: Rotating Equipment Bearing Temperature & Vibration Monitoring) Tj
+T* (1. Operating Limits:) Tj
+T* (Normal bearing operating temperature for pumps and motors is up to 80 degrees C.) Tj
+T* (Maximum continuous operating limit is 80 degrees C.) Tj
+T* (2. Mandatory Actions:) Tj
+T* (If bearing temperature exceeds 80 degrees C, record temperature and inspect bearing immediately.) Tj
+T* (Schedule maintenance inspection within 24 hours to prevent cataclysmic bearing seizure.) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Length 544 >>
+stream
+BT
+/F1 11 Tf
+14.5 TL
+50 750 Td
+(SYNTHETIC DEMONSTRATION DATA -- FOR EVALUATION ONLY) Tj
+T* (SOP-MAINT-001 -- CORRECTIVE ACTIONS & APPROVAL PROCESS) Tj
+T* (3. Corrective Actions for Thermal Exceedance \(> 80 C\):) Tj
+T* (- Isolate secondary bypass if safe to do so.) Tj
+T* (- Check oil reservoir and replace contaminated lubricant.) Tj
+T* (- Check axial alignment and mechanical seal condition.) Tj
+T* (4. Approval Authority:) Tj
+T* (All repairs on Class-1 rotating equipment require an Approval Note signed by Lead Maintenance Engineer.) Tj
+ET
+endstream
+endobj
+2 0 obj
+<< /Type /Pages
+/Count 2
+/Kids [3 0 R 5 0 R]
+>>
+endobj
+3 0 obj
+<< /Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 4 0 R
+/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
+>>
+endobj
+5 0 obj
+<< /Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 6 0 R
+/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
+>>
+endobj
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000001740 00000 n 
+0000001327 00000 n 
+0000001390 00000 n 
+0000000009 00000 n 
+0000001565 00000 n 
+0000000733 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1789
+%%EOF

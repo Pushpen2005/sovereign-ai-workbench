@@ -31,6 +31,16 @@ const FEATURES = [
     description: 'End-to-end automated inspection analysis, risk evaluation, and approval note generation.',
   },
   {
+    icon: '👁',
+    title: 'Multimodal Vision',
+    description: 'Local visual observation of gauges, sensors, and equipment condition without external APIs.',
+  },
+  {
+    icon: '💻',
+    title: 'Sandboxed Coding',
+    description: 'Isolated container code execution with zero network access and strict resource boundaries.',
+  },
+  {
     icon: '🏭',
     title: 'Private Infrastructure',
     description: 'Self-hosted Qdrant, Ollama, and embeddings. Zero external AI API dependency.',
@@ -83,7 +93,7 @@ export function LandingPage() {
 
         {/* Capability tags */}
         <div className="flex flex-wrap justify-center gap-2 mt-6">
-          {['Local AI', 'RAG', 'OCR', 'Agents', 'Sovereign Infrastructure'].map((tag) => (
+          {['Local AI', 'RAG', 'OCR', 'Agents', 'Vision', 'Secure Coding', 'On-Premise'].map((tag) => (
             <span
               key={tag}
               className="px-3 py-1 bg-slate-800 border border-slate-700 rounded-full text-xs text-slate-300"

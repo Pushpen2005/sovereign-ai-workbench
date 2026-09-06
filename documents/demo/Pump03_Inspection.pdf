@@ -1,0 +1,73 @@
+%PDF-1.4
+4 0 obj
+<< /Length 573 >>
+stream
+BT
+/F1 11 Tf
+14.5 TL
+50 750 Td
+(SYNTHETIC DEMONSTRATION DATA -- FOR EVALUATION ONLY) Tj
+T* (EQUIPMENT INSPECTION REPORT -- PUMP-03) Tj
+T* (Asset ID: Pump-03 \(Crude Distillation Unit Cooling Water Booster\)) Tj
+T* (Inspection Date: 2026-08-15) Tj
+T* (Observed Bearing Temperature: 92 degrees C under full operating load.) Tj
+T* (Visual Inspection: Heavy casing vibration detected on bearing housing.) Tj
+T* (Operating Status: Continuous service; abnormal heating observed during routine daily round.) Tj
+T* (Reported By: Senior Reliability Engineer \(Demo Account\)) Tj
+ET
+endstream
+endobj
+6 0 obj
+<< /Length 353 >>
+stream
+BT
+/F1 11 Tf
+14.5 TL
+50 750 Td
+(SYNTHETIC DEMONSTRATION DATA -- FOR EVALUATION ONLY) Tj
+T* (PUMP-03 HISTORICAL LOGS AND SENSOR READINGS) Tj
+T* (Vibration Level: 6.8 mm/s RMS \(ISO 10816-3 Zone C/D Limit is 4.5 mm/s\)) Tj
+T* (Lubrication Oil Level: Low with slight discoloration.) Tj
+T* (Maintenance Urgency: High priority inspection recommended.) Tj
+ET
+endstream
+endobj
+2 0 obj
+<< /Type /Pages
+/Count 2
+/Kids [3 0 R 5 0 R]
+>>
+endobj
+3 0 obj
+<< /Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 4 0 R
+/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
+>>
+endobj
+5 0 obj
+<< /Type /Page
+/Parent 2 0 R
+/MediaBox [0 0 612 792]
+/Contents 6 0 R
+/Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >>
+>>
+endobj
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000001448 00000 n 
+0000001035 00000 n 
+0000001098 00000 n 
+0000000009 00000 n 
+0000001273 00000 n 
+0000000632 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+1497
+%%EOF

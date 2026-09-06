@@ -1,5 +1,10 @@
 {
   "dependencies": {
     "canvas": "^3.2.3"
+  },
+  "scripts": {
+    "audit:sovereignty": "npm --prefix backend run audit:sovereignty",
+    "demo:security": "npm --prefix backend run demo:security",
+    "demo:vision": "npm --prefix backend run demo:vision"
   }
 }
