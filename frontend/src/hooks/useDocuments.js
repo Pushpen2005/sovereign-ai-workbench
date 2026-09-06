@@ -49,10 +49,11 @@ export function useDocuments() {
    * Calls POST /api/v1/documents.
    *
    * @param {File} file
+   * @param {string} [documentType] - Optional document type ('sop' | 'inspection' | 'other')
    * @returns {Promise<void>}
    */
   const uploadDocument = useCallback(
-    async (file) => {
+    async (file, documentType) => {
       // ── Frontend validation ───────────────────────────────────────────────
       if (!file) {
         actions.uploadError('No file selected.');
@@ -71,13 +72,13 @@ export function useDocuments() {
       }
 
       // ── Begin upload ──────────────────────────────────────────────────────
-      actions.uploadStart({ name: file.name, sizeMb: +sizeMb.toFixed(2) });
+      actions.uploadStart({ name: file.name, sizeMb: +sizeMb.toFixed(2), documentType });
 
       try {
         // Ingest into Qdrant + PostgreSQL
-        const result = await uploadDocumentApi(file);
+        const result = await uploadDocumentApi(file, documentType);
 
-        // Backend returns: { success, documentId, filename, originalFilename, chunksStored }
+        // Backend returns: { success, documentId, filename, originalFilename, documentType, chunksStored }
         actions.uploadSuccess(result);
 
         // Refetch to sync full database state

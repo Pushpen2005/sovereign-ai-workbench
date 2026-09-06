@@ -44,6 +44,7 @@ export async function getAllDocuments(organizationId) {
     organizationId: row.organization_id,
     filename: row.filename,
     originalFilename: row.original_filename,
+    documentType: row.document_type || null,
     status: row.status,
     chunksStored: row.chunks_stored,
     extractionMethod: row.extraction_method || "pdf-text",
@@ -76,6 +77,7 @@ export async function getDocumentById(id, organizationId) {
     organizationId: row.organization_id,
     filename: row.filename,
     originalFilename: row.original_filename,
+    documentType: row.document_type || null,
     status: row.status,
     chunksStored: row.chunks_stored,
     extractionMethod: row.extraction_method || "pdf-text",
@@ -192,6 +194,8 @@ export async function processAndIngestDocument(
     originalFilename = filename;
   }
 
+  const documentType = options.documentType || "inspection";
+
   // 1. Create PostgreSQL record with status "Processing"
   try {
     await upsertDocument({
@@ -199,6 +203,7 @@ export async function processAndIngestDocument(
       organizationId,
       filename,
       originalFilename,
+      documentType,
       status: "Processing",
       chunksStored: 0,
     });
@@ -222,6 +227,7 @@ export async function processAndIngestDocument(
         documentId,
         organizationId,
         filename: originalFilename,
+        documentType,
       });
 
     const chunksStored =
@@ -241,6 +247,7 @@ export async function processAndIngestDocument(
       organizationId,
       filename,
       originalFilename,
+      documentType,
       status: "Indexed",
       chunksStored,
       extractionMethod,

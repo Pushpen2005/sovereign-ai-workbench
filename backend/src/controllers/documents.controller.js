@@ -63,6 +63,21 @@ export async function uploadDocument(req, res, next) {
       });
     }
 
+    const ALLOWED_DOCUMENT_TYPES = ["sop", "inspection", "other"];
+    let rawDocumentType = req.body?.documentType;
+    let normalizedDocumentType = "inspection"; // Safe backward-compatible default if omitted
+
+    if (rawDocumentType !== undefined && rawDocumentType !== null && String(rawDocumentType).trim() !== "") {
+      const lower = String(rawDocumentType).trim().toLowerCase();
+      if (!ALLOWED_DOCUMENT_TYPES.includes(lower)) {
+        return res.status(400).json({
+          success: false,
+          message: `Invalid documentType '${rawDocumentType}'. Allowed values: ${ALLOWED_DOCUMENT_TYPES.join(", ")}`,
+        });
+      }
+      normalizedDocumentType = lower;
+    }
+
     const organizationId = resolveAuthenticatedOrganization(req);
     const target = req.file || req.body;
     const options = {
@@ -70,6 +85,7 @@ export async function uploadDocument(req, res, next) {
       documentId: req.body?.documentId,
       filename: req.body?.filename,
       originalFilename: req.file?.originalname || req.body?.originalFilename || req.body?.filename,
+      documentType: normalizedDocumentType,
     };
 
     const result = await processAndIngestDocument(target, options);
@@ -80,6 +96,7 @@ export async function uploadDocument(req, res, next) {
       organizationId: result.organizationId,
       filename: result.filename,
       originalFilename: result.originalFilename,
+      documentType: result.documentType || normalizedDocumentType,
       status: result.status,
       chunksStored: result.chunksStored,
       extractionMethod: result.extractionMethod || "pdf-text",

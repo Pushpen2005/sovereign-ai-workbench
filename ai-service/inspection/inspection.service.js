@@ -316,10 +316,14 @@ export async function ingestInspectionReport(filePath, options = {}) {
         throw new Error(`No text content could be extracted from: ${filename}`);
     }
 
+    const canonicalDocType = typeof options.documentType === "string" && options.documentType.trim()
+        ? options.documentType.trim().toLowerCase()
+        : INSPECTION_DOCUMENT_TYPE;
+
     const chunksWithMeta = rawChunks.map((chunk) => ({
         ...chunk,
         filename,
-        documentType: options.documentType || INSPECTION_DOCUMENT_TYPE,
+        documentType: canonicalDocType,
         organizationId: options.organizationId.trim(),
         extractionMethod: chunk.extractionMethod || extractionMethod || "pdf-text",
     }));

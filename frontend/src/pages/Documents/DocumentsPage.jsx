@@ -12,22 +12,19 @@ import { Button } from '../../components/ui/Button.jsx';
 import { StatusBadge } from '../../components/ui/Badge.jsx';
 import { useDocuments } from '../../hooks/useDocuments.js';
 
+import {
+  inferDocumentType,
+  getCanonicalDocumentType,
+  getDisplayDocumentType,
+  resolveUploadDocumentType,
+  matchesFilter,
+} from './documentClassification.js';
+
 function formatDate(iso) {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString('en-GB', {
     year: 'numeric', month: 'short', day: 'numeric',
   });
-}
-
-function inferDocumentType(filename = '') {
-  const lower = filename.toLowerCase();
-  if (lower.includes('sop') || lower.includes('procedure') || lower.includes('manual')) {
-    return 'SOP';
-  }
-  if (lower.includes('inspection') || lower.includes('iar') || lower.includes('report') || lower.includes('audit')) {
-    return 'Inspection Report';
-  }
-  return 'Technical Document';
 }
 
 // ─── Sovereign Upload Pipeline Progress ───────────────────────────────────────
@@ -107,10 +104,15 @@ export function DocumentsPage() {
   } = useDocuments();
 
   const [activeFilter, setActiveFilter] = useState('All');
+  const [explicitUploadType, setExplicitUploadType] = useState('inspection');
   const [searchQuery, setSearchQuery] = useState('');
   const [showUploadZone, setShowUploadZone] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
+
+  const resolveTargetDocumentType = useCallback(() => {
+    return resolveUploadDocumentType(activeFilter, explicitUploadType);
+  }, [activeFilter, explicitUploadType]);
 
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
@@ -125,36 +127,33 @@ export function DocumentsPage() {
     const file = e.dataTransfer.files?.[0];
     if (file) {
       setShowUploadZone(true);
-      uploadDocument(file);
+      const targetDocType = resolveTargetDocumentType();
+      uploadDocument(file, targetDocType);
     }
-  }, [uploadDocument]);
+  }, [uploadDocument, resolveTargetDocumentType]);
 
   const handleFileChange = useCallback((e) => {
     const file = e.target.files?.[0];
     if (file) {
       setShowUploadZone(true);
-      uploadDocument(file);
+      const targetDocType = resolveTargetDocumentType();
+      uploadDocument(file, targetDocType);
     }
     e.target.value = '';
-  }, [uploadDocument]);
+  }, [uploadDocument, resolveTargetDocumentType]);
 
   // Filtered documents
   const filteredDocuments = useMemo(() => {
     return documents.filter((doc) => {
       const name = (doc.originalFilename || doc.filename || '').toLowerCase();
-      const type = inferDocumentType(doc.originalFilename || doc.filename);
 
       // Search match
       if (searchQuery.trim() && !name.includes(searchQuery.toLowerCase())) {
         return false;
       }
 
-      // Filter match
-      if (activeFilter === 'Inspection Reports' && type !== 'Inspection Report') return false;
-      if (activeFilter === 'SOPs' && type !== 'SOP') return false;
-      if (activeFilter === 'Other' && (type === 'Inspection Report' || type === 'SOP')) return false;
-
-      return true;
+      // Authoritative filter match
+      return matchesFilter(doc, activeFilter);
     });
   }, [documents, searchQuery, activeFilter]);
 
@@ -225,6 +224,24 @@ export function DocumentsPage() {
                   </button>
                 </p>
               </div>
+              {activeFilter === 'All' ? (
+                <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mt-1">
+                  <span className="font-semibold text-slate-700">Classification:</span>
+                  <select
+                    value={explicitUploadType}
+                    onChange={(e) => setExplicitUploadType(e.target.value)}
+                    className="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-800 focus:ring-1 focus:ring-blue-500"
+                  >
+                    <option value="inspection">Inspection Report</option>
+                    <option value="sop">SOP / Knowledge Base</option>
+                    <option value="other">Other Technical Document</option>
+                  </select>
+                </div>
+              ) : (
+                <div className="text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mt-1">
+                  Target Category: <span className="font-bold text-slate-900">{activeFilter}</span> ({activeFilter === 'SOPs' ? 'sop' : activeFilter === 'Inspection Reports' ? 'inspection' : 'other'})
+                </div>
+              )}
               <p className="text-[11px] text-slate-400 max-w-sm">
                 Documents are processed using local extraction, OCR, embeddings and self-hosted retrieval.
               </p>
@@ -306,7 +323,7 @@ export function DocumentsPage() {
                 {filteredDocuments.map((doc) => {
                   const id = doc.id || doc.documentId;
                   const name = doc.originalFilename || doc.filename || id;
-                  const type = inferDocumentType(name);
+                  const displayType = getDisplayDocumentType(doc);
                   const chunks = doc.chunksStored || doc.chunks_stored || 1;
                   const pages = doc.pageCount || doc.pages || 1;
                   const status = doc.status || 'Indexed';
@@ -319,7 +336,7 @@ export function DocumentsPage() {
                           {name}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-slate-600">{type}</td>
+                      <td className="py-3 px-4 text-slate-600">{displayType}</td>
                       <td className="py-3 px-4 text-slate-600 font-mono">{pages}</td>
                       <td className="py-3 px-4 text-slate-600 font-mono">{chunks.toLocaleString()}</td>
                       <td className="py-3 px-4">

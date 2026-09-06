@@ -8,6 +8,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Ensure .env is loaded
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 import {
@@ -100,6 +101,7 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_documents_organization_id ON documents (organization_id);
     ALTER TABLE documents ADD COLUMN IF NOT EXISTS extraction_method VARCHAR(50) DEFAULT 'pdf-text';
+    ALTER TABLE documents ADD COLUMN IF NOT EXISTS document_type VARCHAR(50);
 
     CREATE TABLE IF NOT EXISTS reports (
       id VARCHAR(255) PRIMARY KEY,
@@ -239,14 +241,15 @@ export async function initDb() {
     );
     if (existingDocCheck.rows.length === 0) {
       await query(
-        `INSERT INTO documents (id, organization_id, filename, original_filename, status, chunks_stored, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-         ON CONFLICT (id) DO NOTHING`,
+        `INSERT INTO documents (id, organization_id, filename, original_filename, document_type, status, chunks_stored, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+         ON CONFLICT (id) DO UPDATE SET document_type = COALESCE(documents.document_type, EXCLUDED.document_type)`,
         [
           "6216a2ec-9351-42ef-9ead-7cd2716b3397",
           DEFAULT_ORGANIZATION_ID,
           "6216a2ec-9351-42ef-9ead-7cd2716b3397.pdf",
           "RIL-IAR-2025.pdf",
+          "inspection",
           "Indexed",
           1467,
         ]

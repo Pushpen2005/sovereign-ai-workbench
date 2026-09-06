@@ -24,10 +24,14 @@ export function fetchDocuments() {
  * Upload a PDF file and ingest it into Qdrant + PostgreSQL in a single call.
  *
  * @param {File} file - A PDF File object from the browser
- * @returns {Promise<{ success: boolean, documentId: string, filename: string, originalFilename?: string, chunksStored: number }>}
+ * @param {string} [documentType] - Canonical document type ('sop' | 'inspection' | 'other')
+ * @returns {Promise<{ success: boolean, documentId: string, filename: string, originalFilename?: string, documentType?: string, chunksStored: number }>}
  */
-export function uploadDocument(file) {
+export function uploadDocument(file, documentType) {
   const form = new FormData();
   form.append('document', file);         // field name MUST be "document"
+  if (documentType && typeof documentType === 'string' && documentType.trim()) {
+    form.append('documentType', documentType.trim().toLowerCase());
+  }
   return postForm('/api/v1/documents', form);
 }
