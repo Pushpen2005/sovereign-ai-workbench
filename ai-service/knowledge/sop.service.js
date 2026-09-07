@@ -60,7 +60,11 @@ export async function ingestSop(filePath, options = {}) {
             ? options.documentId.trim()
             : randomUUID();
 
-    const filename = path.basename(filePath);
+    const filename =
+        typeof options.filename === "string" &&
+        options.filename.trim().length > 0
+            ? options.filename.trim()
+            : path.basename(filePath);
 
     // --- Extraction (page-aware, OCR fallback included) ---
     const { pages, extractionMethod } = await extractPdfText(filePath, {

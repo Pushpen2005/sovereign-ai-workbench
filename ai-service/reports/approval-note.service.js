@@ -77,19 +77,23 @@ export function validateApprovalNoteInput(input) {
     }
 
     // 3. Recommendation validation (PR #15 contract)
-    if (
-        typeof recommendation !== "string" ||
-        recommendation.trim().length === 0
-    ) {
-        throw new TypeError("recommendation must be a non-empty string");
+    let rec = recommendation;
+    if (typeof rec !== "string" || rec.trim().length === 0) {
+        if (level === null) {
+            rec = "Insufficient SOP evidence is available to provide a validated recommendation.";
+        } else {
+            throw new TypeError("recommendation must be a non-empty string");
+        }
     }
 
-    // 4. Citations validation (PR #15 contract)
-    if (!Array.isArray(citations)) {
-        throw new TypeError("citations must be an array");
-    }
+    // 4. Citations / References validation (PR #15 contract)
+    const rawCitations = Array.isArray(citations)
+        ? citations
+        : Array.isArray(input.references)
+        ? input.references
+        : [];
 
-    const sanitizedCitations = citations.map((c, idx) => {
+    const sanitizedCitations = rawCitations.map((c, idx) => {
         if (!c || typeof c !== "object" || Array.isArray(c)) {
             throw new TypeError(`citations[${idx}] must be an object`);
         }
@@ -111,8 +115,9 @@ export function validateApprovalNoteInput(input) {
             level,
             reason: riskAssessment.reason.trim(),
         },
-        recommendation: recommendation.trim(),
+        recommendation: rec.trim(),
         citations: sanitizedCitations,
+        references: sanitizedCitations,
     };
 }
 
