@@ -1,0 +1,75 @@
+%PDF-1.4
+4 0 obj
+<< /Length 1304 >>
+stream
+BT /F1 11 Tf 50 740 Td 15 TL (INDUSTRIAL INSPECTION GUIDELINES & SEVERITY STANDARDS) Tj T*
+() Tj T*
+(Document ID: SOP-INSP-003) Tj T*
+(Document Type: sop) Tj T*
+(Revision: Rev 1.4) Tj T*
+(Effective Date: 2026-02-15) Tj T*
+(Department: Quality Assurance & Reliability) Tj T*
+() Tj T*
+(1. Inspection Regimes and Frequency) Tj T*
+(Rotating machinery must undergo systematic surveillance:) Tj T*
+(  - Daily routine inspection: Thermal imaging, surface temperature, audible checks.) Tj T*
+(  - Monthly comprehensive inspection: Vibration spectral analysis, oil sampling.) Tj T*
+(  - Quarterly shutdown audit: Internal bearing clearance, seal inspection.) Tj T*
+() Tj T*
+(2. Severity Classification Matrix) Tj T*
+(Observations must be categorized according to deviation from baseline:) Tj T*
+(  - HIGH SEVERITY: Parameter exceeds continuous limit by > 10% \(e.g. Temp > 88 C\).) Tj T*
+(    Action: Immediate operational restriction and expedited maintenance review.) Tj T*
+(  - MEDIUM SEVERITY: Parameter between normal baseline and limit \(75 C - 80 C\).) Tj T*
+(    Action: Schedule maintenance inspection within 48 hours.) Tj T*
+(  - LOW SEVERITY: Minor aesthetic or non-functional observation \(e.g. minor paint wear\).) Tj T*
+(    Action: Log observation and monitor during next scheduled cycle.) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+6 0 obj
+<< /Length 771 >>
+stream
+BT /F1 11 Tf 50 740 Td 15 TL (INDUSTRIAL INSPECTION GUIDELINES & SEVERITY STANDARDS) Tj T*
+() Tj T*
+(Document ID: SOP-INSP-003 \(Page 2\)) Tj T*
+() Tj T*
+(3. Evidence Recording and Traceability) Tj T*
+(Every recorded inspection finding must capture:) Tj T*
+(  - Asset / equipment identifier \(e.g. Pump-03\)) Tj T*
+(  - Quantitative observed value with physical unit of measurement \(e.g. 92 C\)) Tj T*
+(  - Benchmark operating limit from authoritative SOP \(e.g. 80 C\)) Tj T*
+(  - Exact document source, page number, and paragraph citation.) Tj T*
+() Tj T*
+(4. Approval Note Preparation) Tj T*
+(Approval notes must synthesize findings, technical analysis against SOP thresholds,) Tj T*
+(risk rating, recommended remedial actions, and authoritative references.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000002600 00000 n 
+0000002537 00000 n 
+0000001365 00000 n 
+0000000009 00000 n 
+0000002362 00000 n 
+0000001540 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+2649
+%%EOF

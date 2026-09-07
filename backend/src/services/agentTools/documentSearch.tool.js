@@ -35,7 +35,7 @@ export async function executeDocumentSearch(args, context = {}) {
         throw new DocumentSearchError("Execution context missing authenticated organizationId for document search");
     }
 
-    const { query, documentId, limit: rawLimit } = args;
+    const { query, documentId, documentType, limit: rawLimit } = args;
 
     if (typeof query !== "string" || !query.trim()) {
         throw new DocumentSearchError("query must be a non-empty string");
@@ -50,11 +50,16 @@ export async function executeDocumentSearch(args, context = {}) {
         throw new DocumentSearchError(`Failed to generate query embedding: ${embErr.message}`);
     }
 
+    const filters = {
+        organizationId: organizationId.trim(),
+    };
+    if (documentType && typeof documentType === "string" && documentType.trim()) {
+        filters.documentType = documentType.trim().toLowerCase();
+    }
+
     let chunks;
     try {
-        chunks = await searchSimilarChunks(queryVector, limit, documentId, {
-            organizationId: organizationId.trim(),
-        });
+        chunks = await searchSimilarChunks(queryVector, limit, documentId, filters);
     } catch (searchErr) {
         throw new DocumentSearchError(`Qdrant vector search failed: ${searchErr.message}`);
     }
