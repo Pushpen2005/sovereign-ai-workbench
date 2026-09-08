@@ -162,6 +162,7 @@ export async function analyzeImage(req, res, next) {
             success: true,
             taskType: result.taskType,
             model: result.selectedModel,
+            local: true,
             analysis: result.analysis,
             structured: legacyStructured,
             observations: result.observations,

@@ -469,13 +469,15 @@ async function runPhase4Tests() {
     const liveToken = liveLoginData.data?.token;
     const liveOrgId = liveLoginData.data?.user?.organizationId;
 
+    const liveRunId = randomUUID().slice(0, 8);
+    const liveFilename = `Live_Relief_Valve_SOP_${liveRunId}.pdf`;
     const liveSopPdf = buildMinimalPdf([
-      "LIVE TEST STANDARD OPERATING PROCEDURE",
-      "Document ID: SOP-LIVE-001",
-      "Hydraulic pressure relief valve setting is 150 bar maximum.",
+      `LIVE TEST STANDARD OPERATING PROCEDURE ${liveRunId}`,
+      `Document ID: SOP-LIVE-${liveRunId}`,
+      `Hydraulic pressure relief valve setting for unit ${liveRunId} is 150 bar maximum.`,
     ]);
 
-    const liveUpload = await uploadDoc("http://127.0.0.1:9000", liveToken, liveSopPdf, "Live_Relief_Valve_SOP.pdf", "sop");
+    const liveUpload = await uploadDoc("http://127.0.0.1:9000", liveToken, liveSopPdf, liveFilename, "sop");
     assert.equal(liveUpload.documentType, "sop", "Live upload documentType must be 'sop'");
 
     // GET /api/v1/documents?documentType=sop from live container
@@ -489,11 +491,11 @@ async function runPhase4Tests() {
     assert.equal(liveDocInList, true, "Live uploaded SOP must appear in GET /api/v1/documents?documentType=sop");
 
     // Verify searchSop finds it
-    const liveSopResults = await searchSop("Hydraulic pressure relief valve setting", {
+    const liveSopResults = await searchSop(`Hydraulic pressure relief valve setting for unit ${liveRunId}`, {
       organizationId: liveOrgId,
       scoreThreshold: 0.3,
     });
-    assert.ok(liveSopResults.some((c) => c.documentId === liveUpload.documentId));
+    assert.ok(liveSopResults.some((c) => c.documentId === liveUpload.documentId), "searchSop must retrieve live uploaded SOP chunk");
     console.log("  ✓ PASS Test 15: Live HTTP upload, DB indexing, and searchSop verified against port 9000");
     passedCount++;
   } catch (err) {

@@ -166,15 +166,17 @@ import {
     getAvailableModels,
     getRouterDiagnostic,
     classifyTask,
+    routeTask,
+    RouterError,
     TASK_TYPE,
 } from "../../ai-service/router/modelRouter.js";
 
 app.get('/api/v1/router/models', async (req, res) => {
-    const defaultModel    = process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
-    const documentModel   = process.env.MODEL_DOCUMENT   || process.env.DOCUMENT_MODEL  || defaultModel;
-    const inspectionModel = process.env.MODEL_INSPECTION || process.env.INSPECTION_MODEL || defaultModel;
-    const codingModel     = process.env.MODEL_CODING     || process.env.CODING_MODEL    || defaultModel;
-    const visionModel     = process.env.MODEL_VISION     || process.env.VISION_MODEL    || "moondream";
+    const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
+    const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
+    const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
+    const codingModel     = process.env.CODING_MODEL     || process.env.MODEL_CODING     || defaultModel;
+    const visionModel     = process.env.MODEL_VISION     || process.env.VISION_MODEL     || "moondream";
 
     const installedModels = await getAvailableModels();
     const diagnostic = await getRouterDiagnostic();
@@ -194,6 +196,32 @@ app.get('/api/v1/router/models', async (req, res) => {
         diagnostic,
         ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
     });
+});
+
+/**
+ * POST /api/v1/router/route
+ * Routes an incoming task request to the appropriate local model.
+ */
+app.post('/api/v1/router/route', requireAuth, async (req, res) => {
+    try {
+        const { taskType, request, question, model, context } = req.body || {};
+        const input = request || question || "";
+        const routing = await routeTask(input, { taskType, model, context });
+        res.status(200).json({
+            success: true,
+            ...routing,
+        });
+    } catch (err) {
+        if (err instanceof RouterError) {
+            const statusCode = (err.code === "MODEL_NOT_ALLOWED" || err.code === "INVALID_TASK_TYPE") ? 400 : 503;
+            return res.status(statusCode).json({
+                success: false,
+                code: err.code,
+                message: err.message,
+            });
+        }
+        res.status(500).json({ success: false, message: err.message });
+    }
 });
 
 /**

@@ -23,10 +23,39 @@ export const TASK_TYPE = Object.freeze({
     VISION:            "VISION",
     GENERAL_CHAT:      "GENERAL_CHAT",
     INSPECTION:        "INSPECTION",
-    // Backward-compatibility aliases
+    // Backward-compatibility & Phase 9 aliases
     DOCUMENT:          "DOCUMENT_ANALYSIS",
     GENERAL:           "GENERAL_CHAT",
 });
+
+export const VALID_TASK_TYPES = Object.freeze(new Set([
+    TASK_TYPE.DOCUMENT_ANALYSIS,
+    TASK_TYPE.CODING,
+    TASK_TYPE.VISION,
+    TASK_TYPE.GENERAL_CHAT,
+    TASK_TYPE.INSPECTION,
+    "DOCUMENT",
+    "GENERAL",
+]));
+
+/**
+ * Normalizes task type to minimum canonical taxonomy (DOCUMENT, CODING, GENERAL, VISION, INSPECTION).
+ */
+export function toCanonicalTaskType(taskType) {
+    if (taskType === TASK_TYPE.DOCUMENT_ANALYSIS || taskType === "DOCUMENT" || taskType === TASK_TYPE.INSPECTION) {
+        return "DOCUMENT";
+    }
+    if (taskType === TASK_TYPE.CODING) {
+        return "CODING";
+    }
+    if (taskType === TASK_TYPE.GENERAL_CHAT || taskType === "GENERAL") {
+        return "GENERAL";
+    }
+    if (taskType === TASK_TYPE.VISION) {
+        return "VISION";
+    }
+    return taskType;
+}
 
 // ─── Keyword Dictionaries ─────────────────────────────────────────────────────
 
@@ -62,6 +91,8 @@ const CODING_KEYWORDS = [
     "in python", "in javascript", "in typescript", "in java", "in c++",
     "in sql", "in bash", "in node", "in react",
     "python script", "python code",
+    "javascript function", "python function", "create a javascript", "create a python",
+    "function for", "code for", "script for", "sorting data", "sort data",
     // code-specific nouns
     "function that", "function to", "class that", "class to",
     "script that", "script to", "algorithm that", "algorithm to",
@@ -187,11 +218,11 @@ export function classifyTask(questionOrInput, options = {}) {
  * All values fall back to DEFAULT_MODEL / OLLAMA_MODEL so the router remains fully operational.
  */
 export function getModelRegistry() {
-    const defaultModel    = process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
-    const documentModel   = process.env.MODEL_DOCUMENT   || process.env.DOCUMENT_MODEL  || defaultModel;
-    const inspectionModel = process.env.MODEL_INSPECTION || process.env.INSPECTION_MODEL || defaultModel;
-    const codingModel     = process.env.MODEL_CODING     || process.env.CODING_MODEL    || defaultModel;
-    const visionModel     = process.env.MODEL_VISION     || process.env.VISION_MODEL    || "moondream";
+    const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
+    const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
+    const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
+    const codingModel     = process.env.CODING_MODEL     || process.env.MODEL_CODING     || defaultModel;
+    const visionModel     = process.env.MODEL_VISION     || process.env.MODEL_VISION     || "moondream";
 
     const codingFallbackEnabled =
         (process.env.CODING_MODEL_FALLBACK || "true").toLowerCase() !== "false";
@@ -202,6 +233,8 @@ export function getModelRegistry() {
         [TASK_TYPE.VISION]:            visionModel,
         [TASK_TYPE.GENERAL_CHAT]:      defaultModel,
         [TASK_TYPE.INSPECTION]:        inspectionModel,
+        DOCUMENT:                      documentModel,
+        GENERAL:                       defaultModel,
         defaultModel,
         visionModel,
         codingFallbackEnabled,
@@ -400,6 +433,21 @@ export async function routeTask(requestOrInput, options = {}) {
         }
     }
 
+    // Explicit taskType validation if supplied by caller
+    if (mergedOptions.taskType !== undefined && mergedOptions.taskType !== null) {
+        const candidate = typeof mergedOptions.taskType === "string" ? mergedOptions.taskType.trim() : "";
+        if (!candidate || !VALID_TASK_TYPES.has(candidate)) {
+            console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "invalid_task_type", taskType: mergedOptions.taskType })}`);
+            const err = new RouterError(
+                `Invalid task type '${mergedOptions.taskType}'. Supported: DOCUMENT, CODING, GENERAL, VISION, INSPECTION.`,
+                { code: "INVALID_TASK_TYPE", taskType: mergedOptions.taskType }
+            );
+            err.code = "INVALID_TASK_TYPE";
+            err.taskType = mergedOptions.taskType;
+            throw err;
+        }
+    }
+
     const taskType = mergedOptions.taskType || classifyTask(requestOrInput, options);
     console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.classified", taskType, requestPreview: typeof requestOrInput === 'string' ? requestOrInput.slice(0, 50) : null })}`);
 
@@ -416,6 +464,8 @@ export async function routeTask(requestOrInput, options = {}) {
         console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: registryModel, latencyMs, isFallback: false, local: true })}`);
         return {
             taskType,
+            canonicalTaskType: toCanonicalTaskType(taskType),
+            model:         registryModel,
             selectedModel: registryModel,
             reason,
             routingReason: reason,
@@ -473,6 +523,8 @@ export async function routeTask(requestOrInput, options = {}) {
         console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: defaultModel, latencyMs, isFallback: true, local: true })}`);
         return {
             taskType,
+            canonicalTaskType: toCanonicalTaskType(taskType),
+            model:         defaultModel,
             selectedModel: defaultModel,
             reason,
             routingReason: reason,
@@ -511,10 +563,12 @@ function routingReason(taskType, model, isFallback) {
 }
 
 export class RouterError extends Error {
-    constructor(message) {
+    constructor(message, options = {}) {
         super(message);
         this.name = "RouterError";
-        this.code = "ROUTER_ERROR";
+        this.code = options.code || "ROUTER_ERROR";
+        if (options.taskType) this.taskType = options.taskType;
+        if (options.model) this.model = options.model;
     }
 }
 

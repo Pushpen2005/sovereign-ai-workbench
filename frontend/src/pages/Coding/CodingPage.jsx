@@ -12,27 +12,43 @@ import { generateCode, executeCode } from '../../api/coding.api.js';
 
 const DEMO_PRESETS = [
   {
-    label: 'MRPL Benchmark: Calculate List Average',
+    label: 'Python: List Average',
     prompt: 'Write Python code to calculate the average of [10, 20, 30, 40, 50].',
+    language: 'python',
   },
   {
-    label: 'Industrial: Bearing Temperature Trend',
+    label: 'Python: Bearing Temp Trend',
     prompt: 'Write Python code to calculate bearing temperature statistics and detect if maximum exceeds 80C from readings = [72.5, 76.1, 79.8, 83.2, 81.0].',
+    language: 'python',
   },
   {
-    label: 'Security Test: Infinite Loop (Timeout)',
-    prompt: 'while True:\n    pass',
-    isDirectCode: true,
+    label: 'JS: Pump Efficiency',
+    prompt: 'Write JavaScript code to calculate pump efficiency given output power 85kW and input power 100kW.',
+    language: 'javascript',
   },
   {
-    label: 'Security Test: Outbound Network Exfiltration',
+    label: 'Security: Python Egress Probe',
     prompt: 'import urllib.request\ntry:\n    urllib.request.urlopen("https://example.com", timeout=2)\n    print("NET_SUCCESS")\nexcept Exception as e:\n    print(f"NET_BLOCKED: {type(e).__name__}")',
     isDirectCode: true,
+    language: 'python',
+  },
+  {
+    label: 'Security: JS Egress Probe',
+    prompt: 'const https = require("https");\nhttps.get("https://example.com", (res) => {\n  console.log("NET_SUCCESS");\n}).on("error", (e) => {\n  console.log(`NET_BLOCKED: ${e.code || e.message}`);\n});',
+    isDirectCode: true,
+    language: 'javascript',
+  },
+  {
+    label: 'Security: Loop Timeout',
+    prompt: 'while (true) {}',
+    isDirectCode: true,
+    language: 'javascript',
   },
 ];
 
 export function CodingPage() {
   const [prompt, setPrompt] = useState('Write Python code to calculate the average of [10, 20, 30, 40, 50].');
+  const [language, setLanguage] = useState('python');
   const [code, setCode] = useState('');
   const [generationMeta, setGenerationMeta] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -48,12 +64,13 @@ export function CodingPage() {
     setExecutionResult(null);
 
     try {
-      const res = await generateCode(prompt.trim());
+      const res = await generateCode(prompt.trim(), language);
       if (res && res.success) {
         setCode(res.code || '');
         setGenerationMeta({
           taskType: res.taskType,
           model: res.model,
+          language: res.language || language,
           routingReason: res.routingReason,
           isFallback: res.isFallback,
         });
@@ -73,7 +90,7 @@ export function CodingPage() {
     setError(null);
 
     try {
-      const res = await executeCode(code.trim(), 'python', 5000);
+      const res = await executeCode(code.trim(), language, 5000);
       setExecutionResult(res);
     } catch (err) {
       setError(err?.message || 'Sandbox execution request failed.');
@@ -83,11 +100,15 @@ export function CodingPage() {
   };
 
   const handleApplyPreset = (preset) => {
+    if (preset.language) {
+      setLanguage(preset.language);
+    }
     if (preset.isDirectCode) {
       setCode(preset.prompt);
       setGenerationMeta({
         taskType: 'CODING',
         model: 'manual-test',
+        language: preset.language || 'python',
         routingReason: 'Direct security benchmark test',
         isFallback: false,
       });
@@ -164,15 +185,41 @@ export function CodingPage() {
         {/* Left Column: Prompt and Code Generator */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col gap-4">
           <div>
-            <label htmlFor="coding-prompt" className="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">
-              1. Coding Request (Model Router)
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label htmlFor="coding-prompt" className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
+                1. Coding Request (Model Router)
+              </label>
+              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                <button
+                  type="button"
+                  onClick={() => setLanguage('python')}
+                  className={`px-2.5 py-0.5 text-xs font-medium rounded-md transition-colors ${
+                    language === 'python'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Python
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLanguage('javascript')}
+                  className={`px-2.5 py-0.5 text-xs font-medium rounded-md transition-colors ${
+                    language === 'javascript'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  JavaScript
+                </button>
+              </div>
+            </div>
             <textarea
               id="coding-prompt"
               rows={3}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe the Python task you want the local model to write..."
+              placeholder={`Describe the ${language === 'javascript' ? 'JavaScript' : 'Python'} task you want the local model to write...`}
               disabled={isGenerating || isExecuting}
               className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-slate-100"
             />
@@ -194,11 +241,11 @@ export function CodingPage() {
           <div className="mt-2 flex-1 flex flex-col">
             <div className="flex items-center justify-between mb-1.5">
               <label htmlFor="code-display" className="text-xs font-semibold uppercase tracking-wider text-slate-600">
-                2. Generated Python Code (Editable)
+                2. Generated Code ({language.toUpperCase()})
               </label>
               {generationMeta && (
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                  Task: {generationMeta.taskType} · Model: {generationMeta.model}
+                  Task: {generationMeta.taskType} · Model: {generationMeta.model} · {generationMeta.language || language}
                 </span>
               )}
             </div>
@@ -260,7 +307,7 @@ export function CodingPage() {
 
           {/* Execution Telemetry Card */}
           {executionResult?.sandbox && (
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs">
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Exit Code</span>
                 <span className="font-mono font-medium text-slate-800">
@@ -270,6 +317,12 @@ export function CodingPage() {
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Duration</span>
                 <span className="font-mono font-medium text-slate-800">{executionResult.durationMs} ms</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Language</span>
+                <span className="font-mono font-bold text-blue-700 uppercase">
+                  {executionResult.sandbox.language || executionResult.language || language}
+                </span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Network</span>
