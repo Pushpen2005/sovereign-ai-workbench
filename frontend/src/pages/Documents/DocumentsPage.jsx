@@ -240,7 +240,7 @@ export function DocumentsPage() {
               ) : (
                 <div className="text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mt-1">
                   Target Category: <span className="font-bold text-slate-900">{activeFilter}</span> (
-                  {activeFilter === 'SOPs' || activeFilter === 'SOPs / Knowledge Base'
+                  {activeFilter === 'SOPs' || activeFilter === 'SOPs / Knowledge Base' || activeFilter === 'Knowledge Base / SOPs'
                     ? 'sop'
                     : activeFilter === 'Inspection Reports'
                     ? 'inspection'

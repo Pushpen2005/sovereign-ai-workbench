@@ -11,6 +11,7 @@
 import express from "express";
 import {
     runAgent,
+    runInspectionAgentController,
     getAgentRuns,
     getAgentRun,
     getAgentRunSteps,
@@ -20,6 +21,7 @@ import {
 const router = express.Router();
 
 router.post("/run", runAgent);
+router.post("/inspection", runInspectionAgentController);
 router.get("/runs", getAgentRuns);
 router.get("/runs/:runId", getAgentRun);
 router.get("/runs/:runId/steps", getAgentRunSteps);

@@ -63,6 +63,7 @@ export async function assessFindingRisk(finding, options = {}) {
         task: "risk_assessment",
         temperature: 0.1,
         num_predict: 512,
+        timeoutMs: 180000, // 3 minutes timeout to accommodate longer inference
     });
 
     // 7. Parse & validate JSON response against PR #15 schema

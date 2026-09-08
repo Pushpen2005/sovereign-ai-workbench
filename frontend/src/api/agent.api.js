@@ -61,3 +61,18 @@ export function fetchAgentRunSteps(runId) {
   return get(`/api/v1/agent/runs/${encodeURIComponent(runId)}/steps`);
 }
 
+/**
+ * Execute an inspection agent workflow for a given documentId.
+ *
+ * @param {string} documentId - Target document identifier
+ * @param {string} [goal] - User goal / instructions
+ * @returns {Promise<object>}
+ */
+export function runInspectionAgentApi(documentId, goal) {
+  return post('/api/v1/agent/inspection', {
+    documentId,
+    goal,
+  });
+}
+
+

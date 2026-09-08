@@ -8,12 +8,13 @@
 import { post } from './client.js';
 
 /**
- * Generate Python code using local Model Router & configured local LLM.
+ * Generate code using local Model Router & configured local LLM.
  * @param {string} prompt
+ * @param {string} [language='python']
  * @returns {Promise<{ success: boolean, taskType: string, model: string, language: string, code: string, rawOutput: string, routingReason: string, isFallback: boolean }>}
  */
-export function generateCode(prompt) {
-  return post('/api/v1/coding/generate', { prompt });
+export function generateCode(prompt, language = 'python') {
+  return post('/api/v1/coding/generate', { prompt, language });
 }
 
 /**

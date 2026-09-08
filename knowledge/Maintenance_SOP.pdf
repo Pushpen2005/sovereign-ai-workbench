@@ -1,0 +1,76 @@
+%PDF-1.4
+4 0 obj
+<< /Length 1235 >>
+stream
+BT /F1 11 Tf 50 740 Td 15 TL (STANDARD OPERATING PROCEDURE  PUMP BEARING TEMPERATURE MAINTENANCE) Tj T*
+() Tj T*
+(Document ID: SOP-MAINT-001) Tj T*
+(Document Type: sop) Tj T*
+(Revision: Rev 3.2) Tj T*
+(Effective Date: 2026-01-15) Tj T*
+(Department: Industrial Rotating Equipment Division) Tj T*
+() Tj T*
+(1. Scope and Equipment Applicability) Tj T*
+(This standard operating procedure governs centrifugal pumps, crude transfer pumps,) Tj T*
+(and heavy rotating equipment including Pump-01, Pump-02, and Pump-03.) Tj T*
+() Tj T*
+(2. Thermal Operating Limits) Tj T*
+(Normal operating temperature for centrifugal pump bearings is 60 to 75 degrees Celsius.) Tj T*
+(The continuous operating limit for bearing temperature is 80 degrees Celsius \(80 C\).) Tj T*
+(Any observed bearing temperature exceeding 80 degrees Celsius is an abnormal excursion.) Tj T*
+() Tj T*
+(3. Corrective Action Requirements) Tj T*
+(If bearing temperature exceeds 80 degrees Celsius:) Tj T*
+(  1. Reduce operating load immediately.) Tj T*
+(  2. Inspect lubrication condition, oil level, and lubricant viscosity.) Tj T*
+(  3. Check bearing condition and alignment for mechanical degradation.) Tj T*
+(  4. Escalate for maintenance inspection within 2 hours.) Tj T*
+ET
+endstream
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+6 0 obj
+<< /Length 801 >>
+stream
+BT /F1 11 Tf 50 740 Td 15 TL (STANDARD OPERATING PROCEDURE  PUMP BEARING TEMPERATURE MAINTENANCE) Tj T*
+() Tj T*
+(Document ID: SOP-MAINT-001 \(Page 2\)) Tj T*
+() Tj T*
+(4. Critical Escalation and Emergency Thresholds) Tj T*
+(If bearing temperature reaches or exceeds 95 degrees Celsius:) Tj T*
+(  - Immediate shutdown of the pump unit is mandatory to prevent seizure.) Tj T*
+(  - Tag unit as OUT OF SERVICE under Lockout/Tagout protocol.) Tj T*
+(  - Drain and replace bearing oil reservoir.) Tj T*
+(  - Perform vibration spectral analysis before restart.) Tj T*
+() Tj T*
+(5. Documentation and Quality Records) Tj T*
+(All thermal excursions and maintenance actions must be logged in the shift logbook.) Tj T*
+(Inspection approval notes must cite SOP-MAINT-001 and record measured deviations.) Tj T*
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 6 0 R /Resources << /Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>
+endobj
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+xref
+0 7
+0000000000 65535 f 
+0000002561 00000 n 
+0000002498 00000 n 
+0000001296 00000 n 
+0000000009 00000 n 
+0000002323 00000 n 
+0000001471 00000 n 
+trailer
+<< /Size 7 /Root 1 0 R >>
+startxref
+2610
+%%EOF

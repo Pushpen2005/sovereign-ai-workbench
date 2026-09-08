@@ -23,13 +23,29 @@ export class SandboxValidationError extends Error {
     }
 }
 
+const SUPPORTED_LANGUAGES = Object.freeze({
+    python: {
+        canonical: "python",
+        image: "python:3.11-alpine",
+        command: ["python", "-I", "-"],
+        env: ["-e", "PYTHONUNBUFFERED=1"],
+    },
+    javascript: {
+        canonical: "javascript",
+        image: "node:20-alpine",
+        command: ["node", "-"],
+        env: ["-e", "NODE_ENV=production"],
+    },
+});
+
 /**
- * Execute Python code inside an isolated Docker sandbox container.
+ * Execute code inside an isolated Docker sandbox container.
+ * Supported languages: python, javascript.
  *
  * @param {object} params
  * @param {string} params.code - Source code to execute
- * @param {string} [params.language="python"] - Language runtime (only "python" supported)
- * @param {number} [params.timeoutMs=5000] - Hard execution timeout in milliseconds
+ * @param {string} [params.language="python"] - Language runtime ("python" or "javascript")
+ * @param {number} [params.timeoutMs=8000] - Hard execution timeout in milliseconds
  * @returns {Promise<object>}
  */
 export async function executeInSandbox({
@@ -37,11 +53,14 @@ export async function executeInSandbox({
     language = "python",
     timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
-    // 1. Language validation
-    const normalizedLang = String(language || "").trim().toLowerCase();
-    if (normalizedLang !== "python") {
+    // 1. Language validation & resolution
+    const rawLang = String(language || "python").trim().toLowerCase();
+    const resolvedKey = rawLang === "js" || rawLang === "node" ? "javascript" : (rawLang === "py" ? "python" : rawLang);
+    const langConfig = SUPPORTED_LANGUAGES[resolvedKey];
+
+    if (!langConfig) {
         throw new SandboxValidationError(
-            `Unsupported language '${language}'. Only 'python' is supported.`
+            `Unsupported language '${language}'. Supported: python, javascript.`
         );
     }
 
@@ -86,9 +105,9 @@ export async function executeInSandbox({
         "--cap-drop", "ALL",
         "--ipc", "none",
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
-        "-e", "PYTHONUNBUFFERED=1",
-        "python:3.11-alpine",
-        "python", "-I", "-",
+        ...langConfig.env,
+        langConfig.image,
+        ...langConfig.command,
     ];
 
     const startTime = Date.now();
@@ -145,7 +164,7 @@ export async function executeInSandbox({
                 stdoutTruncated: false,
                 stderrTruncated: false,
                 durationMs: Date.now() - startTime,
-                sandbox: getSandboxMetadata(effectiveTimeout),
+                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
             });
         }
 
@@ -205,7 +224,7 @@ export async function executeInSandbox({
                 stdoutTruncated,
                 stderrTruncated,
                 durationMs: Date.now() - startTime,
-                sandbox: getSandboxMetadata(effectiveTimeout),
+                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
             });
         });
 
@@ -229,7 +248,7 @@ export async function executeInSandbox({
                 stdoutTruncated,
                 stderrTruncated,
                 durationMs,
-                sandbox: getSandboxMetadata(effectiveTimeout),
+                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
             });
         });
 
@@ -249,16 +268,17 @@ export async function executeInSandbox({
                 stdoutTruncated: false,
                 stderrTruncated: false,
                 durationMs: Date.now() - startTime,
-                sandbox: getSandboxMetadata(effectiveTimeout),
+                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
             });
         }
     });
 }
 
-function getSandboxMetadata(timeoutMs) {
+function getSandboxMetadata(timeoutMs, canonicalLang = "python", image = "python:3.11-alpine") {
     return {
         isolated: true,
         network: "none",
+        language: canonicalLang,
         timeoutSeconds: timeoutMs / 1000,
         memoryLimitMb: 256,
         cpuLimit: 1,
@@ -266,6 +286,6 @@ function getSandboxMetadata(timeoutMs) {
         readOnlyRoot: true,
         capabilitiesDropped: "ALL",
         ipc: "none",
-        image: "python:3.11-alpine",
+        image,
     };
 }

@@ -85,12 +85,18 @@ function MessageRow({ message, documents, onPreviewSource }) {
           {!isUser && (message.taskType || message.selectedModel) && (
             <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-600 bg-slate-100/90 border border-slate-200 px-2.5 py-0.5 rounded-full font-mono">
               <span className="font-semibold text-slate-700">
-                {message.taskType === 'CODING' ? '💻 Coding' : message.taskType === 'DOCUMENT' ? '📄 Document RAG' : '⚡ Local AI'}
+                {message.taskType === 'CODING'
+                  ? '💻 Coding'
+                  : (message.taskType === 'DOCUMENT' || message.taskType === 'DOCUMENT_ANALYSIS')
+                  ? '📄 Document Analysis'
+                  : message.taskType === 'INSPECTION'
+                  ? '🔍 Inspection Analysis'
+                  : '⚡ General Task'}
               </span>
               <span>·</span>
-              <span>{message.selectedModel || 'llama3.2:3b'}</span>
+              <span className="font-medium text-slate-800">{message.selectedModel || 'llama3.2:3b'}</span>
               <span>·</span>
-              <span className="text-emerald-700 font-semibold">100% Local</span>
+              <span className="text-emerald-700 font-semibold">Local Ollama</span>
             </div>
           )}
 

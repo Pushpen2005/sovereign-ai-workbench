@@ -9,6 +9,7 @@
  */
 
 import { runAgentLoop, AgentRuntimeError } from "../services/agent.service.js";
+import { runInspectionAgent } from "../services/inspection-agent.service.js";
 import { resolveAuthenticatedOrganization } from "../config/organization.js";
 import {
     listAgentRuns,
@@ -173,6 +174,43 @@ export async function streamAgentRun(req, res, next) {
         const persistedSteps = await getStepsByRunId(runId, organizationId);
         executionEvents.subscribe(runId, req, res, { organizationId, persistedSteps });
     } catch (error) {
+        next(error);
+    }
+}
+
+/**
+ * Executes the dedicated industrial Inspection Agent workflow.
+ * POST /api/v1/agent/inspection
+ */
+export async function runInspectionAgentController(req, res, next) {
+    try {
+        const { documentId, goal } = req.body || {};
+
+        if (!documentId || typeof documentId !== "string" || !documentId.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "A non-empty 'documentId' string is required.",
+            });
+        }
+
+        const organizationId = resolveAuthenticatedOrganization(req);
+        const userId = req.user?.id || req.user?.userId || null;
+
+        const result = await runInspectionAgent({
+            documentId: documentId.trim(),
+            goal: typeof goal === "string" && goal.trim() ? goal.trim() : undefined,
+            organizationId,
+            userId,
+        });
+
+        return res.status(200).json(result);
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message,
+            });
+        }
         next(error);
     }
 }

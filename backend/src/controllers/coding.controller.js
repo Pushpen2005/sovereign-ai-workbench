@@ -20,21 +20,34 @@ import {
 } from "../services/sandbox.service.js";
 
 /**
- * Strips markdown code fences (```python ... ```) or trims whitespace.
+ * Strips markdown code fences (```python ... ```, ```javascript ... ```, or generic ``` ... ```) or trims whitespace.
  * Ensures the generated code is ready for direct interpreter execution.
  *
  * @param {string} raw
+ * @param {string} [language="python"]
  * @returns {string}
  */
-export function cleanGeneratedCode(raw) {
+export function cleanGeneratedCode(raw, language = "python") {
     if (typeof raw !== "string") return "";
 
     const trimmed = raw.trim();
+    const normLang = String(language || "python").trim().toLowerCase();
 
-    // Check for fenced code block: ```python ... ``` or ``` ... ```
-    const match = trimmed.match(/```(?:python)?\s*\n?([\s\S]*?)```/i);
-    if (match && match[1]) {
-        return match[1].trim();
+    if (normLang === "javascript" || normLang === "js" || normLang === "node") {
+        const jsMatch = trimmed.match(/```(?:javascript|js|node)\s*\n?([\s\S]*?)```/i);
+        if (jsMatch && jsMatch[1]) {
+            return jsMatch[1].trim();
+        }
+    } else {
+        const pyMatch = trimmed.match(/```(?:python|py)\s*\n?([\s\S]*?)```/i);
+        if (pyMatch && pyMatch[1]) {
+            return pyMatch[1].trim();
+        }
+    }
+
+    const genericMatch = trimmed.match(/```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)```/);
+    if (genericMatch && genericMatch[1]) {
+        return genericMatch[1].trim();
     }
 
     return trimmed;
@@ -43,17 +56,30 @@ export function cleanGeneratedCode(raw) {
 /**
  * POST /api/v1/coding/generate
  *
- * Accepts a user coding request, passes it through the Model Router,
- * and generates Python code using the configured local model.
+ * Accepts a user coding request ({ request, prompt, language }), passes it through
+ * the Model Router, and generates executable code using the configured local model.
  */
 export async function generateCode(req, res, next) {
     try {
-        const { prompt, model } = req.body || {};
+        const { prompt, request, language = "python", model } = req.body || {};
+        const codingPrompt = prompt || request;
 
-        if (typeof prompt !== "string" || !prompt.trim()) {
+        if (typeof codingPrompt !== "string" || !codingPrompt.trim()) {
             return res.status(400).json({
                 success: false,
-                message: "Valid prompt is required",
+                message: "Valid request or prompt is required",
+            });
+        }
+
+        const rawLang = String(language || "python").trim().toLowerCase();
+        const normLang = (rawLang === "javascript" || rawLang === "js" || rawLang === "node")
+            ? "javascript"
+            : (rawLang === "python" || rawLang === "py" ? "python" : rawLang);
+
+        if (normLang !== "python" && normLang !== "javascript") {
+            return res.status(400).json({
+                success: false,
+                message: `Unsupported language '${language}'. Supported: python, javascript.`,
             });
         }
 
@@ -70,7 +96,7 @@ export async function generateCode(req, res, next) {
         // 1. Route through Model Router
         let routing;
         try {
-            routing = await routeTask(prompt.trim(), { model });
+            routing = await routeTask(codingPrompt.trim(), { model });
         } catch (routerErr) {
             if (routerErr instanceof RouterError) {
                 if (routerErr.code === "MODEL_NOT_ALLOWED") {
@@ -90,24 +116,35 @@ export async function generateCode(req, res, next) {
         }
 
         // 2. Generate code with local model
-        const codingSystemPrompt = `You are a professional Python engineer.
+        const isJs = normLang === "javascript";
+        const codingSystemPrompt = isJs
+            ? `You are a professional JavaScript engineer.
+Write clean, executable, self-contained JavaScript (Node.js) code that directly fulfills the following user request.
+Include necessary variables, calculations, and console.log() calls to demonstrate the result.
+Do not require external internet access or non-standard packages. Only use the Node.js standard library.
+
+User Request:
+${codingPrompt.trim()}
+
+Return ONLY the JavaScript code inside a \`\`\`javascript code block.`
+            : `You are a professional Python engineer.
 Write clean, executable, self-contained Python code that directly fulfills the following user request.
 Include necessary variables, calculations, and print() calls to demonstrate the result.
 Do not require external internet access or non-standard packages.
 
 User Request:
-${prompt.trim()}
+${codingPrompt.trim()}
 
 Return ONLY the Python code inside a \`\`\`python code block.`;
 
         const rawOutput = await generateAnswer(codingSystemPrompt, routing.selectedModel);
-        const code = cleanGeneratedCode(rawOutput);
+        const code = cleanGeneratedCode(rawOutput, normLang);
 
         return res.status(200).json({
             success: true,
             taskType: routing.taskType,
             model: routing.selectedModel,
-            language: "python",
+            language: normLang,
             code,
             rawOutput,
             routingReason: routing.routingReason,
@@ -121,7 +158,7 @@ Return ONLY the Python code inside a \`\`\`python code block.`;
 /**
  * POST /api/v1/coding/execute
  *
- * Accepts Python source code and runs it strictly inside an isolated,
+ * Accepts source code and runs it strictly inside an isolated,
  * unprivileged, network-disabled Docker container.
  */
 export async function executeCode(req, res, next) {
@@ -143,7 +180,7 @@ export async function executeCode(req, res, next) {
 
         return res.status(200).json({
             success: result.success,
-            language: "python",
+            language: result.sandbox?.language || language,
             stdout: result.stdout,
             stderr: result.stderr,
             exitCode: result.exitCode,
@@ -178,7 +215,7 @@ export async function runCodingWorkflowHandler(req, res, next) {
         const organizationId = resolveAuthenticatedOrganization(req);
         const userId = req.user?.id || req.user?.userId || req.user?.sub || null;
 
-        const { prompt, request, expected, timeoutMs, customRunId, model } = req.body || {};
+        const { prompt, request, language = "python", expected, timeoutMs, customRunId, model } = req.body || {};
         const codingRequest = prompt || request;
 
         if (typeof codingRequest !== "string" || !codingRequest.trim()) {
@@ -203,6 +240,7 @@ export async function runCodingWorkflowHandler(req, res, next) {
             request: codingRequest,
             organizationId,
             userId,
+            language,
             expected,
             timeoutMs,
             customRunId,

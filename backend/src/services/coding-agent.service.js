@@ -54,25 +54,35 @@ export class CodingAgentError extends Error {
 }
 
 /**
- * Extracts and cleans Python code from raw model output.
- * Handles fenced blocks (```python ... ``` or ``` ... ```) and trims whitespace.
+ * Extracts and cleans code from raw model output for a specified language.
+ * Handles fenced blocks (```python ... ```, ```javascript ... ```, ```js ... ```, or generic ``` ... ```)
+ * and trims whitespace.
  *
  * @param {string} raw
+ * @param {string} [language="python"]
  * @returns {string}
  */
-export function extractPythonCode(raw) {
+export function extractCode(raw, language = "python") {
     if (typeof raw !== "string") return "";
 
     const trimmed = raw.trim();
+    const normLang = String(language || "python").trim().toLowerCase();
 
-    // 1. Try matching ```python ... ```
-    const pyMatch = trimmed.match(/```(?:python|py)\s*\n?([\s\S]*?)```/i);
-    if (pyMatch && pyMatch[1]) {
-        return pyMatch[1].trim();
+    // 1. Try matching language-specific block
+    if (normLang === "javascript" || normLang === "js" || normLang === "node") {
+        const jsMatch = trimmed.match(/```(?:javascript|js|node)\s*\n?([\s\S]*?)```/i);
+        if (jsMatch && jsMatch[1]) {
+            return jsMatch[1].trim();
+        }
+    } else {
+        const pyMatch = trimmed.match(/```(?:python|py)\s*\n?([\s\S]*?)```/i);
+        if (pyMatch && pyMatch[1]) {
+            return pyMatch[1].trim();
+        }
     }
 
-    // 2. Try matching generic ``` ... ```
-    const genericMatch = trimmed.match(/```\s*\n?([\s\S]*?)```/);
+    // 2. Try matching any generic or language-tagged fenced block: ```<lang>? ... ```
+    const genericMatch = trimmed.match(/```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)```/);
     if (genericMatch && genericMatch[1]) {
         return genericMatch[1].trim();
     }
@@ -81,15 +91,20 @@ export function extractPythonCode(raw) {
     return trimmed;
 }
 
+export function extractPythonCode(raw) {
+    return extractCode(raw, "python");
+}
+
 /**
- * Validates Python source code for structural safety and bounds.
+ * Validates source code for structural safety and bounds.
  * Note: The Docker container is the true security boundary; this static check
  * provides fast early rejection of malformed or empty outputs.
  *
  * @param {string} code
+ * @param {string} [language="python"]
  * @throws {CodingAgentError}
  */
-export function validatePythonCode(code) {
+export function validateCode(code, language = "python") {
     if (typeof code !== "string" || !code.trim()) {
         throw new CodingAgentError(
             "Code validation failed: Generated code is empty or missing",
@@ -108,12 +123,13 @@ export function validatePythonCode(code) {
     }
 
     // Reject obvious non-code conversational responses without valid syntax
-    // e.g. "Sorry, I cannot write this code..."
     const lower = trimmed.toLowerCase();
     if (
         (lower.startsWith("i cannot") || lower.startsWith("i am sorry") || lower.startsWith("as an ai")) &&
         !trimmed.includes("def ") &&
         !trimmed.includes("print(") &&
+        !trimmed.includes("console.log") &&
+        !trimmed.includes("function") &&
         !trimmed.includes("=")
     ) {
         throw new CodingAgentError(
@@ -123,6 +139,10 @@ export function validatePythonCode(code) {
     }
 
     return trimmed;
+}
+
+export function validatePythonCode(code) {
+    return validateCode(code, "python");
 }
 
 /**
@@ -236,6 +256,7 @@ export async function runCodingWorkflow({
     request,
     organizationId,
     userId,
+    language = "python",
     expected = null,
     timeoutMs = 5000,
     customRunId = null,
@@ -252,6 +273,18 @@ export async function runCodingWorkflow({
     if (!request || typeof request !== "string" || !request.trim()) {
         throw new CodingAgentError(
             "User coding request must be a non-empty string",
+            CODING_ERROR_CODES.CODE_VALIDATION_FAILED
+        );
+    }
+
+    const rawLang = String(language || "python").trim().toLowerCase();
+    const normLang = (rawLang === "javascript" || rawLang === "js" || rawLang === "node")
+        ? "javascript"
+        : (rawLang === "python" || rawLang === "py" ? "python" : rawLang);
+
+    if (normLang !== "python" && normLang !== "javascript") {
+        throw new CodingAgentError(
+            `Unsupported language '${language}'. Supported: python, javascript.`,
             CODING_ERROR_CODES.CODE_VALIDATION_FAILED
         );
     }
@@ -277,7 +310,7 @@ export async function runCodingWorkflow({
         local: true,
         generatedCode: null,
         rawModelOutput: null,
-        language: "python",
+        language: normLang,
         executionStatus: "pending",
         stdout: "",
         stderr: "",
@@ -293,7 +326,7 @@ export async function runCodingWorkflow({
             executionEvents.publish(
                 runId,
                 event,
-                { runId, organizationId, taskType: state.taskType, ...data },
+                { runId, organizationId, taskType: state.taskType, language: state.language, ...data },
                 null,
                 organizationId
             );
@@ -351,9 +384,20 @@ export async function runCodingWorkflow({
         // ─────────────────────────────────────────────────────────────
         // STAGE 3: generate_code
         // ─────────────────────────────────────────────────────────────
-        emitProgress("generating_code", { model: state.selectedModel });
+        emitProgress("generating_code", { model: state.selectedModel, language: normLang });
 
-        const codingSystemPrompt = `You are a professional Python engineer.
+        const isJs = normLang === "javascript";
+        const codingSystemPrompt = isJs
+            ? `You are a professional JavaScript engineer.
+Write clean, executable, self-contained JavaScript (Node.js) code that directly fulfills the following user request.
+Include necessary variables, calculations, and console.log() calls to output the final result clearly.
+Do not require external internet access or non-standard packages. Only use the Node.js standard library.
+
+User Request:
+${cleanRequest}
+
+Return ONLY the executable JavaScript code inside a \`\`\`javascript code block. Do not include conversational filler.`
+            : `You are a professional Python engineer.
 Write clean, executable, self-contained Python code that directly fulfills the following user request.
 Include necessary variables, calculations, and print() calls to output the final result clearly.
 Do not require external internet access or non-standard packages. Only use the Python standard library.
@@ -377,19 +421,19 @@ Return ONLY the executable Python code inside a \`\`\`python code block. Do not 
         // STAGE 4: validate_code
         // ─────────────────────────────────────────────────────────────
         emitProgress("validating_code");
-        const extracted = extractPythonCode(rawModelOutput);
-        const validatedCode = validatePythonCode(extracted);
+        const extracted = extractCode(rawModelOutput, normLang);
+        const validatedCode = validateCode(extracted, normLang);
         state.generatedCode = validatedCode;
 
         // ─────────────────────────────────────────────────────────────
         // STAGE 5: execute_sandbox
         // ─────────────────────────────────────────────────────────────
-        emitProgress("executing_sandbox", { language: "python", timeoutMs });
+        emitProgress("executing_sandbox", { language: normLang, timeoutMs });
         state.executionStatus = "running";
 
         const executionResult = await executeInSandbox({
             code: validatedCode,
-            language: "python",
+            language: normLang,
             timeoutMs,
         });
 
@@ -480,7 +524,7 @@ Return ONLY the executable Python code inside a \`\`\`python code block. Do not 
             taskType: state.taskType,
             selectedModel: state.selectedModel,
             local: true,
-            language: "python",
+            language: state.language,
             generatedCode: state.generatedCode,
             execution: {
                 status: "completed",

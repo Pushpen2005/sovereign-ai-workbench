@@ -39,7 +39,7 @@ export function getDisplayDocumentType(doc) {
 }
 
 export function resolveUploadDocumentType(activeFilter, explicitChoice = null) {
-  if (activeFilter === 'SOPs' || activeFilter === 'SOPs / Knowledge Base') return 'sop';
+  if (activeFilter === 'SOPs' || activeFilter === 'SOPs / Knowledge Base' || activeFilter === 'Knowledge Base / SOPs') return 'sop';
   if (activeFilter === 'Inspection Reports') return 'inspection';
   if (activeFilter === 'Other') return 'other';
   return explicitChoice || 'inspection';
@@ -49,7 +49,7 @@ export function matchesFilter(doc, activeFilter) {
   if (activeFilter === 'All') return true;
   const canonical = getCanonicalDocumentType(doc);
   if (activeFilter === 'Inspection Reports') return canonical === 'inspection';
-  if (activeFilter === 'SOPs' || activeFilter === 'SOPs / Knowledge Base') return canonical === 'sop';
+  if (activeFilter === 'SOPs' || activeFilter === 'SOPs / Knowledge Base' || activeFilter === 'Knowledge Base / SOPs') return canonical === 'sop';
   if (activeFilter === 'Other') return canonical === 'other';
   return true;
 }

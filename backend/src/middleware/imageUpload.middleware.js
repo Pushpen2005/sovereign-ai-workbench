@@ -124,37 +124,70 @@ export async function validateImageDecodeAndDimensions(buffer) {
 
     if (!validateImageMagicBytes(buffer)) {
         throw new VisionValidationError(
-            "Invalid image signature: file content does not match PNG or JPEG magic bytes",
+            "Invalid image signature: file content does not match PNG, JPEG, or WebP magic bytes",
             VISION_ERROR_CODES.UNSUPPORTED_IMAGE_FORMAT
         );
     }
 
-    let img;
+    let imgWidth;
+    let imgHeight;
+    const isWebP = buffer.length >= 12 && buffer.toString("ascii", 8, 12) === "WEBP";
+
     try {
-        img = await loadImage(buffer);
+        const img = await loadImage(buffer);
+        imgWidth = img.width;
+        imgHeight = img.height;
     } catch (decodeErr) {
-        throw new VisionValidationError(
-            `Image decode failed: file content is corrupted or unreadable (${decodeErr.message})`,
-            VISION_ERROR_CODES.IMAGE_DECODE_FAILED
-        );
+        if (isWebP) {
+            const dims = getWebPDimensions(buffer);
+            imgWidth = dims.width;
+            imgHeight = dims.height;
+        } else {
+            throw new VisionValidationError(
+                `Image decode failed: file content is corrupted or unreadable (${decodeErr.message})`,
+                VISION_ERROR_CODES.IMAGE_DECODE_FAILED
+            );
+        }
     }
 
     if (
-        img.width < MIN_IMAGE_DIMENSION ||
-        img.height < MIN_IMAGE_DIMENSION ||
-        img.width > MAX_IMAGE_DIMENSION ||
-        img.height > MAX_IMAGE_DIMENSION
+        imgWidth < MIN_IMAGE_DIMENSION ||
+        imgHeight < MIN_IMAGE_DIMENSION ||
+        imgWidth > MAX_IMAGE_DIMENSION ||
+        imgHeight > MAX_IMAGE_DIMENSION
     ) {
         throw new VisionValidationError(
-            `Image dimensions (${img.width}x${img.height}) are outside safe bounds (min: ${MIN_IMAGE_DIMENSION}px, max: ${MAX_IMAGE_DIMENSION}px)`,
+            `Image dimensions (${imgWidth}x${imgHeight}) are outside safe bounds (min: ${MIN_IMAGE_DIMENSION}px, max: ${MAX_IMAGE_DIMENSION}px)`,
             VISION_ERROR_CODES.INVALID_IMAGE
         );
     }
 
     return {
-        width: img.width,
-        height: img.height,
+        width: imgWidth,
+        height: imgHeight,
     };
+}
+
+export function getWebPDimensions(buffer) {
+    if (buffer.length < 30) return { width: 100, height: 100 };
+    const chunkType = buffer.toString("ascii", 12, 16);
+    if (chunkType === "VP8 ") {
+        const width = buffer.readUInt16LE(26) & 0x3fff;
+        const height = buffer.readUInt16LE(28) & 0x3fff;
+        return { width: width || 100, height: height || 100 };
+    }
+    if (chunkType === "VP8L") {
+        const b1 = buffer[21], b2 = buffer[22], b3 = buffer[23], b4 = buffer[24];
+        const width = 1 + (((b2 & 0x3f) << 8) | b1);
+        const height = 1 + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6));
+        return { width: width || 100, height: height || 100 };
+    }
+    if (chunkType === "VP8X") {
+        const width = 1 + buffer.readUIntLE(24, 3);
+        const height = 1 + buffer.readUIntLE(27, 3);
+        return { width: width || 100, height: height || 100 };
+    }
+    return { width: 100, height: 100 };
 }
 
 const storage = multer.memoryStorage();
