@@ -1,0 +1,443 @@
+/**
+ * PAGE — KnowledgeBasePage.jsx
+ *
+ * Route: /knowledge-base
+ * Dedicated Company Knowledge Base Workspace for reference SOPs, procedures,
+ * safety manuals, and engineering guidelines.
+ *
+ * Strictly scoped to canonical backend documentType="sop" and authenticated organizationId.
+ */
+
+import React, { useRef, useState, useCallback, useMemo } from 'react';
+import { PageHeader } from '../../components/layout/PageHeader.jsx';
+import { Button } from '../../components/ui/Button.jsx';
+import { StatusBadge } from '../../components/ui/Badge.jsx';
+import { useDocuments } from '../../hooks/useDocuments.js';
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-GB', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
+// ─── Upload Pipeline Progress ────────────────────────────────────────────────
+
+function KnowledgeUploadProgress({ state, pendingFile, onReset }) {
+  const steps = [
+    { label: 'Uploading', desc: 'Securely received in organization workspace' },
+    { label: 'Extraction', desc: 'PDF text and tabular procedures parsed' },
+    { label: 'OCR Fallback', desc: 'Tesseract OCR applied where required' },
+    { label: 'Chunking', desc: 'Page-aware reference chunks generated' },
+    { label: 'Embedding', desc: '384D local ONNX embeddings computed' },
+    { label: 'Indexing', desc: 'Stored into tenant-isolated Qdrant collection' },
+  ];
+
+  const isComplete = state === 'success';
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-4">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h3 className="text-sm font-bold text-slate-900">
+            {isComplete ? 'Knowledge Document Indexed' : 'Processing Reference Document…'}
+          </h3>
+          <p className="text-xs text-slate-500 font-mono">
+            {pendingFile?.name || 'knowledge_document.pdf'}
+          </p>
+        </div>
+        {isComplete && (
+          <Button variant="primary" size="sm" onClick={onReset}>
+            Done
+          </Button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+        {steps.map((step, idx) => (
+          <div
+            key={idx}
+            className={[
+              'p-3 rounded-lg border text-xs flex flex-col gap-1 transition-all',
+              isComplete
+                ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                : 'bg-blue-50/50 border-blue-200 text-blue-900',
+            ].join(' ')}
+          >
+            <div className="flex items-center justify-between font-bold">
+              <span>{step.label}</span>
+              <span className="text-emerald-600 font-bold">✓</span>
+            </div>
+            <p className="text-[11px] opacity-80">{step.desc}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-[11px] text-slate-600 flex items-center justify-between">
+        <span>🛡 100% on-premise execution · Zero external AI API calls</span>
+        <span className="font-mono text-[10px] text-slate-400">PostgreSQL + Qdrant (SOP)</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── Delete Confirmation Modal ───────────────────────────────────────────────
+
+function DeleteConfirmModal({ document, onConfirm, onCancel, deleting }) {
+  if (!document) return null;
+  const name = document.originalFilename || document.filename || document.id;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4">
+      <div className="bg-white border border-slate-200 rounded-xl p-6 max-w-md w-full shadow-lg flex flex-col gap-4">
+        <div className="flex items-center gap-3 text-amber-600">
+          <span className="text-2xl">⚠️</span>
+          <h3 className="text-base font-bold text-slate-900">Delete this knowledge document?</h3>
+        </div>
+        <p className="text-xs text-slate-600 leading-relaxed">
+          Are you sure you want to delete <span className="font-semibold text-slate-900">"{name}"</span>?
+          This will remove the file, database records, and vector embeddings from Qdrant.
+        </p>
+        <div className="flex items-center justify-end gap-2.5 pt-2">
+          <Button variant="outline" size="sm" onClick={onCancel} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button variant="danger" size="sm" onClick={onConfirm} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete Document'}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Knowledge Base Page ────────────────────────────────────────────────
+
+export function KnowledgeBasePage() {
+  const {
+    documents,
+    loading,
+    uploadState,
+    uploadError,
+    actionError,
+    pendingFile,
+    uploadDocument,
+    deleteDocument,
+    resetUpload,
+    clearError,
+  } = useDocuments({ documentType: 'sop' });
+
+  const [showUploadZone, setShowUploadZone] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [docToDelete, setDocToDelete] = useState(null);
+  const [deleting, setDeleting] = useState(false);
+  const [uiError, setUiError] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const handleDragOver = useCallback((e) => {
+    e.preventDefault();
+    setDragOver(true);
+  }, []);
+
+  const handleDragLeave = useCallback(() => setDragOver(false), []);
+
+  const handleDrop = useCallback(
+    (e) => {
+      e.preventDefault();
+      setDragOver(false);
+      setUiError(null);
+      const file = e.dataTransfer.files?.[0];
+      if (file) {
+        setShowUploadZone(true);
+        // Canonical Knowledge Base documentType is always 'sop'
+        uploadDocument(file, 'sop');
+      }
+    },
+    [uploadDocument],
+  );
+
+  const handleFileChange = useCallback(
+    (e) => {
+      setUiError(null);
+      const file = e.target.files?.[0];
+      if (file) {
+        setShowUploadZone(true);
+        // Canonical Knowledge Base documentType is always 'sop'
+        uploadDocument(file, 'sop');
+      }
+      e.target.value = '';
+    },
+    [uploadDocument],
+  );
+
+  const handleConfirmDelete = async () => {
+    if (!docToDelete) return;
+    setDeleting(true);
+    setUiError(null);
+    try {
+      const docId = docToDelete.id || docToDelete.documentId;
+      await deleteDocument(docId);
+      setDocToDelete(null);
+    } catch {
+      setUiError('Unable to delete knowledge document.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  // Filtered Knowledge Documents (SOPs only)
+  const filteredDocuments = useMemo(() => {
+    return documents.filter((doc) => {
+      // Backend guarantees documentType = 'sop', but verify canonical type
+      const docType = (doc.documentType || doc.document_type || '').toLowerCase();
+      if (docType && docType !== 'sop') return false;
+
+      const name = (doc.originalFilename || doc.filename || '').toLowerCase();
+      if (searchQuery.trim() && !name.includes(searchQuery.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [documents, searchQuery]);
+
+  const totalChunks = useMemo(() => {
+    return filteredDocuments.reduce((acc, d) => acc + (d.chunksStored || 0), 0);
+  }, [filteredDocuments]);
+
+  return (
+    <div className="max-w-6xl mx-auto flex flex-col gap-6">
+      {/* Page Header */}
+      <PageHeader
+        title="Company Knowledge Base"
+        subtitle="Manage the SOPs, procedures, manuals, and reference documents used by SovereignAI for grounded analysis."
+        actions={
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setShowUploadZone(!showUploadZone)}
+          >
+            {showUploadZone ? 'Close Upload' : '+ Upload Knowledge Document'}
+          </Button>
+        }
+      />
+
+      {/* Error Banner */}
+      {(uploadError || actionError || uiError) && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-center justify-between text-xs text-red-800">
+          <div className="flex items-center gap-2">
+            <span>⚠️</span>
+            <span>{uploadError || actionError || uiError || 'Unable to index this knowledge document.'}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              clearError();
+              setUiError(null);
+            }}
+            className="text-red-600 hover:text-red-800 font-semibold ml-4"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Upload Experience */}
+      {showUploadZone && (
+        <div className="flex flex-col gap-3">
+          {uploadState === 'uploading' || uploadState === 'success' ? (
+            <KnowledgeUploadProgress
+              state={uploadState}
+              pendingFile={pendingFile}
+              onReset={() => {
+                resetUpload();
+                setShowUploadZone(false);
+              }}
+            />
+          ) : (
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={[
+                'bg-white border-2 border-dashed rounded-xl p-8 text-center transition-all flex flex-col items-center justify-center gap-3 shadow-sm',
+                dragOver ? 'border-blue-500 bg-blue-50/50' : 'border-slate-300 hover:border-slate-400',
+              ].join(' ')}
+            >
+              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center text-2xl font-bold">
+                📚
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-800">
+                  Upload Reference SOP or Manual (PDF)
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">
+                  Drag & drop your file here or{' '}
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="text-blue-600 font-semibold underline underline-offset-2 hover:text-blue-700"
+                  >
+                    Browse Files
+                  </button>
+                </p>
+              </div>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2 text-[11px] text-slate-600 flex items-center gap-2 mt-1">
+                <span className="font-semibold text-slate-700">Target Category:</span>
+                <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-mono text-[10px] font-bold">
+                  SOP / Knowledge Base
+                </span>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-500">Auto-Indexed for Inspection Grounding</span>
+              </div>
+
+              <p className="text-[11px] text-slate-400 max-w-md">
+                Supported format: <span className="font-semibold text-slate-600">PDF</span>.
+                Uploaded procedures will be indexed into Qdrant vector store and made available for automatic finding-driven SOP retrieval.
+              </p>
+
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,application/pdf"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Summary Stat & Search Bar */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-3 text-xs text-slate-600">
+          <span className="font-semibold text-slate-900">
+            {filteredDocuments.length} Knowledge Document{filteredDocuments.length === 1 ? '' : 's'}
+          </span>
+          <span className="text-slate-300">|</span>
+          <span>{totalChunks.toLocaleString()} Indexed Vector Chunks</span>
+        </div>
+
+        {/* Search input */}
+        <div className="relative max-w-xs w-full">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search knowledge documents…"
+            className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg py-1.5 pl-8 pr-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+            🔍
+          </span>
+        </div>
+      </div>
+
+      {/* Knowledge Documents Table */}
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        {loading ? (
+          <div className="p-12 text-center text-xs text-slate-500">
+            Loading knowledge base…
+          </div>
+        ) : filteredDocuments.length === 0 ? (
+          <div className="p-12 text-center flex flex-col items-center justify-center gap-3">
+            <span className="text-4xl">📚</span>
+            <p className="text-sm font-bold text-slate-800">Knowledge Base is empty.</p>
+            <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+              Upload your first SOP, maintenance procedure, safety document, or reference manual to begin building your organization's knowledge base.
+            </p>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setShowUploadZone(true);
+                fileInputRef.current?.click();
+              }}
+              className="mt-2"
+            >
+              Upload Knowledge Document
+            </Button>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
+                <tr>
+                  <th className="py-3 px-4">Document</th>
+                  <th className="py-3 px-4">Type</th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4">Chunks Stored</th>
+                  <th className="py-3 px-4">Extraction Method</th>
+                  <th className="py-3 px-4">Uploaded</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredDocuments.map((doc) => {
+                  const id = doc.id || doc.documentId;
+                  const name = doc.originalFilename || doc.filename || id;
+                  const chunks = doc.chunksStored || doc.chunks_stored || 0;
+                  const status = doc.status || 'Indexed';
+                  const method = (doc.extractionMethod || doc.extraction_method || 'pdf-text') === 'ocr' ? 'OCR' : 'PDF Text';
+
+                  return (
+                    <tr key={id} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-3 px-4 font-semibold text-slate-900 flex items-center gap-2">
+                        <span className="text-slate-400">📄</span>
+                        <span className="truncate max-w-[260px]" title={name}>
+                          {name}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-slate-600">
+                        <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono text-[10px] font-medium">
+                          SOP
+                        </span>
+                      </td>
+                      <td className="py-3 px-4">
+                        <StatusBadge status={status} />
+                      </td>
+                      <td className="py-3 px-4 text-slate-600 font-mono font-medium">
+                        {chunks.toLocaleString()} chunks
+                      </td>
+                      <td className="py-3 px-4 text-slate-600">
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {method}
+                        </span>
+                      </td>
+                      <td className="py-3 px-4 text-slate-500 font-mono">
+                        {formatDate(doc.uploadedAt || doc.createdAt || doc.created_at)}
+                      </td>
+                      <td className="py-3 px-4 text-right">
+                        <button
+                          type="button"
+                          onClick={() => setDocToDelete(doc)}
+                          className="px-2.5 py-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded text-xs font-semibold transition-colors"
+                          title="Delete knowledge document"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      <DeleteConfirmModal
+        document={docToDelete}
+        deleting={deleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDocToDelete(null)}
+      />
+    </div>
+  );
+}
+
+export default KnowledgeBasePage;

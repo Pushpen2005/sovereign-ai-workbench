@@ -214,5 +214,7 @@ export async function searchSop(
             score: chunk.score,
             text: chunk.text,
             organizationId: chunk.organizationId ?? null,
+            extractionMethod:
+                chunk.extractionMethod || chunk.source || "pdf-text",
         }));
 }

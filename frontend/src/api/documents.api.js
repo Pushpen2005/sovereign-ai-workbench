@@ -10,14 +10,18 @@
  *     → { success, documentId, filename, chunksStored }
  */
 
-import { get, postForm } from './client.js';
+import { get, postForm, del } from './client.js';
 
 /**
- * Fetch all persisted documents from PostgreSQL metadata store.
+ * Fetch persisted documents from PostgreSQL metadata store, optionally filtered by documentType.
+ * @param {string} [documentType] - Optional filter ('sop' | 'inspection' | 'other')
  * @returns {Promise<{ success: boolean, documents: Array }>}
  */
-export function fetchDocuments() {
-  return get('/api/v1/documents');
+export function fetchDocuments(documentType) {
+  const path = documentType && typeof documentType === 'string' && documentType.trim()
+    ? `/api/v1/documents?documentType=${encodeURIComponent(documentType.trim().toLowerCase())}`
+    : '/api/v1/documents';
+  return get(path);
 }
 
 /**
@@ -35,3 +39,14 @@ export function uploadDocument(file, documentType) {
   }
   return postForm('/api/v1/documents', form);
 }
+
+/**
+ * Delete a document by ID (removes PostgreSQL record, tenant physical file, and Qdrant vectors).
+ * @param {string} documentId
+ * @returns {Promise<{ success: boolean, message: string }>}
+ */
+export function deleteDocument(documentId) {
+  if (!documentId) throw new Error('Document ID is required for deletion');
+  return del(`/api/v1/documents/${encodeURIComponent(documentId)}`);
+}
+

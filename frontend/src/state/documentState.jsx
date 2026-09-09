@@ -27,12 +27,14 @@ function documentReducer(state, action) {
         id: doc.documentId || doc.id,
         documentId: doc.documentId || doc.id,
         filename: doc.originalFilename || doc.filename,
-        originalFilename: doc.originalFilename,
-        type: 'Inspection',
-        pages: null,
+        originalFilename: doc.originalFilename || doc.filename,
+        documentType: doc.documentType || doc.document_type || 'inspection',
+        type: doc.documentType === 'sop' ? 'SOP' : (doc.documentType || 'Inspection'),
+        pages: doc.pages || doc.pageCount || null,
         status: doc.status || 'Indexed',
-        uploadedAt: doc.createdAt || doc.uploadedAt || new Date().toISOString(),
-        chunksStored: doc.chunksStored,
+        extractionMethod: doc.extractionMethod || doc.extraction_method || 'pdf-text',
+        uploadedAt: doc.createdAt || doc.created_at || doc.uploadedAt || new Date().toISOString(),
+        chunksStored: doc.chunksStored !== undefined ? doc.chunksStored : (doc.chunks_stored !== undefined ? doc.chunks_stored : 0),
       }));
       return { ...state, documents: mapped };
     }
@@ -54,6 +56,7 @@ function documentReducer(state, action) {
       const newDoc = action.payload;
       const docId = newDoc.documentId || newDoc.id;
       const displayFilename = newDoc.originalFilename || newDoc.filename;
+      const docType = newDoc.documentType || state.pendingFile?.documentType || 'inspection';
       // Prepend real document; remove any entry with same id or filename
       const filtered = (state.documents || []).filter(
         (d) => d.id !== docId && d.documentId !== docId && d.filename !== displayFilename
@@ -65,6 +68,7 @@ function documentReducer(state, action) {
           documentId: docId,
           filename: displayFilename,
           chunksStored: newDoc.chunksStored,
+          documentType: docType,
         },
         documents: [
           {
@@ -72,12 +76,14 @@ function documentReducer(state, action) {
             documentId: docId,
             filename: displayFilename,
             originalFilename: newDoc.originalFilename,
-            type: 'Inspection',
+            documentType: docType,
+            type: docType === 'sop' ? 'SOP' : 'Inspection',
             pages: null,
             status: newDoc.status || 'Indexed',
+            extractionMethod: newDoc.extractionMethod || 'pdf-text',
             uploadedAt: newDoc.createdAt || new Date().toISOString(),
             sizeMb: state.pendingFile?.sizeMb || null,
-            chunksStored: newDoc.chunksStored,
+            chunksStored: newDoc.chunksStored || 0,
           },
           ...filtered,
         ],

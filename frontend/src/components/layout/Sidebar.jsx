@@ -18,14 +18,15 @@ import { useAuth } from '../../state/authState.jsx';
 import { fetchChatHistory } from '../../api/chat.api.js';
 
 const PRIMARY_NAV = [
-  { to: '/dashboard', label: 'Dashboard',        icon: '⊞' },
-  { to: '/documents', label: 'Documents',        icon: '📄' },
-  { to: '/chat',      label: 'AI Chat',          icon: '💬' },
-  { to: '/agent',     label: 'Agent Workspace',  icon: '⚡' },
-  { to: '/coding',    label: 'Coding',           icon: '💻' },
-  { to: '/vision',    label: 'Vision',           icon: '👁' },
-  { to: '/reports',   label: 'Reports',          icon: '📋' },
-  { to: '/security',  label: 'Security',         icon: '🔒' },
+  { to: '/dashboard',      label: 'Dashboard',        icon: '⊞' },
+  { to: '/documents',      label: 'Documents',        icon: '📄' },
+  { to: '/knowledge-base', label: 'Knowledge Base',   icon: '📚' },
+  { to: '/chat',           label: 'AI Chat',          icon: '💬' },
+  { to: '/agent',          label: 'Agent Workspace',  icon: '⚡' },
+  { to: '/coding',         label: 'Coding',           icon: '💻' },
+  { to: '/vision',         label: 'Vision',           icon: '👁' },
+  { to: '/reports',        label: 'Reports',          icon: '📋' },
+  { to: '/security',       label: 'Security',         icon: '🔒' },
 ];
 
 const DEFAULT_RECENT_CHATS = [
