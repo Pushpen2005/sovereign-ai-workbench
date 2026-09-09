@@ -34,6 +34,7 @@
     "test:golden-path": "node tests/inspection.golden-path.test.js",
     "test:kb": "node tests/phase8.knowledge.base.test.js",
     "test:phase3-kb": "node tests/phase3.knowledge.search.test.js",
+    "test:phase4-kb": "node tests/phase4.knowledge.base.final.test.js",
     "test:rag": "node tests/rag.hardening.test.js",
     "test:vision": "node tests/vision.e2e.test.js",
     "test:security": "node tests/security.hardening.test.js",

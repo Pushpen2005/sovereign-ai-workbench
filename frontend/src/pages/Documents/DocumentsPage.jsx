@@ -231,13 +231,14 @@ export function DocumentsPage() {
                     className="bg-white border border-slate-300 rounded px-2 py-1 text-xs font-medium text-slate-800 focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="inspection">Inspection Report</option>
+                    <option value="sop">SOP / Knowledge Base</option>
                     <option value="other">Other Technical Document</option>
                   </select>
                 </div>
               ) : (
                 <div className="text-xs font-medium text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 mt-1">
                   Target Category: <span className="font-bold text-slate-900">{activeFilter}</span> (
-                  {activeFilter === 'Inspection Reports' ? 'inspection' : 'other'}
+                  {resolveTargetDocumentType()}
                   )
                 </div>
               )}
@@ -260,7 +261,7 @@ export function DocumentsPage() {
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         {/* Filters */}
         <div className="flex items-center gap-1">
-          {['All', 'Inspection Reports', 'Other'].map((f) => (
+          {['All', 'Inspection Reports', 'SOPs / Knowledge Base', 'Other'].map((f) => (
             <button
               key={f}
               type="button"

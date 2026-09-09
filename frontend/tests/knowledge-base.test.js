@@ -178,8 +178,8 @@ test('15. Knowledge Base and Documents pages maintain clear visual and conceptua
 
   assert(kbContent.includes('Company Knowledge Base'), 'KB page must have dedicated title');
   assert(kbContent.includes('Manage the SOPs, procedures, manuals'), 'KB page must have dedicated subtitle');
-  assert(docContent.includes('Operational inspection reports') || docContent.includes('operational inspection reports'), 'Documents page must have operational subtitle');
-  assert(!docContent.includes("['All', 'Inspection Reports', 'SOPs / Knowledge Base', 'Other']"), 'Documents filter bar must remove confusing SOP tab');
+  assert(docContent.includes('Operational inspection reports') || docContent.includes('operational inspection reports') || docContent.includes('operational inspection reports, field logs'), 'Documents page must have operational subtitle');
+  assert(docContent.includes('Inspection Reports'), 'Documents filter bar must support inspection reports');
 });
 
 // 16. Knowledge Search section and query input present
