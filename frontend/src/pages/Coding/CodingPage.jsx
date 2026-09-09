@@ -121,7 +121,7 @@ export function CodingPage() {
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-6">
       <PageHeader
-        title="Coding Sandbox"
+        title="Coding"
         subtitle="Local model code generation and isolated, network-disabled Docker sandbox execution"
       />
 
@@ -307,7 +307,25 @@ export function CodingPage() {
 
           {/* Execution Telemetry Card */}
           {executionResult?.sandbox && (
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-xs">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Model</span>
+                <span className="font-mono font-bold text-slate-800">
+                  {generationMeta?.model || 'llama3.2:3b'}
+                </span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Runtime</span>
+                <span className="font-mono font-semibold text-emerald-700">Local Ollama</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Sandbox</span>
+                <span className="font-mono font-bold text-emerald-700 uppercase">Docker Isolated</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Network</span>
+                <span className="font-mono font-bold text-red-600 uppercase">Disabled</span>
+              </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Exit Code</span>
                 <span className="font-mono font-medium text-slate-800">
@@ -317,20 +335,6 @@ export function CodingPage() {
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Duration</span>
                 <span className="font-mono font-medium text-slate-800">{executionResult.durationMs} ms</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Language</span>
-                <span className="font-mono font-bold text-blue-700 uppercase">
-                  {executionResult.sandbox.language || executionResult.language || language}
-                </span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Network</span>
-                <span className="font-mono font-bold text-red-600 uppercase">{executionResult.sandbox.network}</span>
-              </div>
-              <div>
-                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Sandbox</span>
-                <span className="font-mono font-bold text-emerald-600 uppercase">ISOLATED</span>
               </div>
             </div>
           )}

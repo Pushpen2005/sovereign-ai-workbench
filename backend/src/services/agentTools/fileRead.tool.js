@@ -10,7 +10,15 @@
 
 import { query } from "../../config/db.js";
 
-const QDRANT_URL = process.env.QDRANT_URL || "http://localhost:6333";
+function getQdrantUrl() {
+    const raw = process.env.QDRANT_URL || "http://localhost:6333";
+    const isDocker = Boolean(process.env.DOCKER_CONTAINER || process.env.IS_DOCKER);
+    if (!isDocker && raw.includes("://qdrant")) {
+        return raw.replace("://qdrant", "://127.0.0.1");
+    }
+    return raw;
+}
+
 const COLLECTION_NAME = "documents";
 
 export class FileReadError extends Error {
@@ -80,7 +88,7 @@ export async function executeFileRead(args, context = {}) {
     const targetDocId = docRow ? docRow.id : cleanId;
 
     try {
-        const scrollUrl = `${QDRANT_URL}/collections/${COLLECTION_NAME}/points/scroll`;
+        const scrollUrl = `${getQdrantUrl()}/collections/${COLLECTION_NAME}/points/scroll`;
         const scrollRes = await fetch(scrollUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },

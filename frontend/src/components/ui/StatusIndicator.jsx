@@ -31,7 +31,7 @@ export function StatusIndicator({ status = 'neutral', label, note }) {
         ].join(' ')}
         aria-label={status}
       />
-      <span className="text-sm font-medium text-slate-700">{label}</span>
+      <span className={`text-sm font-medium ${labelClass[status] || 'text-slate-700'}`}>{label}</span>
       {note && <span className="text-xs text-slate-400">{note}</span>}
     </div>
   );

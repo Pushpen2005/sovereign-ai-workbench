@@ -453,10 +453,10 @@ async function runPhase4Tests() {
     passedCount++;
 
     // ─────────────────────────────────────────────────────────────
-    // TEST 15: Live end-to-end HTTP API verification against port 9000
+    // TEST 15: Live end-to-end HTTP API verification against server
     // ─────────────────────────────────────────────────────────────
-    console.log("\n[Test 15] Live HTTP API verification against container at http://127.0.0.1:9000...");
-    const liveLoginRes = await fetch("http://127.0.0.1:9000/api/v1/auth/login", {
+    console.log(`\n[Test 15] Live HTTP API verification against ${baseUrl}...`);
+    const liveLoginRes = await fetch(`${baseUrl}/api/v1/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -477,11 +477,11 @@ async function runPhase4Tests() {
       `Hydraulic pressure relief valve setting for unit ${liveRunId} is 150 bar maximum.`,
     ]);
 
-    const liveUpload = await uploadDoc("http://127.0.0.1:9000", liveToken, liveSopPdf, liveFilename, "sop");
+    const liveUpload = await uploadDoc(baseUrl, liveToken, liveSopPdf, liveFilename, "sop");
     assert.equal(liveUpload.documentType, "sop", "Live upload documentType must be 'sop'");
 
-    // GET /api/v1/documents?documentType=sop from live container
-    const listRes = await fetch("http://127.0.0.1:9000/api/v1/documents?documentType=sop", {
+    // GET /api/v1/documents?documentType=sop from live server
+    const listRes = await fetch(`${baseUrl}/api/v1/documents?documentType=sop`, {
       headers: { Authorization: `Bearer ${liveToken}` },
     });
     assert.equal(listRes.status, 200);

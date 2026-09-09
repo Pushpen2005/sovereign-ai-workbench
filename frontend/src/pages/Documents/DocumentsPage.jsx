@@ -13,8 +13,6 @@ import { StatusBadge } from '../../components/ui/Badge.jsx';
 import { useDocuments } from '../../hooks/useDocuments.js';
 
 import {
-  inferDocumentType,
-  getCanonicalDocumentType,
   getDisplayDocumentType,
   resolveUploadDocumentType,
   matchesFilter,
