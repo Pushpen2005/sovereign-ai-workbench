@@ -182,11 +182,52 @@ test('15. Knowledge Base and Documents pages maintain clear visual and conceptua
   assert(!docContent.includes("['All', 'Inspection Reports', 'SOPs / Knowledge Base', 'Other']"), 'Documents filter bar must remove confusing SOP tab');
 });
 
+// 16. Knowledge Search section and query input present
+test('16. Knowledge Search section and finding textarea present', () => {
+  const kbPath = path.join(srcDir, 'pages/KnowledgeBase/KnowledgeBasePage.jsx');
+  const content = fs.readFileSync(kbPath, 'utf8');
+  assert(content.includes('Knowledge Search'), 'Must contain "Knowledge Search" section title');
+  assert(content.includes('Finding / Query Input'), 'Must contain query input label');
+  assert(content.includes('Enter an engineering finding or question'), 'Must provide descriptive placeholder');
+});
+
+// 17. Search button and searching indicator present
+test('17. Search button and dynamic loading state present', () => {
+  const kbPath = path.join(srcDir, 'pages/KnowledgeBase/KnowledgeBasePage.jsx');
+  const content = fs.readFileSync(kbPath, 'utf8');
+  assert(content.includes('Search Knowledge Base'), 'Must contain "Search Knowledge Base" button label');
+  assert(content.includes('Searching knowledge base...'), 'Must contain searching loading copy');
+});
+
+// 18. Results card renders metadata: filename, page, score, extraction method
+test('18. Result card renders metadata and similarity score', () => {
+  const kbPath = path.join(srcDir, 'pages/KnowledgeBase/KnowledgeBasePage.jsx');
+  const content = fs.readFileSync(kbPath, 'utf8');
+  assert(content.includes('Score:'), 'Must label similarity score cleanly');
+  assert(content.includes('Page'), 'Must display page metadata');
+  assert(content.includes('Chunk #'), 'Must display chunk index when available');
+});
+
+// 19. Zero result copy present
+test('19. Zero result state displays standard no-evidence message', () => {
+  const kbPath = path.join(srcDir, 'pages/KnowledgeBase/KnowledgeBasePage.jsx');
+  const content = fs.readFileSync(kbPath, 'utf8');
+  assert(content.includes('No relevant knowledge-base evidence found.'), 'Must display standard zero-result copy');
+});
+
+// 20. Sanitized search error copy present
+test('20. Sanitized search error copy present without exposing internal details', () => {
+  const kbPath = path.join(srcDir, 'pages/KnowledgeBase/KnowledgeBasePage.jsx');
+  const content = fs.readFileSync(kbPath, 'utf8');
+  assert(content.includes('Unable to search the knowledge base.'), 'Must display sanitized search error message');
+});
+
 console.log(`\nResults: ${passed}/${total} tests passed.`);
 if (passed === total) {
-  console.log('✓ All Phase 2 Knowledge Base frontend tests PASSED!\n');
+  console.log('✓ All Knowledge Base frontend tests PASSED!\n');
   process.exit(0);
 } else {
   console.error(`✗ ${total - passed} tests failed.\n`);
   process.exit(1);
 }
+

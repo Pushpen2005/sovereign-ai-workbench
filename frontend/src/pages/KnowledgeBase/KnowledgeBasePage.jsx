@@ -6,6 +6,7 @@
  * safety manuals, and engineering guidelines.
  *
  * Strictly scoped to canonical backend documentType="sop" and authenticated organizationId.
+ * Includes Phase 3 Interactive Knowledge Base Semantic Search Simulator.
  */
 
 import React, { useRef, useState, useCallback, useMemo } from 'react';
@@ -13,6 +14,7 @@ import { PageHeader } from '../../components/layout/PageHeader.jsx';
 import { Button } from '../../components/ui/Button.jsx';
 import { StatusBadge } from '../../components/ui/Badge.jsx';
 import { useDocuments } from '../../hooks/useDocuments.js';
+import { searchKnowledgeBase } from '../../api/knowledge.api.js';
 
 function formatDate(iso) {
   if (!iso) return '—';
@@ -137,6 +139,14 @@ export function KnowledgeBasePage() {
   const [uiError, setUiError] = useState(null);
   const fileInputRef = useRef(null);
 
+  // ─── Semantic Search Simulator State (Phase 3) ───────────────────────────
+  const [simQuery, setSimQuery] = useState('');
+  const [simTopK, setSimTopK] = useState(5);
+  const [searching, setSearching] = useState(false);
+  const [searchExecuted, setSearchExecuted] = useState(false);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchError, setSearchError] = useState(null);
+
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
     setDragOver(true);
@@ -188,10 +198,39 @@ export function KnowledgeBasePage() {
     }
   };
 
+  // ─── Semantic Search Trigger ─────────────────────────────────────────────
+  const handleExecuteSearch = async (e) => {
+    if (e) e.preventDefault();
+    if (!simQuery.trim() || searching) return;
+
+    setSearching(true);
+    setSearchError(null);
+    setSearchExecuted(true);
+
+    try {
+      const response = await searchKnowledgeBase({
+        query: simQuery.trim(),
+        topK: Number(simTopK) || 5,
+        scoreThreshold: 0.0,
+      });
+
+      if (response && response.success && Array.isArray(response.results)) {
+        setSearchResults(response.results);
+      } else {
+        setSearchResults([]);
+      }
+    } catch (err) {
+      console.error('Semantic search error:', err);
+      setSearchError('Unable to search the knowledge base.');
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
   // Filtered Knowledge Documents (SOPs only)
   const filteredDocuments = useMemo(() => {
     return documents.filter((doc) => {
-      // Backend guarantees documentType = 'sop', but verify canonical type
       const docType = (doc.documentType || doc.document_type || '').toLowerCase();
       if (docType && docType !== 'sop') return false;
 
@@ -208,7 +247,7 @@ export function KnowledgeBasePage() {
   }, [filteredDocuments]);
 
   return (
-    <div className="max-w-6xl mx-auto flex flex-col gap-6">
+    <div className="max-w-6xl mx-auto flex flex-col gap-8 pb-12">
       {/* Page Header */}
       <PageHeader
         title="Company Knowledge Base"
@@ -311,122 +350,284 @@ export function KnowledgeBasePage() {
         </div>
       )}
 
-      {/* Summary Stat & Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3 text-xs text-slate-600">
-          <span className="font-semibold text-slate-900">
-            {filteredDocuments.length} Knowledge Document{filteredDocuments.length === 1 ? '' : 's'}
-          </span>
-          <span className="text-slate-300">|</span>
-          <span>{totalChunks.toLocaleString()} Indexed Vector Chunks</span>
+      {/* ─── SECTION 1: KNOWLEDGE DOCUMENTS TABLE ───────────────────────────── */}
+      <div className="flex flex-col gap-4">
+        {/* Section Header & Search */}
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3 text-xs text-slate-600">
+            <span className="font-bold text-slate-900 text-sm">
+              Knowledge Documents
+            </span>
+            <span className="text-slate-300">|</span>
+            <span className="font-semibold text-slate-700">
+              {filteredDocuments.length} Document{filteredDocuments.length === 1 ? '' : 's'}
+            </span>
+            <span className="text-slate-300">·</span>
+            <span>{totalChunks.toLocaleString()} Indexed Vector Chunks</span>
+          </div>
+
+          {/* Table search filter */}
+          <div className="relative max-w-xs w-full">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter listed documents…"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg py-1.5 pl-8 pr-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+              🔍
+            </span>
+          </div>
         </div>
 
-        {/* Search input */}
-        <div className="relative max-w-xs w-full">
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search knowledge documents…"
-            className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg py-1.5 pl-8 pr-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">
-            🔍
-          </span>
+        {/* Documents Table */}
+        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+          {loading ? (
+            <div className="p-12 text-center text-xs text-slate-500">
+              Loading knowledge base…
+            </div>
+          ) : filteredDocuments.length === 0 ? (
+            <div className="p-12 text-center flex flex-col items-center justify-center gap-3">
+              <span className="text-4xl">📚</span>
+              <p className="text-sm font-bold text-slate-800">Knowledge Base is empty.</p>
+              <p className="text-xs text-slate-500 max-w-md leading-relaxed">
+                Upload your first SOP, maintenance procedure, safety document, or reference manual to begin building your organization's knowledge base.
+              </p>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setShowUploadZone(true);
+                  fileInputRef.current?.click();
+                }}
+                className="mt-2"
+              >
+                Upload Knowledge Document
+              </Button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
+                  <tr>
+                    <th className="py-3 px-4">Document</th>
+                    <th className="py-3 px-4">Type</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4">Chunks Stored</th>
+                    <th className="py-3 px-4">Extraction Method</th>
+                    <th className="py-3 px-4">Uploaded</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredDocuments.map((doc) => {
+                    const id = doc.id || doc.documentId;
+                    const name = doc.originalFilename || doc.filename || id;
+                    const chunks = doc.chunksStored || doc.chunks_stored || 0;
+                    const status = doc.status || 'Indexed';
+                    const method = (doc.extractionMethod || doc.extraction_method || 'pdf-text') === 'ocr' ? 'OCR' : 'PDF Text';
+
+                    return (
+                      <tr key={id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-4 font-semibold text-slate-900 flex items-center gap-2">
+                          <span className="text-slate-400">📄</span>
+                          <span className="truncate max-w-[260px]" title={name}>
+                            {name}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">
+                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono text-[10px] font-medium">
+                            SOP
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <StatusBadge status={status} />
+                        </td>
+                        <td className="py-3 px-4 text-slate-600 font-mono font-medium">
+                          {chunks.toLocaleString()} chunks
+                        </td>
+                        <td className="py-3 px-4 text-slate-600">
+                          <span className="text-[11px] text-slate-500 font-medium">
+                            {method}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 text-slate-500 font-mono">
+                          {formatDate(doc.uploadedAt || doc.createdAt || doc.created_at)}
+                        </td>
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setDocToDelete(doc)}
+                            className="px-2.5 py-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded text-xs font-semibold transition-colors"
+                            title="Delete knowledge document"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* Knowledge Documents Table */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-        {loading ? (
-          <div className="p-12 text-center text-xs text-slate-500">
-            Loading knowledge base…
+      {/* ─── SECTION 2: KNOWLEDGE SEARCH SIMULATOR (Phase 3) ─────────────────── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col gap-5">
+        <div className="border-b border-slate-100 pb-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <span>🔍</span> Knowledge Search
+            </h2>
+            <span className="text-[11px] bg-blue-50 text-blue-700 font-mono font-semibold px-2.5 py-1 rounded-md border border-blue-200/60">
+              Deterministic Qdrant Retrieval
+            </span>
           </div>
-        ) : filteredDocuments.length === 0 ? (
-          <div className="p-12 text-center flex flex-col items-center justify-center gap-3">
-            <span className="text-4xl">📚</span>
-            <p className="text-sm font-bold text-slate-800">Knowledge Base is empty.</p>
-            <p className="text-xs text-slate-500 max-w-md leading-relaxed">
-              Upload your first SOP, maintenance procedure, safety document, or reference manual to begin building your organization's knowledge base.
-            </p>
+          <p className="text-xs text-slate-500 mt-1">
+            Interactive semantic retrieval simulator. Enter an engineering finding or question to retrieve grounded reference SOP evidence directly from Qdrant.
+          </p>
+        </div>
+
+        {/* Search Query Form */}
+        <form onSubmit={handleExecuteSearch} className="flex flex-col gap-3.5">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="knowledge-search-input" className="text-xs font-bold text-slate-700">
+              Finding / Query Input
+            </label>
+            <textarea
+              id="knowledge-search-input"
+              rows={3}
+              value={simQuery}
+              onChange={(e) => setSimQuery(e.target.value)}
+              placeholder="Enter an engineering finding or question (e.g., Pump-03 bearing temperature reached 92°C. What does the maintenance SOP say?)"
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none leading-relaxed"
+              disabled={searching}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2 text-xs text-slate-600">
+              <span className="font-semibold text-slate-700">Retrieve Top Chunks:</span>
+              <select
+                value={simTopK}
+                onChange={(e) => setSimTopK(Number(e.target.value))}
+                className="bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-semibold text-slate-800 focus:ring-1 focus:ring-blue-500"
+                disabled={searching}
+              >
+                <option value={3}>Top 3</option>
+                <option value={5}>Top 5 (Default)</option>
+                <option value={10}>Top 10</option>
+              </select>
+            </div>
+
             <Button
+              type="submit"
               variant="primary"
               size="sm"
-              onClick={() => {
-                setShowUploadZone(true);
-                fileInputRef.current?.click();
-              }}
-              className="mt-2"
+              disabled={searching || !simQuery.trim()}
+              className="min-w-[170px]"
             >
-              Upload Knowledge Document
+              {searching ? 'Searching knowledge base...' : 'Search Knowledge Base'}
             </Button>
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold uppercase tracking-wider">
-                <tr>
-                  <th className="py-3 px-4">Document</th>
-                  <th className="py-3 px-4">Type</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4">Chunks Stored</th>
-                  <th className="py-3 px-4">Extraction Method</th>
-                  <th className="py-3 px-4">Uploaded</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredDocuments.map((doc) => {
-                  const id = doc.id || doc.documentId;
-                  const name = doc.originalFilename || doc.filename || id;
-                  const chunks = doc.chunksStored || doc.chunks_stored || 0;
-                  const status = doc.status || 'Indexed';
-                  const method = (doc.extractionMethod || doc.extraction_method || 'pdf-text') === 'ocr' ? 'OCR' : 'PDF Text';
+        </form>
 
-                  return (
-                    <tr key={id} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="py-3 px-4 font-semibold text-slate-900 flex items-center gap-2">
-                        <span className="text-slate-400">📄</span>
-                        <span className="truncate max-w-[260px]" title={name}>
-                          {name}
+        {/* Search Results Area */}
+        <div className="mt-2 border-t border-slate-100 pt-4 flex flex-col gap-3">
+          {searchError && (
+            <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-xs text-red-700 flex items-center justify-between">
+              <span>⚠️ {searchError}</span>
+              <button
+                type="button"
+                onClick={() => setSearchError(null)}
+                className="text-red-600 hover:text-red-800 font-semibold"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {searching ? (
+            <div className="p-8 text-center flex flex-col items-center justify-center gap-2">
+              <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+              <p className="text-xs font-semibold text-slate-700">Searching knowledge base...</p>
+              <p className="text-[11px] text-slate-400">Computing 384D ONNX query embedding & searching Qdrant</p>
+            </div>
+          ) : !searchExecuted ? (
+            <div className="p-8 text-center text-xs text-slate-400 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+              Search your uploaded SOPs and reference documents.
+            </div>
+          ) : searchResults.length === 0 ? (
+            <div className="p-8 text-center flex flex-col items-center justify-center gap-2 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+              <span className="text-2xl">📋</span>
+              <p className="text-sm font-semibold text-slate-700">No relevant knowledge-base evidence found.</p>
+              <p className="text-xs text-slate-400 max-w-sm">
+                No matching SOP passages were found in Qdrant for this query. Try adjusting your query or upload the corresponding SOP PDF.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between text-xs text-slate-600">
+                <span className="font-semibold text-slate-900">
+                  Retrieved {searchResults.length} Evidence Passage{searchResults.length === 1 ? '' : 's'}
+                </span>
+                <span className="text-slate-400 text-[11px]">
+                  Ranked by Cosine Similarity Score
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                {searchResults.map((result, idx) => (
+                  <div
+                    key={idx}
+                    className="bg-slate-50/70 border border-slate-200 rounded-xl p-4 shadow-xs flex flex-col gap-2.5 transition-all hover:border-slate-300"
+                  >
+                    {/* Header Row: Document, Page, Score, Method */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/70 pb-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 flex items-center gap-1.5">
+                          <span>📄</span> {result.filename || 'SOP_Document.pdf'}
                         </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-600">
-                        <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-mono text-[10px] font-medium">
+                        <span className="bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold">
                           SOP
                         </span>
-                      </td>
-                      <td className="py-3 px-4">
-                        <StatusBadge status={status} />
-                      </td>
-                      <td className="py-3 px-4 text-slate-600 font-mono font-medium">
-                        {chunks.toLocaleString()} chunks
-                      </td>
-                      <td className="py-3 px-4 text-slate-600">
-                        <span className="text-[11px] text-slate-500 font-medium">
-                          {method}
+                        <span className="text-slate-400">·</span>
+                        <span className="text-slate-600 font-medium">
+                          Page {result.page || 1}
                         </span>
-                      </td>
-                      <td className="py-3 px-4 text-slate-500 font-mono">
-                        {formatDate(doc.uploadedAt || doc.createdAt || doc.created_at)}
-                      </td>
-                      <td className="py-3 px-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => setDocToDelete(doc)}
-                          className="px-2.5 py-1 text-red-600 hover:text-red-700 hover:bg-red-50 rounded text-xs font-semibold transition-colors"
-                          title="Delete knowledge document"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+                        {result.chunkIndex !== undefined && result.chunkIndex !== null && (
+                          <>
+                            <span className="text-slate-400">·</span>
+                            <span className="text-slate-500 font-mono text-[11px]">
+                              Chunk #{result.chunkIndex}
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {result.extractionMethod === 'ocr' ? 'OCR' : 'PDF Text'}
+                        </span>
+                        <span className="bg-blue-100 text-blue-900 font-mono text-[11px] font-bold px-2 py-0.5 rounded-md">
+                          Score: {typeof result.score === 'number' ? result.score.toFixed(4) : result.score}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Content Text Block */}
+                    <div className="bg-white border border-slate-200 rounded-lg p-3 text-xs text-slate-800 leading-relaxed font-sans whitespace-pre-wrap">
+                      {result.text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Delete Confirmation Modal */}
