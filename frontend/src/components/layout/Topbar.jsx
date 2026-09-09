@@ -12,12 +12,13 @@ import { useAuth } from '../../state/authState.jsx';
 const ROUTE_LABELS = {
   '/dashboard': 'Dashboard',
   '/documents': 'Documents',
-  '/chat':      'AI Search & Workspace',
-  '/agent':     'Inspection Agent',
+  '/chat':      'AI Chat',
+  '/agent':     'Agent Workspace',
+  '/inspection':'Agent Workspace',
+  '/coding':    'Coding',
+  '/vision':    'Vision',
   '/reports':   'Reports',
-  '/security':  'Security & Sovereignty',
-  '/coding':    'Coding Sandbox',
-  '/vision':    'Vision Analysis',
+  '/security':  'Security',
 };
 
 export function Topbar() {
@@ -46,20 +47,26 @@ export function Topbar() {
           </svg>
         </button>
 
-        {/* Page title */}
-        <h1 className="text-sm font-semibold text-slate-800 truncate">{currentLabel}</h1>
+        {/* Page title / breadcrumb */}
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 hidden sm:inline">
+            SovereignAI
+          </span>
+          <span className="text-slate-300 hidden sm:inline">/</span>
+          <h1 className="text-sm font-semibold text-slate-800 truncate">{currentLabel}</h1>
+        </div>
       </div>
 
-      {/* Right Section: Sovereignty & Air-Gap status + User Info */}
+      {/* Right Section: Sovereignty & Local AI Runtime Indicator + User Info */}
       <div className="flex items-center gap-3">
         <Link
           to="/security"
-          className="hidden sm:flex items-center gap-2 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full transition-colors"
-          title="Click to view data sovereignty audit"
+          className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-full transition-colors"
+          title="Click to view data sovereignty & local runtime audit"
         >
           <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true" />
-          <span className="text-xs font-semibold text-emerald-800">
-            Local Self-Hosted · 0 Cloud Calls
+          <span className="text-xs font-semibold text-emerald-800 font-mono">
+            ● Local AI
           </span>
         </Link>
 

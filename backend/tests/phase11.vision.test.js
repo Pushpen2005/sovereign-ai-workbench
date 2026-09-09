@@ -39,6 +39,7 @@ dotenv.config({ path: path.resolve(__dirname, "../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../../ai-service/.env") });
 
 import app from "../src/app.js";
+import { initDb } from "../src/config/db.js";
 import { generateToken } from "../src/utils/auth.js";
 import {
     routeTask,
@@ -60,8 +61,9 @@ import {
     validateImageDecodeAndDimensions,
     VisionValidationError,
 } from "../src/middleware/imageUpload.middleware.js";
+import { executionEvents } from "../src/services/execution-events.service.js";
 
-const ORG_A = "org_alpha_vision_test";
+const ORG_A = "0bd5dba2-05e1-4f5c-9047-25843d338622";
 const ORG_B = "org_beta_vision_test";
 
 function createSyntheticPngBuffer(label = "GAUGE-01") {
@@ -109,14 +111,15 @@ async function runTests() {
         }
     }
 
+    await initDb();
     const server = app.listen(0);
     const port = server.address().port;
     const baseUrl = `http://127.0.0.1:${port}`;
 
     const tokenA = generateToken({
-        id: "user_alpha_1",
-        userId: "user_alpha_1",
-        email: "alpha@workbench.local",
+        id: "53ee9e5e-bf00-46ce-9621-f979148f36f7",
+        userId: "53ee9e5e-bf00-46ce-9621-f979148f36f7",
+        email: "engineer@example.com",
         organizationId: ORG_A,
     });
 
@@ -252,14 +255,11 @@ async function runTests() {
         // TEST 11: Cross-tenant access is rejected
         // ─────────────────────────────────────────────────────────────
         console.log("\n[Test 11] Cross-tenant isolation...");
-        // Check that Tenant B cannot access runs created by Tenant A
-        const eventsRes = await fetch(`${baseUrl}/api/v1/agent/runs/fake-run-id`, {
-            headers: {
-                Authorization: `Bearer ${tokenB}`,
-            },
-        });
-        const crossTenantOk = eventsRes.status === 404 || eventsRes.status === 403;
-        record(11, "Cross-tenant access strictly prevented", crossTenantOk);
+        const runA = `vision-run-test-${Date.now()}`;
+        executionEvents.registerRunOwner(runA, ORG_A, "vision");
+        const crossCheck = await executionEvents.verifyOrHydrateRunOwner(runA, ORG_B);
+        const crossTenantOk = crossCheck.allowed === false && crossCheck.forbidden === true;
+        record(11, "Cross-tenant access strictly prevented", crossTenantOk, `forbidden=${crossCheck.forbidden}`);
 
         // ─────────────────────────────────────────────────────────────
         // TEST 12: Ollama vision request is strictly local-only
@@ -390,6 +390,7 @@ async function runTests() {
     if (failed > 0) {
         process.exit(1);
     }
+    process.exit(0);
 }
 
 runTests().catch((err) => {

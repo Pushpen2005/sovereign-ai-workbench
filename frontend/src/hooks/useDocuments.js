@@ -11,35 +11,44 @@
  *              → state updated with real backend response
  */
 
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDocumentState, useDocumentActions } from '../state/documentState.jsx';
 import {
   uploadDocument as uploadDocumentApi,
   fetchDocuments as fetchDocumentsApi,
+  deleteDocument as deleteDocumentApi,
 } from '../api/documents.api.js';
 
 // Max file size the UI will warn about (backend is authoritative)
 const MAX_FILE_SIZE_MB = 50;
 
-export function useDocuments() {
+export function useDocuments(options = {}) {
+  const documentTypeFilter = typeof options === 'string' ? options : options?.documentType;
   const state = useDocumentState();
   const actions = useDocumentActions();
+  const [loading, setLoading] = useState(false);
+  const [actionError, setActionError] = useState(null);
 
   /**
    * Fetch documents from PostgreSQL backend and update state.
    */
   const loadDocuments = useCallback(async () => {
+    setLoading(true);
+    setActionError(null);
     try {
-      const res = await fetchDocumentsApi();
+      const res = await fetchDocumentsApi(documentTypeFilter);
       if (res && res.success && Array.isArray(res.documents)) {
         actions.setDocuments(res.documents);
       }
     } catch (err) {
       console.warn('Could not fetch persisted documents from backend:', err?.message);
+      setActionError(err?.message || 'Failed to load documents');
+    } finally {
+      setLoading(false);
     }
-  }, [actions]);
+  }, [actions, documentTypeFilter]);
 
-  // Load documents on initial mount (and on browser refresh)
+  // Load documents on initial mount and when filter changes
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
@@ -54,6 +63,7 @@ export function useDocuments() {
    */
   const uploadDocument = useCallback(
     async (file, documentType) => {
+      const targetType = documentType || documentTypeFilter || 'inspection';
       // ── Frontend validation ───────────────────────────────────────────────
       if (!file) {
         actions.uploadError('No file selected.');
@@ -72,11 +82,11 @@ export function useDocuments() {
       }
 
       // ── Begin upload ──────────────────────────────────────────────────────
-      actions.uploadStart({ name: file.name, sizeMb: +sizeMb.toFixed(2), documentType });
+      actions.uploadStart({ name: file.name, sizeMb: +sizeMb.toFixed(2), documentType: targetType });
 
       try {
         // Ingest into Qdrant + PostgreSQL
-        const result = await uploadDocumentApi(file, documentType);
+        const result = await uploadDocumentApi(file, targetType);
 
         // Backend returns: { success, documentId, filename, originalFilename, documentType, chunksStored }
         actions.uploadSuccess(result);
@@ -89,14 +99,36 @@ export function useDocuments() {
         actions.uploadError(message);
       }
     },
-    [actions, loadDocuments],
+    [actions, loadDocuments, documentTypeFilter],
   );
 
-  const clearError = useCallback(() => actions.uploadReset(), [actions]);
+  /**
+   * Delete a document by ID and refresh state.
+   */
+  const deleteDocument = useCallback(
+    async (documentId) => {
+      if (!documentId) return;
+      try {
+        await deleteDocumentApi(documentId);
+        await loadDocuments();
+      } catch (err) {
+        setActionError(err?.message || 'Unable to delete document.');
+        throw err;
+      }
+    },
+    [loadDocuments],
+  );
+
+  const clearError = useCallback(() => {
+    actions.uploadReset();
+    setActionError(null);
+  }, [actions]);
 
   return {
     // Document list (loaded from PostgreSQL backend)
     documents: state.documents,
+    loading,
+    actionError,
 
     // Selection
     selectedDocument: state.selectedDocument,
@@ -113,6 +145,8 @@ export function useDocuments() {
 
     // Actions
     uploadDocument,
+    deleteDocument,
+    resetUpload: actions.uploadReset,
     clearError,
     refreshDocuments: loadDocuments,
   };

@@ -18,6 +18,7 @@ import reportsRouter from "./routes/reports.routes.js";
 import codingRouter from "./routes/coding.routes.js";
 import visionRouter from "./routes/vision.routes.js";
 import agentRouter from "./routes/agent.routes.js";
+import knowledgeRouter from "./routes/knowledge.routes.js";
 import authRouter from "./routes/auth.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
 import { telemetryService } from "./services/telemetry.service.js";
@@ -153,6 +154,7 @@ app.use("/api/v1/reports", requireAuth, reportsRouter);
 app.use("/api/v1/coding", requireAuth, codingRouter);
 app.use("/api/v1/vision", requireAuth, visionRouter);
 app.use("/api/v1/agent", requireAuth, agentRouter);
+app.use("/api/v1/knowledge", requireAuth, knowledgeRouter);
 
 /**
  * PR #23 — Model Router Diagnostic Endpoint

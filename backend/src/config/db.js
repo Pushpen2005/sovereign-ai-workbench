@@ -17,10 +17,13 @@ import {
 } from "./organization.js";
 
 const { Pool } = pg;
+const isDocker = Boolean(process.env.DOCKER_CONTAINER || process.env.IS_DOCKER);
+const dbHost = (!isDocker && process.env.POSTGRES_HOST === "postgres") ? "127.0.0.1" : (process.env.POSTGRES_HOST || "localhost");
+const dbPort = (!isDocker && process.env.POSTGRES_HOST === "postgres") ? 5433 : parseInt(process.env.POSTGRES_PORT || "5433", 10);
 
 const pool = new Pool({
-  host: process.env.POSTGRES_HOST || "localhost",
-  port: parseInt(process.env.POSTGRES_PORT || "5433", 10),
+  host: dbHost,
+  port: dbPort,
   user: process.env.POSTGRES_USER || "workbench",
   password: process.env.POSTGRES_PASSWORD || "workbench_secret",
   database: process.env.POSTGRES_DB || "workbench_db",

@@ -202,13 +202,15 @@ services:
 
 volumes:
   postgres_data:
-    external: true
+    name: postgres_data
   qdrant_storage:
-    external: true
+    name: qdrant_storage
   ollama_data:
-    external: true
+    name: ollama_data
   uploads_data:
+    name: uploads_data
   reports_data:
+    name: reports_data
 
 networks:
   sovereign_net:

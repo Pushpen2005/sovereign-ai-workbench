@@ -89,6 +89,8 @@ function MessageRow({ message, documents, onPreviewSource }) {
                   ? '💻 Coding'
                   : (message.taskType === 'DOCUMENT' || message.taskType === 'DOCUMENT_ANALYSIS')
                   ? '📄 Document Analysis'
+                  : message.taskType === 'VISION'
+                  ? '👁 Vision'
                   : message.taskType === 'INSPECTION'
                   ? '🔍 Inspection Analysis'
                   : '⚡ General Task'}

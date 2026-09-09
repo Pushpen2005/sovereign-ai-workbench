@@ -137,4 +137,14 @@ export function postForm(path, formData) {
     .then((res) => res.data);
 }
 
+/**
+ * DELETE request — returns parsed response data.
+ * @param {string} path
+ * @returns {Promise<any>}
+ */
+export function del(path) {
+  return axiosInstance.delete(path).then((res) => res.data);
+}
+
 export default axiosInstance;
+

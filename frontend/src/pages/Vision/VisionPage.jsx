@@ -12,15 +12,15 @@ import { analyzeImage } from '../../api/vision.api.js';
 
 const PROMPT_PRESETS = [
   {
-    label: 'Equipment & Defect Inspection',
-    text: 'Analyze this industrial image. Describe visible equipment, components, physical conditions, and identify any obvious abnormalities or defects. Only report observations supported by the image.',
+    label: 'Equipment & Observation Inspection',
+    text: 'Analyze this engineering image. Identify visible equipment, components, labels, abnormal conditions, or safety-relevant observations. If something cannot be determined from the image, explicitly state that it cannot be determined.',
   },
   {
     label: 'Engineering Drawing Review',
     text: 'Analyze the engineering drawing. Identify visible equipment, lines, labels, symbols, and notable relationships. Clearly distinguish what is visible from what is inferred.',
   },
   {
-    label: 'Corrosion & Leak Detection',
+    label: 'Corrosion & Defect Detection',
     text: 'Identify visible signs of damage, corrosion, cracks, leakage, deformation, or other abnormal conditions. Only report observations supported by the image.',
   },
 ];
@@ -41,7 +41,7 @@ export function VisionPage() {
 
     // Local client validation
     const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'];
-    if (!validTypes.includes(file.mimetype) && !/\.(png|jpe?g|webp)$/i.test(file.name)) {
+    if (!validTypes.includes(file.type) && !/\.(png|jpe?g|webp)$/i.test(file.name)) {
       setError('Please select a PNG, JPEG, or WebP image file.');
       return;
     }
@@ -172,7 +172,7 @@ export function VisionPage() {
   return (
     <div className="max-w-6xl mx-auto flex flex-col gap-6">
       <PageHeader
-        title="Vision Analysis"
+        title="Vision"
         subtitle="Local multimodal visual inspection for industrial equipment, engineering drawings, and scanned records"
       />
 
@@ -197,13 +197,13 @@ export function VisionPage() {
 
         <div className="flex flex-wrap gap-2 text-[11px] font-mono">
           <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            Task: <strong className="text-blue-400">VISION</strong>
+            Task: <strong className="text-blue-400">Vision Analysis</strong>
           </span>
           <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            In-Memory: <strong className="text-emerald-400">EPHEMERAL</strong>
+            Model: <strong className="text-emerald-400">moondream:latest</strong>
           </span>
           <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            Cloud Vision: <strong className="text-red-400">NONE</strong>
+            Runtime: <strong className="text-emerald-400">Local Ollama</strong>
           </span>
         </div>
       </div>

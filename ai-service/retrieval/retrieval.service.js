@@ -4,8 +4,13 @@ import { QdrantClient } from "@qdrant/js-client-rest";
 const COLLECTION_NAME = "documents";
 const VECTOR_SIZE = 384;
 
+const isDockerEnv = Boolean(process.env.DOCKER_CONTAINER || process.env.IS_DOCKER);
+const qdrantUrl = (process.env.QDRANT_URL && process.env.QDRANT_URL.includes("://qdrant") && !isDockerEnv)
+    ? process.env.QDRANT_URL.replace("://qdrant", "://127.0.0.1")
+    : (process.env.QDRANT_URL || "http://localhost:6333");
+
 const qdrant = new QdrantClient({
-    url: process.env.QDRANT_URL,
+    url: qdrantUrl,
 });
 
 /**

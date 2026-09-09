@@ -222,7 +222,7 @@ export function getModelRegistry() {
     const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
     const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
     const codingModel     = process.env.CODING_MODEL     || process.env.MODEL_CODING     || defaultModel;
-    const visionModel     = process.env.MODEL_VISION     || process.env.MODEL_VISION     || "moondream";
+    const visionModel     = process.env.VISION_MODEL     || process.env.MODEL_VISION     || "moondream";
 
     const codingFallbackEnabled =
         (process.env.CODING_MODEL_FALLBACK || "true").toLowerCase() !== "false";

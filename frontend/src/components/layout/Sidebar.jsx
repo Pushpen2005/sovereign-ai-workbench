@@ -18,18 +18,15 @@ import { useAuth } from '../../state/authState.jsx';
 import { fetchChatHistory } from '../../api/chat.api.js';
 
 const PRIMARY_NAV = [
-  { to: '/chat',       label: 'AI Search',           icon: '💬' },
-  { to: '/documents',  label: 'Documents',           icon: '📄' },
-  { to: '/agent',      label: 'Agent Workspace',     icon: '⚡' },
-  { to: '/inspection', label: 'Inspection Agent',    icon: '⚙' },
-  { to: '/reports',    label: 'Reports',             icon: '📋' },
-  { to: '/security',   label: 'Security',            icon: '🔒' },
-];
-
-const SECONDARY_NAV = [
-  { to: '/dashboard', label: 'Dashboard',        icon: '⊞' },
-  { to: '/coding',    label: 'Coding Sandbox',    icon: '💻' },
-  { to: '/vision',    label: 'Vision Analysis',   icon: '👁' },
+  { to: '/dashboard',      label: 'Dashboard',        icon: '⊞' },
+  { to: '/documents',      label: 'Documents',        icon: '📄' },
+  { to: '/knowledge-base', label: 'Knowledge Base',   icon: '📚' },
+  { to: '/chat',           label: 'AI Chat',          icon: '💬' },
+  { to: '/agent',          label: 'Agent Workspace',  icon: '⚡' },
+  { to: '/coding',         label: 'Coding',           icon: '💻' },
+  { to: '/vision',         label: 'Vision',           icon: '👁' },
+  { to: '/reports',        label: 'Reports',          icon: '📋' },
+  { to: '/security',       label: 'Security',         icon: '🔒' },
 ];
 
 const DEFAULT_RECENT_CHATS = [
@@ -42,7 +39,7 @@ const DEFAULT_RECENT_CHATS = [
 export function Sidebar() {
   const { sidebarOpen } = useAppState();
   const { toggleSidebar } = useAppActions();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [recentChats, setRecentChats] = useState(DEFAULT_RECENT_CHATS);
 
@@ -200,35 +197,6 @@ export function Sidebar() {
               </div>
             </div>
           )}
-
-          {/* Secondary / Workspaces */}
-          {sidebarOpen && (
-            <div className="flex flex-col gap-1 pt-2 border-t border-slate-800/60">
-              <div className="px-3 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                Workspaces
-              </div>
-              <ul className="flex flex-col gap-0.5" role="list">
-                {SECONDARY_NAV.map((item) => (
-                  <li key={item.to}>
-                    <NavLink
-                      to={item.to}
-                      className={({ isActive }) =>
-                        [
-                          'flex items-center gap-3 px-3 py-1.5 rounded-lg transition-colors text-xs',
-                          isActive
-                            ? 'bg-slate-800 text-white font-semibold'
-                            : 'text-slate-400 hover:bg-slate-900 hover:text-slate-200',
-                        ].join(' ')
-                      }
-                    >
-                      <span className="text-sm flex-shrink-0" aria-hidden="true">{item.icon}</span>
-                      <span className="truncate">{item.label}</span>
-                    </NavLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
 
         {/* System Status Cluster */}
@@ -258,7 +226,7 @@ export function Sidebar() {
           </div>
         )}
 
-        {/* User Profile & Tenant Context */}
+        {/* User Profile, Organization & Logout (Section 4 Requirement) */}
         <div className="p-2.5 border-t border-slate-800/70 bg-slate-950">
           <div className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg bg-slate-900/70 border border-slate-800 w-full">
             <div className="w-7 h-7 rounded-full bg-emerald-700/80 border border-emerald-500/40 flex items-center justify-center text-xs font-bold text-white shadow-sm shrink-0">
@@ -268,17 +236,27 @@ export function Sidebar() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center justify-between gap-1">
                   <p className="text-xs font-semibold text-white truncate">{user?.name || 'Demo User'}</p>
-                  <span className="text-[9px] uppercase px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
-                    {user?.role || 'member'}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      logout();
+                      navigate('/login', { replace: true });
+                    }}
+                    className="p-1 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded transition-colors"
+                    title="Sign Out"
+                    aria-label="Sign Out"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                    </svg>
+                  </button>
                 </div>
                 <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400">
-                  <span className="flex items-center gap-1 text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <span>Authenticated</span>
+                  <span className="text-emerald-400 truncate font-medium">
+                    {user?.organizationName || 'MRPL Demo Org'}
                   </span>
                   <span className="text-slate-600">·</span>
-                  <span className="text-slate-400 truncate">On-Prem</span>
+                  <span className="text-slate-400 uppercase font-mono text-[9px]">{user?.role || 'member'}</span>
                 </div>
               </div>
             )}
