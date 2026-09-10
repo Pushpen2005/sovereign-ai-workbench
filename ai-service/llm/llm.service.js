@@ -3,7 +3,8 @@
  *
  * Centralized inference gateway orchestrating local model runtime adapters:
  *   - GemmaMlxAdapter (Native macOS MLX server via :8080)
- *   - OllamaAdapter (Local Ollama daemon via :11434)
+ *   - QwenCoderMlxAdapter (Native macOS MLX server via :8081)
+ *   - QwenVlMlxAdapter (Native macOS MLX server via :8082)
  *
  * INVARIANTS PRESERVED:
  *   - Identical external signature: generateAnswer(prompt, modelOrOptions, maybeOptions)
@@ -13,7 +14,6 @@
  */
 
 import { isModelAllowed } from "../router/modelRouter.js";
-import { OllamaAdapter } from "./adapters/ollama.adapter.js";
 import { GemmaMlxAdapter } from "./adapters/gemmaMlx.adapter.js";
 import { QwenCoderMlxAdapter } from "./adapters/qwenCoderMlx.adapter.js";
 import { QwenVlMlxAdapter } from "./adapters/qwenVlMlx.adapter.js";
@@ -32,13 +32,11 @@ export class LLMError extends Error {
 }
 
 // Instantiate singleton adapters
-const ollamaAdapter = new OllamaAdapter();
 const gemmaMlxAdapter = new GemmaMlxAdapter();
 const qwenCoderMlxAdapter = new QwenCoderMlxAdapter();
 const qwenVlMlxAdapter = new QwenVlMlxAdapter();
 
 const ADAPTERS = Object.freeze({
-    ollama: ollamaAdapter,
     mlx: gemmaMlxAdapter,
     gemma_mlx: gemmaMlxAdapter,
     qwen_coder_mlx: qwenCoderMlxAdapter,
@@ -55,7 +53,7 @@ const ADAPTERS = Object.freeze({
  * @returns {import("./adapters/base.adapter.js").BaseAdapter}
  */
 export function resolveAdapter(modelName, options = {}) {
-    const explicitProvider = options.provider || process.env.LLM_PROVIDER;
+    const explicitProvider = options.provider;
 
     if (explicitProvider && ADAPTERS[explicitProvider.toLowerCase()]) {
         return ADAPTERS[explicitProvider.toLowerCase()];
@@ -69,11 +67,9 @@ export function resolveAdapter(modelName, options = {}) {
     if (norm.startsWith("qwen") || norm.includes("qwen2.5-coder") || norm.includes("coder-mlx")) {
         return qwenCoderMlxAdapter;
     }
-    if (norm.startsWith("gemma") || norm.includes("mlx")) {
-        return gemmaMlxAdapter;
-    }
 
-    return ollamaAdapter;
+    // Default: Gemma MLX adapter
+    return gemmaMlxAdapter;
 }
 
 /**
@@ -136,10 +132,8 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
     const options = normalized.options;
 
     const defaultModel =
-        process.env.DEFAULT_MODEL ||
-        process.env.OLLAMA_MODEL ||
-        process.env.MLX_MODEL ||
-        "llama3.2:3b";
+        process.env.GEMMA_MLX_MODEL ||
+        "gemma-2-2b-it-4bit";
 
     const selectedModel = normalized.model || defaultModel;
 
@@ -154,23 +148,14 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         throw err;
     }
 
-    const managed = isManagedModel(selectedModel);
+    // Containers must only consume host-native MLX over host.docker.internal.
+    // Process lifecycle management is host-only and explicitly opt-in.
+    const managed = process.env.MLX_RUNTIME_MANAGED === "true" && isManagedModel(selectedModel);
     if (managed) {
         try {
             await localModelRuntimeManager.ensureRunning(selectedModel);
         } catch (startupErr) {
             console.warn(`[RUNTIME-MANAGER] ensureRunning failed for '${selectedModel}': ${startupErr.message}`);
-            const norm = String(selectedModel).toLowerCase();
-            if (norm.includes("vl") || norm.includes("vision")) {
-                const fallbackVision = process.env.VISION_MODEL || "moondream";
-                console.log(`[RUNTIME-MANAGER] Falling back to vision fallback: ${fallbackVision}`);
-                return await ollamaAdapter.generate(normalized.prompt, fallbackVision, options);
-            }
-            if (norm.includes("coder") || norm.includes("qwen")) {
-                const fallbackCoding = process.env.DEFAULT_MODEL || "llama3.2:3b";
-                console.log(`[RUNTIME-MANAGER] Falling back to coding fallback: ${fallbackCoding}`);
-                return await ollamaAdapter.generate(normalized.prompt, fallbackCoding, options);
-            }
             throw new LLMError(`Failed to start local model server for '${selectedModel}': ${startupErr.message}`, {
                 cause: startupErr,
                 code: "STARTUP_FAILED",
@@ -208,19 +193,19 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
             });
         }
 
-        if (error.statusCode === 404 || error.message?.includes("Model unavailable")) {
-            throw new LLMError("Model unavailable", {
+        if (error.code === "LOCAL_RUNTIME_UNAVAILABLE" || error.statusCode === 503) {
+            throw new LLMError("Local Gemma MLX runtime is unavailable.", {
                 cause: error,
-                code: "MODEL_UNAVAILABLE",
-                statusCode: 404,
+                code: "LOCAL_RUNTIME_UNAVAILABLE",
+                statusCode: 503,
                 model: selectedModel,
             });
         }
 
         if (error instanceof TypeError || error.code === "ECONNREFUSED" || error.message?.includes("fetch failed")) {
-            throw new LLMError(`${adapter.name.toUpperCase()} connection failed: ${error.message}`, {
+            throw new LLMError(`Local MLX runtime connection failed: ${error.message}`, {
                 cause: error,
-                code: "CONNECTION_FAILED",
+                code: "LOCAL_RUNTIME_UNAVAILABLE",
                 statusCode: 503,
                 model: selectedModel,
             });
@@ -262,7 +247,7 @@ async function generateVisionAnswer(prompt, images, model, options = {}) {
  * @param {string[]} [models]
  * @returns {Promise<Array<{ model: string, success: boolean, durationMs: number, provider: string }>>}
  */
-async function warmLocalModels(models = ["llama3.2:3b", "gemma-2-2b-it-4bit"]) {
+async function warmLocalModels(models = ["gemma-2-2b-it-4bit"]) {
     const results = [];
 
     for (const model of models) {
@@ -288,23 +273,18 @@ async function warmLocalModels(models = ["llama3.2:3b", "gemma-2-2b-it-4bit"]) {
 }
 
 /**
- * Diagnostic helper to check health across all registered adapters.
+ * Diagnostic helper to check health across all registered MLX adapters.
  *
  * @returns {Promise<Record<string, { healthy: boolean, url: string }>>}
  */
 async function checkGatewayHealth() {
-    const [ollamaHealthy, mlxHealthy, qwenHealthy, qwenVlHealthy] = await Promise.all([
-        ollamaAdapter.checkHealth(),
+    const [mlxHealthy, qwenHealthy, qwenVlHealthy] = await Promise.all([
         gemmaMlxAdapter.checkHealth(),
         qwenCoderMlxAdapter.checkHealth(),
         qwenVlMlxAdapter.checkHealth(),
     ]);
 
     return {
-        ollama: {
-            healthy: ollamaHealthy,
-            url: ollamaAdapter.getBaseUrl(),
-        },
         mlx: {
             healthy: mlxHealthy,
             url: gemmaMlxAdapter.getBaseUrl(),
@@ -326,7 +306,6 @@ export {
     warmLocalModels,
     checkGatewayHealth,
     ADAPTERS,
-    ollamaAdapter,
     gemmaMlxAdapter,
     qwenCoderMlxAdapter,
     qwenVlMlxAdapter,

@@ -99,7 +99,7 @@ export async function runAgentWorkflow(input, options = {}) {
             engine: "langgraph",
             status: "in_progress",
             goal: cleanGoal,
-            model: "llama3.2:3b",
+            model: process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit",
             maxSteps: cleanMaxSteps,
         });
     } catch (sseErr) {
@@ -268,7 +268,7 @@ export async function runAgentWorkflow(input, options = {}) {
             totalSteps: steps.length,
             durationMs,
             finalAnswer: finalState.finalAnswer || "",
-            model: finalState.model || "llama3.2:3b",
+            model: finalState.model || process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit",
             completedAt: new Date(),
         });
     } catch (dbErr) {

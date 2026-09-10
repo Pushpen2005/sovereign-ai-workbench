@@ -54,7 +54,7 @@ echo "  ✓ docker compose config validated successfully."
 
 # 4. Ensure Persistent Docker Volumes Exist
 echo "[4/7] Ensuring persistent data volumes exist..."
-for vol in postgres_data qdrant_storage ollama_data uploads_data reports_data; do
+for vol in postgres_data qdrant_storage uploads_data reports_data; do
     if ! docker volume inspect "${vol}" >/dev/null 2>&1; then
         echo "  • Creating persistent volume: ${vol}"
         docker volume create "${vol}" >/dev/null

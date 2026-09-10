@@ -70,10 +70,16 @@ export function parseInspectionLlmResponse(rawResponse) {
 
     let cleaned = rawResponse.trim();
 
-    // Strip markdown code fences if present (e.g. ```json ... ```)
-    const codeBlockMatch = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-    if (codeBlockMatch) {
-        cleaned = codeBlockMatch[1].trim();
+    const startIdx = cleaned.indexOf("{");
+    const endIdx = cleaned.lastIndexOf("}");
+    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+        cleaned = cleaned.substring(startIdx, endIdx + 1);
+    } else {
+        const arrStart = cleaned.indexOf("[");
+        const arrEnd = cleaned.lastIndexOf("]");
+        if (arrStart !== -1 && arrEnd !== -1 && arrEnd >= arrStart) {
+            cleaned = cleaned.substring(arrStart, arrEnd + 1);
+        }
     }
 
     let parsed;
@@ -81,7 +87,12 @@ export function parseInspectionLlmResponse(rawResponse) {
     try {
         parsed = JSON.parse(cleaned);
     } catch (error) {
-        throw new InspectionValidationError(`LLM returned invalid JSON: ${error.message}`);
+        try {
+            const repaired = cleaned.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+            parsed = JSON.parse(repaired);
+        } catch {
+            throw new InspectionValidationError(`LLM returned invalid JSON: ${error.message}`);
+        }
     }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

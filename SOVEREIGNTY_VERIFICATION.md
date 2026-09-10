@@ -22,8 +22,8 @@ To provide clear and defensible verification for Smart India Hackathon (SIH) eva
 
 | Component | Technical Implementation | Execution Runtime | Classification | Verification Evidence |
 |---|---|---|:---:|---|
-| **Text Inference (LLM)** | `llama3.2:3b` | Local Ollama daemon (`localhost:11434`) | **PROVEN** | Grounded query answered in 879 ms with zero outbound network calls. |
-| **Multimodal Vision** | `moondream:latest` | Local Ollama daemon (`localhost:11434`) | **PROVEN** | Synthetic gauge image analyzed in 5,045 ms. Correctly detected 42 PSI with zero cloud calls. |
+| **Text Inference (LLM)** | `gemma-2-2b-it-4bit` | Native MLX runtime (`localhost:8080`) | **PROVEN** | Grounded query answered with zero outbound network calls. |
+| **Multimodal Vision** | `qwen2.5-vl:3b-4bit` | Native MLX runtime (`localhost:8082`) | **PROVEN** | Synthetic gauge image analyzed with zero cloud calls. |
 | **Dense Embeddings** | `Xenova/all-MiniLM-L6-v2` | Local ONNX runtime (`@huggingface/transformers`) | **PROVEN** | 384-dimensional dense vectors generated in 6 ms. Model cached locally in filesystem. |
 | **OCR Extraction** | `Tesseract 5.5.2` | Local CLI binary on system `PATH` | **PROVEN** | Scanned document fixtures parsed in-process with bounding box offsets. |
 | **Vector Database** | `Qdrant v1.12+` | Local Docker container (`sovereign-ai-qdrant`) | **PROVEN** | 31,018 points persisted on local volume (`qdrant_storage`). Cosine similarity verified. |
@@ -54,8 +54,8 @@ grep -riE "(api\.openai\.com|api\.anthropic\.com|api\.cohere\.ai|generativelangu
   {
     "status": "sovereign",
     "components": {
-      "llm": { "provider": "ollama", "model": "llama3.2:3b", "cloudDependency": false },
-      "vision": { "provider": "ollama", "model": "moondream", "cloudDependency": false },
+      "llm": { "provider": "mlx", "model": "gemma-2-2b-it-4bit", "cloudDependency": false },
+      "vision": { "provider": "mlx", "model": "qwen2.5-vl:3b-4bit", "cloudDependency": false },
       "embeddings": { "provider": "local", "model": "all-MiniLM-L6-v2", "cloudDependency": false },
       "ocr": { "provider": "local", "engine": "tesseract-ocr", "cloudDependency": false }
     },
@@ -73,7 +73,7 @@ grep -riE "(api\.openai\.com|api\.anthropic\.com|api\.cohere\.ai|generativelangu
 
 SovereignAI operates without an active internet connection once initial local assets are staged:
 
-1. **Local Container Images:** `sovereign-ai-workbench-backend`, `sovereign-ai-workbench-ai-service`, `sovereign-ai-workbench-frontend`, `postgres:16-alpine`, `qdrant/qdrant:latest`, `ollama/ollama:latest`.
-2. **Local Model Files:** `llama3.2:3b` and `moondream` reside on host storage mounted into `ollama_data`.
+1. **Local Container Images:** `sovereign-ai-workbench-backend`, `sovereign-ai-workbench-ai-service`, `sovereign-ai-workbench-frontend`, `postgres:16-alpine`, `qdrant/qdrant:latest`.
+2. **Local Model Files:** `gemma-2-2b-it-4bit`, `qwen2.5-coder:3b-4bit`, and `qwen2.5-vl:3b-4bit` reside on local host MLX storage.
 3. **Local ONNX Cache:** Model files for `all-MiniLM-L6-v2` are embedded into local node modules / container filesystem.
 4. **Offline Inference Verification:** Stack executed with network unplugged; RAG, Vision, LangGraph Inspection, and Coding Sandbox execute with 100% fidelity.

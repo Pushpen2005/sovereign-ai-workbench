@@ -7,31 +7,61 @@
 
 import { BaseAdapter } from "./base.adapter.js";
 
+let gemmaQueue = Promise.resolve();
+
+function enqueueGemma(fn) {
+    const next = gemmaQueue.then(fn, fn);
+    gemmaQueue = next.catch(() => {});
+    return next;
+}
+
 export class GemmaMlxAdapter extends BaseAdapter {
     constructor(options = {}) {
-        super("mlx");
-        this.baseUrl = options.baseUrl || process.env.MLX_URL || "http://127.0.0.1:8080";
-        this.defaultModel = options.defaultModel || process.env.MLX_MODEL || "gemma-2-2b-it-4bit";
+        super("gemma_mlx");
+        this.baseUrl = options.baseUrl || process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://host.docker.internal:8080";
+        this.defaultModel = options.defaultModel || process.env.GEMMA_MLX_MODEL || process.env.MLX_MODEL || "gemma-2-2b-it-4bit";
     }
 
     getBaseUrl() {
-        return process.env.MLX_URL || this.baseUrl;
+        const url = process.env.GEMMA_MLX_URL || process.env.MLX_URL || this.baseUrl || "http://host.docker.internal:8080";
+        return url.trim().replace(/\/$/, "");
     }
 
-    async _fetchWithDockerFallback(endpoint, init) {
-        const primaryUrl = this.getBaseUrl();
+    async _fetch(endpoint, init) {
+        const baseUrl = this.getBaseUrl();
         try {
-            return await fetch(`${primaryUrl}${endpoint}`, init);
+            return await fetch(`${baseUrl}${endpoint}`, init);
         } catch (err) {
-            if (primaryUrl.includes("host.docker.internal")) {
-                const fallbackUrl = primaryUrl.replace("host.docker.internal", "127.0.0.1");
-                return await fetch(`${fallbackUrl}${endpoint}`, init);
+            // If running outside Docker container directly on host, host.docker.internal may not resolve.
+            // Fall back to 127.0.0.1 on the same port for local host test scripts and diagnostic runners.
+            if (baseUrl.includes("host.docker.internal")) {
+                try {
+                    const fallbackUrl = baseUrl.replace("host.docker.internal", "127.0.0.1");
+                    return await fetch(`${fallbackUrl}${endpoint}`, init);
+                } catch {
+                    // Ignore fallback failure and report primary error below
+                }
             }
-            throw err;
+
+            if (err.name === "TimeoutError" || err.name === "AbortError") {
+                const timeoutErr = new Error(`Gemma MLX request timed out: ${err.message}`);
+                timeoutErr.code = "LOCAL_RUNTIME_TIMEOUT";
+                timeoutErr.statusCode = 504;
+                throw timeoutErr;
+            }
+
+            const unavailErr = new Error(`Local Gemma MLX runtime unavailable at ${baseUrl}: ${err.message}`);
+            unavailErr.code = "LOCAL_RUNTIME_UNAVAILABLE";
+            unavailErr.statusCode = 503;
+            throw unavailErr;
         }
     }
 
     async generate(prompt, model, options = {}) {
+        return enqueueGemma(() => this._executeGenerate(prompt, model, options));
+    }
+
+    async _executeGenerate(prompt, model, options = {}) {
         const isStreaming = typeof options.onChunk === "function" || options.stream === true;
         const taskName = options.task || "general";
         const startTime = Date.now();
@@ -80,10 +110,12 @@ export class GemmaMlxAdapter extends BaseAdapter {
             stream: isStreaming,
         };
 
-        const timeoutMs = typeof options.timeoutMs === "number" ? options.timeoutMs : Number(process.env.MLX_TIMEOUT_MS || 120000);
+        const timeoutMs = typeof options.timeoutMs === "number"
+            ? options.timeoutMs
+            : Number(process.env.GEMMA_MLX_TIMEOUT_MS || 120000);
         const abortSignal = options.signal || AbortSignal.timeout(timeoutMs);
 
-        const response = await this._fetchWithDockerFallback("/v1/chat/completions", {
+        const response = await this._fetch("/v1/chat/completions", {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
@@ -93,12 +125,12 @@ export class GemmaMlxAdapter extends BaseAdapter {
         });
 
         if (!response.ok) {
+            const responseText = await response.text().catch(() => "");
             const err = new Error(
-                response.status === 404
-                    ? "Model unavailable on MLX server"
-                    : `MLX inference generation failed with status ${response.status}`
+                `Gemma MLX host runtime returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 240)}` : ""}`
             );
-            err.statusCode = response.status;
+            err.code = "LOCAL_RUNTIME_UNAVAILABLE";
+            err.statusCode = response.status >= 500 || response.status === 404 ? 503 : response.status;
             throw err;
         }
 
@@ -157,7 +189,10 @@ export class GemmaMlxAdapter extends BaseAdapter {
             }
 
             if (!fullText.trim()) {
-                throw new Error("MLX generation produced empty stream response");
+                const err = new Error("Gemma MLX returned a malformed streaming response (no generated content).");
+                err.code = "MALFORMED_RESPONSE";
+                err.statusCode = 502;
+                throw err;
             }
 
             const durationMs = Date.now() - startTime;
@@ -173,11 +208,23 @@ export class GemmaMlxAdapter extends BaseAdapter {
             return resultText;
         }
 
-        const data = await response.json();
+        let data;
+        try {
+            data = await response.json();
+        } catch (cause) {
+            const err = new Error("Gemma MLX returned malformed JSON.");
+            err.code = "MALFORMED_RESPONSE";
+            err.statusCode = 502;
+            err.cause = cause;
+            throw err;
+        }
         const content = data?.choices?.[0]?.message?.content;
 
         if (typeof content !== "string" || !content.trim()) {
-            throw new Error("MLX generation produced empty response");
+            const err = new Error("Gemma MLX returned a malformed completion response.");
+            err.code = "MALFORMED_RESPONSE";
+            err.statusCode = 502;
+            throw err;
         }
 
         const durationMs = Date.now() - startTime;
@@ -200,10 +247,14 @@ export class GemmaMlxAdapter extends BaseAdapter {
 
     async checkHealth() {
         try {
-            const res = await this._fetchWithDockerFallback("/health", {
+            const res = await this._fetch("/health", {
                 signal: AbortSignal.timeout(3000),
             });
-            return res.ok;
+            if (res.ok) return true;
+            const modelsRes = await this._fetch("/v1/models", {
+                signal: AbortSignal.timeout(3000),
+            });
+            return modelsRes.ok;
         } catch {
             return false;
         }
@@ -211,7 +262,7 @@ export class GemmaMlxAdapter extends BaseAdapter {
 
     async listModels() {
         try {
-            const res = await this._fetchWithDockerFallback("/v1/models", {
+            const res = await this._fetch("/v1/models", {
                 signal: AbortSignal.timeout(3000),
             });
             if (!res.ok) return [];
@@ -228,7 +279,7 @@ export class GemmaMlxAdapter extends BaseAdapter {
         const t0 = Date.now();
         try {
             const serverModel = model?.startsWith("/") ? model : "default_model";
-            const res = await this._fetchWithDockerFallback("/v1/chat/completions", {
+            const res = await this._fetch("/v1/chat/completions", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({

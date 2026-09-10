@@ -6,6 +6,8 @@ import {
     INSUFFICIENT_EVIDENCE_RESULT,
     parseRiskLlmResponse,
     validateFindingInput,
+    validateGemmaRiskOutput,
+    validateGemmaRecommendationGrounding,
 } from "./risk.schema.js";
 
 /**
@@ -19,7 +21,7 @@ import {
  * @param {string} [options.model] Optional model name override
  * @param {object} [options.sopOptions] Optional retrieval options (limit, scoreThreshold)
  * @returns {Promise<{
- *   riskAssessment: { level: "LOW" | "MEDIUM" | "HIGH" | null, reason: string },
+ *   riskAssessment: { level: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL" | null, reason: string },
  *   recommendation: string,
  *   citations: Array<{ documentId: string, filename: string, page: number, chunkIndex: number }>
  * }>}
@@ -63,11 +65,11 @@ export async function assessFindingRisk(finding, options = {}) {
         format: "json",
         task: "risk_assessment",
         temperature: 0.1,
-        num_predict: 384,
+        num_predict: 1024,
         timeoutMs: 180000, // 3 minutes timeout to accommodate longer inference
     });
 
-    // 7. Parse & validate JSON response against PR #15 schema
+    // 7. Parse & validate JSON response
     const parsedResponse = parseRiskLlmResponse(rawResponse);
 
     // 8. Enforce citation integrity (reject hallucinated citations, keep valid ones)
@@ -78,7 +80,27 @@ export async function assessFindingRisk(finding, options = {}) {
         orgId
     );
 
-    // 9. Return trusted structured result
+    // 9. Deterministic Risk & Recommendation Validation
+    const riskCheck = validateGemmaRiskOutput(
+        { ...parsedResponse, citations: validatedCitations },
+        validatedFinding,
+        retrievedChunks,
+        orgId
+    );
+    if (!riskCheck.isValid) {
+        throw new Error(`Risk assessment validation failed: ${riskCheck.error}`);
+    }
+
+    const recCheck = validateGemmaRecommendationGrounding(
+        parsedResponse.recommendation,
+        validatedFinding,
+        retrievedChunks
+    );
+    if (!recCheck.isValid) {
+        throw new Error(`Recommendation grounding validation failed: ${recCheck.error}`);
+    }
+
+    // 10. Return trusted structured result
     return {
         riskAssessment: parsedResponse.riskAssessment,
         recommendation: parsedResponse.recommendation,
@@ -94,4 +116,6 @@ export {
     INSUFFICIENT_EVIDENCE_RESULT,
     parseRiskLlmResponse,
     validateFindingInput,
+    validateGemmaRiskOutput,
+    validateGemmaRecommendationGrounding,
 };

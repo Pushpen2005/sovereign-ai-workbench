@@ -13,7 +13,7 @@ export function useAgentExecution() {
   const [status, setStatus] = useState('idle'); // 'idle' | 'running' | 'completed' | 'failed' | 'stopped'
   const [goal, setGoal] = useState('');
   const [runId, setRunId] = useState(null);
-  const [model, setModel] = useState('llama3.2:3b');
+  const [model, setModel] = useState('gemma-2-2b-it-4bit');
   const [currentStep, setCurrentStep] = useState(0);
   const [maxSteps, setMaxSteps] = useState(5);
   const [timeline, setTimeline] = useState([]);

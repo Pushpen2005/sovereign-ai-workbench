@@ -24,7 +24,7 @@ import { query } from "../config/db.js";
  * @param {string} [params.userId] - Requesting user identifier
  * @param {string} params.organizationId - Scoped organization identifier
  * @param {string} params.goal - User inquiry or instruction
- * @param {string} [params.model="llama3.2:3b"] - Model used for planning
+ * @param {string} [params.model="gemma-2-2b-it-4bit"] - Model used for planning
  * @param {string} [params.status="in_progress"] - Lifecycle status
  * @param {Date} [params.startedAt] - Initiation timestamp
  * @returns {Promise<object>} Created or updated run record
@@ -35,7 +35,7 @@ export async function createAgentRun({
     userId = null,
     organizationId,
     goal,
-    model = "llama3.2:3b",
+    model = process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit",
     status = "in_progress",
     documentId = null,
     startedAt = new Date(),

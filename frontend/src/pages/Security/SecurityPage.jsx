@@ -390,28 +390,28 @@ export function SecurityPage() {
             Model Governance & Allowlist
           </h2>
           <span className="text-[11px] text-slate-500 font-mono">
-            Deterministic Task Routing · Strictly Local Ollama Runtime
+            Deterministic Task Routing · Strictly Local MLX Runtime
           </span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {(modelGovernance?.diagnostic?.models || [
             {
-              model: "llama3.2:3b",
+              model: "gemma-2-2b-it-4bit",
               taskType: "DOCUMENT_ANALYSIS",
               purpose: "Industrial document & SOP RAG analysis",
               available: true,
               local: true,
             },
             {
-              model: "moondream:latest",
+              model: "qwen2.5-vl:3b-4bit",
               taskType: "VISION",
               purpose: "Local multimodal visual inspection & gauge reading",
               available: true,
               local: true,
             },
             {
-              model: "llama3.2:3b",
+              model: "qwen2.5-coder:3b-4bit",
               taskType: "CODING",
               purpose: "Isolated sandbox Python code generation",
               available: true,
@@ -490,10 +490,10 @@ export function SecurityPage() {
                 </span>
               </div>
               <p className="text-sm font-bold text-slate-900">
-                {components.llm?.provider || 'Ollama (Local Runtime)'}
+                {components.llm?.provider || 'MLX (Local Runtime)'}
               </p>
               <p className="text-xs text-slate-600 font-mono mt-0.5">
-                Model: {components.llm?.model || 'llama3.2:3b'}
+                Model: {components.llm?.model || 'gemma-2-2b-it-4bit'}
               </p>
             </div>
             <p className="text-[11px] text-slate-500 mt-3 pt-2 border-t border-slate-100">
@@ -635,7 +635,7 @@ export function SecurityPage() {
               { item: 'Uploaded Documents', location: 'LOCAL', detail: 'Appliance filesystem & PostgreSQL' },
               { item: 'Embedding Vectors', location: 'LOCAL', detail: 'Generated with Xenova ONNX MiniLM' },
               { item: 'Vector Index & Search', location: 'LOCAL', detail: 'Self-hosted Qdrant storage' },
-              { item: 'LLM Reasoning & Inference', location: 'LOCAL', detail: 'Local Ollama runtime' },
+              { item: 'LLM Reasoning & Inference', location: 'LOCAL', detail: 'Local MLX runtime' },
               { item: 'Optical Character Recognition', location: 'LOCAL', detail: 'Local Tesseract binary' },
               { item: 'Agent Execution State', location: 'LOCAL', detail: 'PostgreSQL agent_runs table' },
               { item: 'Generated Approval Notes', location: 'LOCAL', detail: 'Generated DOCX in local storage' },
@@ -781,8 +781,8 @@ export function SecurityPage() {
           {/* Local Microservices Grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
             <div className="p-2.5 bg-slate-900 border border-slate-800 rounded flex flex-col gap-1">
-              <span className="text-emerald-400 font-bold text-[11px]">Ollama Runtime</span>
-              <span className="text-[10px] text-slate-400">llama3.2:3b LLM</span>
+              <span className="text-emerald-400 font-bold text-[11px]">MLX Runtime</span>
+              <span className="text-[10px] text-slate-400">gemma-2-2b-it-4bit LLM</span>
             </div>
             <div className="p-2.5 bg-slate-900 border border-slate-800 rounded flex flex-col gap-1">
               <span className="text-emerald-400 font-bold text-[11px]">ONNX MiniLM</span>

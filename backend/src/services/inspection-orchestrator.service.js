@@ -121,19 +121,20 @@ export async function runInspectionWorkflow(input, options = {}) {
         },
     };
 
-    // Stage labels conforming to Phase 6 Step 17
+    // Stage labels conforming to Phase 6
     const STAGE_LABELS = {
         ingest: "Reading inspection report",
         retrieve: "Reading inspection report",
-        extract_findings: "Extracting findings",
-        validate_findings: "Validating findings",
+        extract_findings: "Extracting observations",
+        validate_findings: "Validating observations",
         retry_extraction: "Retrying findings extraction",
-        retrieve_sop: "Searching SOP",
-        check_sop_evidence: "Validating SOP evidence",
+        retrieve_sop: "Searching Knowledge Base",
+        check_sop_evidence: "Validating evidence",
         assess_risk: "Assessing risk",
         validate_risk: "Preparing recommendation",
         validate_citations: "Validating citations",
         generate_report: "Generating approval note",
+        insufficient_evidence: "Evidence insufficient",
     };
 
     // 3. Stream compiled LangGraph StateGraph snapshots in real-time
@@ -162,23 +163,17 @@ export async function runInspectionWorkflow(input, options = {}) {
                     }
 
                     if (nodeName === "extract_findings" && stateSnapshot.findings?.length > 0) {
-                        executionEvents.publish(runId, "findings_extracted", {
+                        executionEvents.publish(runId, "observations_extracted", {
                             runId,
-                            findings: stateSnapshot.findings,
+                            observations: stateSnapshot.findings,
                         });
                     } else if (nodeName === "validate_findings") {
                         executionEvents.publish(runId, "validation", {
                             runId,
                             validator: "validate_findings",
                             valid: stateSnapshot.findingValidation?.valid ?? stateSnapshot.findingValidation?.isValid,
-                            findingsCount: stateSnapshot.findings?.length || 0,
+                            observationsCount: stateSnapshot.findings?.length || 0,
                         });
-                        if (stateSnapshot.findings?.length > 0) {
-                            executionEvents.publish(runId, "findings_extracted", {
-                                runId,
-                                findings: stateSnapshot.findings,
-                            });
-                        }
                     } else if (nodeName === "retrieve_sop" && stateSnapshot.sopEvidence?.length > 0) {
                         executionEvents.publish(runId, "sop_matched", {
                             runId,
@@ -197,6 +192,13 @@ export async function runInspectionWorkflow(input, options = {}) {
                             validator: "check_sop_evidence",
                             status: stateSnapshot.sopEvidenceStatus,
                         });
+                        // Publish validated findings only when confirmed by evidence gate
+                        if (stateSnapshot.sopEvidenceStatus === "EVIDENCE_FOUND" && stateSnapshot.findings?.length > 0) {
+                            executionEvents.publish(runId, "findings_extracted", {
+                                runId,
+                                findings: stateSnapshot.findings,
+                            });
+                        }
                     } else if (nodeName === "assess_risk") {
                         executionEvents.publish(runId, "risk_assessed", {
                             runId,
@@ -232,11 +234,20 @@ export async function runInspectionWorkflow(input, options = {}) {
                             });
                         }
                     } else if (nodeName === "insufficient_evidence") {
+                        executionEvents.publish(runId, "workflow_stage", {
+                            runId,
+                            node: "insufficient_evidence",
+                            stage: "Evidence insufficient",
+                        });
                         executionEvents.publish(runId, "run_stopped", {
                             runId,
                             node: "insufficient_evidence",
                             outcome: "INSUFFICIENT_EVIDENCE",
-                            reason: stateSnapshot.failureReason,
+                            reason: stateSnapshot.failureReason || "Analysis stopped because no sufficiently relevant Knowledge Base evidence was found.",
+                            findings: [],
+                            risk: null,
+                            recommendation: null,
+                            approvalNote: null,
                         });
                     } else if (nodeName === "safe_failure") {
                         executionEvents.publish(runId, "run_failed", {

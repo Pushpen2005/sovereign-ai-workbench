@@ -382,7 +382,7 @@ export async function answerQuestion(question, options = {}) {
         context
     );
 
-    // 10. Generate answer using local LLM (Ollama)
+    // 10. Generate answer using local LLM (MLX)
     const tGenStart = Date.now();
     const generateAnswerFn = options.generateAnswer ?? generateAnswer;
     const generateOpts = {

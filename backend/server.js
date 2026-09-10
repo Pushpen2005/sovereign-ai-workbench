@@ -23,7 +23,8 @@ app.listen(PORT, async () => {
   // Non-blocking pre-warming of local LLM to eliminate ~4.5s cold-start penalty
   try {
     const { warmLocalModels } = await import("../ai-service/llm/llm.service.js");
-    warmLocalModels(["llama3.2:3b"]).then((results) => {
+    const defaultModel = process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
+    warmLocalModels([defaultModel]).then((results) => {
       console.log(`[LLM-WARM] Pre-warming completed: ${JSON.stringify(results)}`);
     }).catch((err) => {
       console.warn(`[LLM-WARM] Pre-warming warning: ${err.message}`);

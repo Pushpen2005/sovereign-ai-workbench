@@ -217,7 +217,7 @@ function generateDemoFiles() {
 
 4. **\`Pump03_Vibration_Gauge.png\`**
    - Synthetic vibration sensor display graphic showing an alarm reading of **6.8 mm/s**.
-   - Used for: Local Multimodal Vision demonstration with \`moondream:latest\`.
+   - Used for: Local Multimodal Vision demonstration with \`qwen2.5-vl:3b-4bit\`.
 `;
     fs.writeFileSync(path.join(DEMO_DIR, "README.md"), readmeContent);
     console.log("Created documents/demo/README.md");

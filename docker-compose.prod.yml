@@ -1,7 +1,7 @@
 # SovereignAI Production Hardened Docker Compose Configuration
 #
 # Production Security Invariants:
-# 1. Zero external host port exposure for data & AI stores (PostgreSQL, Qdrant, Ollama, ai-service).
+# 1. Zero external host port exposure for data stores (PostgreSQL, Qdrant, ai-service).
 # 2. Only Frontend (port 80) and Backend API (port 9000) are reachable from host/network ingress.
 # 3. All internal services communicate strictly over the private bridge network 'sovereign_net'.
 # 4. Mandatory health checks and restart policies enabled.
@@ -57,30 +57,6 @@ services:
     networks:
       - sovereign_net
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: sovereign-ai-ollama
-    restart: always
-    # Production Hardening: NO host port exposure (Internal to sovereign_net only)
-    expose:
-      - "11434"
-    environment:
-      OLLAMA_KEEP_ALIVE: "24h"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-    networks:
-      - sovereign_net
-
   ai-service:
     build:
       context: .
@@ -91,16 +67,28 @@ services:
     expose:
       - "5001"
     environment:
+      DOCKER_CONTAINER: "true"
       PORT: 5001
       NODE_ENV: production
       QDRANT_URL: http://qdrant:6333
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.2:3b}
-      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-llama3.2:3b}
-      CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
-      CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
-      VISION_MODEL: ${VISION_MODEL:-moondream}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gemma-2-2b-it-4bit}
+      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-gemma-2-2b-it-4bit}
+      INSPECTION_MODEL: ${INSPECTION_MODEL:-gemma-2-2b-it-4bit}
+      RISK_MODEL: ${RISK_MODEL:-gemma-2-2b-it-4bit}
+      GEMMA_MLX_URL: ${GEMMA_MLX_URL:-http://host.docker.internal:8080}
+      GEMMA_MLX_MODEL: ${GEMMA_MLX_MODEL:-gemma-2-2b-it-4bit}
+      GEMMA_MLX_TIMEOUT_MS: ${GEMMA_MLX_TIMEOUT_MS:-120000}
+      MLX_RUNTIME_MANAGED: "false"
+      CODING_MODEL: ${CODING_MODEL:-qwen2.5-coder:3b-4bit}
+      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
+      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
+      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
+      VISION_MODEL: ${VISION_MODEL:-qwen2.5-vl:3b-4bit}
+      VISION_MLX_ENABLED: ${VISION_MLX_ENABLED:-true}
+      QWEN_VL_MLX_URL: ${QWEN_VL_MLX_URL:-http://host.docker.internal:8082}
+      QWEN_VL_MODEL: ${QWEN_VL_MODEL:-qwen2.5-vl:3b-4bit}
+      QWEN_VL_SERVER_MODEL: ${QWEN_VL_SERVER_MODEL:-models/qwen2.5-vl-3b-4bit}
+      QWEN_VL_TIMEOUT_MS: ${QWEN_VL_TIMEOUT_MS:-60000}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -128,6 +116,7 @@ services:
     ports:
       - "9000:9000"
     environment:
+      DOCKER_CONTAINER: "true"
       PORT: 9000
       NODE_ENV: production
       POSTGRES_HOST: postgres
@@ -136,13 +125,24 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-workbench_secret}
       POSTGRES_DB: ${POSTGRES_DB:-workbench_db}
       QDRANT_URL: http://qdrant:6333
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.2:3b}
-      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-llama3.2:3b}
-      CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
-      CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
-      VISION_MODEL: ${VISION_MODEL:-moondream}
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gemma-2-2b-it-4bit}
+      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-gemma-2-2b-it-4bit}
+      INSPECTION_MODEL: ${INSPECTION_MODEL:-gemma-2-2b-it-4bit}
+      RISK_MODEL: ${RISK_MODEL:-gemma-2-2b-it-4bit}
+      GEMMA_MLX_URL: ${GEMMA_MLX_URL:-http://host.docker.internal:8080}
+      GEMMA_MLX_MODEL: ${GEMMA_MLX_MODEL:-gemma-2-2b-it-4bit}
+      GEMMA_MLX_TIMEOUT_MS: ${GEMMA_MLX_TIMEOUT_MS:-120000}
+      MLX_RUNTIME_MANAGED: "false"
+      CODING_MODEL: ${CODING_MODEL:-qwen2.5-coder:3b-4bit}
+      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
+      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
+      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
+      VISION_MODEL: ${VISION_MODEL:-qwen2.5-vl:3b-4bit}
+      VISION_MLX_ENABLED: ${VISION_MLX_ENABLED:-true}
+      QWEN_VL_MLX_URL: ${QWEN_VL_MLX_URL:-http://host.docker.internal:8082}
+      QWEN_VL_MODEL: ${QWEN_VL_MODEL:-qwen2.5-vl:3b-4bit}
+      QWEN_VL_SERVER_MODEL: ${QWEN_VL_SERVER_MODEL:-models/qwen2.5-vl-3b-4bit}
+      QWEN_VL_TIMEOUT_MS: ${QWEN_VL_TIMEOUT_MS:-60000}
       AI_SERVICE_URL: http://ai-service:5001
       DEFAULT_ORGANIZATION_ID: ${DEFAULT_ORGANIZATION_ID:-0bd5dba2-05e1-4f5c-9047-25843d338622}
       DEFAULT_ORGANIZATION_NAME: ${DEFAULT_ORGANIZATION_NAME:-Demo Organization}
@@ -205,8 +205,6 @@ volumes:
     name: postgres_data
   qdrant_storage:
     name: qdrant_storage
-  ollama_data:
-    name: ollama_data
   uploads_data:
     name: uploads_data
   reports_data:

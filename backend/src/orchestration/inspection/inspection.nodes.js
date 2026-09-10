@@ -41,9 +41,10 @@ import * as defaultAdapters from "./inspection.adapters.js";
 import { INSUFFICIENT_EVIDENCE_RESULT } from "../../../../ai-service/risk/risk.schema.js";
 import { executeCalculator } from "../../services/agentTools/calculator.tool.js";
 import { getReportStoragePath } from "../../utils/storage.js";
+import { checkKnowledgeBaseSopGate } from "../../services/sop-gate.service.js";
 import fs from "fs";
 
-const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", null]);
+const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL", null]);
 
 /**
  * Validates PR #13 finding contract.
@@ -209,7 +210,7 @@ export function validateRiskStructure(riskAssessment, recommendation) {
     if (!ALLOWED_RISK_LEVELS.has(level)) {
         return {
             isValid: false,
-            error: `Invalid risk level: '${riskAssessment.level}'. Allowed levels: LOW, MEDIUM, HIGH, null`,
+            error: `Invalid risk level: '${riskAssessment.level}'. Allowed levels: LOW, MEDIUM, HIGH, CRITICAL, null`,
         };
     }
 
@@ -273,7 +274,7 @@ export function routeSopEvidence(state) {
         return "insufficient_evidence";
     }
 
-    if (state.sopEvidenceStatus === "EVIDENCE_FOUND") {
+    if (state.sopEvidenceStatus === "EVIDENCE_FOUND" && Array.isArray(state.findings) && state.findings.length > 0) {
         return "assess_risk";
     }
 
@@ -537,6 +538,21 @@ export function createInspectionNodes(customAdapters = {}) {
                 return { currentNode: "retrieve_sop", executionOrder };
             }
 
+            // Authoritative Gate: Check PostgreSQL for active approved SOP documents first
+            if (state.organizationId) {
+                const gate = await checkKnowledgeBaseSopGate(state.organizationId);
+                if (!gate.evidenceAvailable) {
+                    console.log(`[KB_GATE] retrieveSopNode skipped: organizationId=${state.organizationId} approvedSopCount=0`);
+                    return {
+                        sopEvidence: [],
+                        findings: (state.findings || []).map((f) => ({ ...f, sopEvidence: [], validated: false })),
+                        sopEvidenceStatus: "NO_EVIDENCE",
+                        currentNode: "retrieve_sop",
+                        executionOrder,
+                    };
+                }
+            }
+
             const sopOptions = {
                 organizationId: state.organizationId,
                 ...state.metadata?.riskOptions,
@@ -618,31 +634,92 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 7: Check SOP Evidence (Phase 4 & 6)
-     * Verifies whether authoritative SOP chunks were retrieved.
+     * Node 7: Check SOP Evidence (Phase 6: Deterministic Knowledge Base Evidence Gate)
+     * Enforces that candidate observations cannot become findings without valid Knowledge Base evidence.
+     * Evaluates each candidate independently:
+     * - Only candidates with valid KB evidence become validated findings.
+     * - Unsupported candidates are dropped.
+     * - If 0 candidates have valid KB evidence, terminates with NO_EVIDENCE.
      */
     async function checkSopEvidenceNode(state) {
         const executionOrder = ["check_sop_evidence"];
         try {
-            // Clean inspections (0 findings) proceed to assess_risk for routine recommendation
-            if (Array.isArray(state.findings) && state.findings.length === 0) {
+            if (state.status === "failed") {
                 return {
-                    sopEvidenceStatus: "EVIDENCE_FOUND",
+                    sopEvidenceStatus: "NO_EVIDENCE",
+                    findings: [],
+                    sopEvidence: [],
                     currentNode: "check_sop_evidence",
                     executionOrder,
                 };
             }
 
-            const hasEvidence = Array.isArray(state.sopEvidence) && state.sopEvidence.length > 0;
+            if (!Array.isArray(state.findings) || state.findings.length === 0) {
+                return {
+                    sopEvidenceStatus: "NO_EVIDENCE",
+                    findings: [],
+                    sopEvidence: [],
+                    currentNode: "check_sop_evidence",
+                    executionOrder,
+                };
+            }
+
+            const validatedFindings = [];
+            const allValidatedSopEvidence = [];
+            const seenKeys = new Set();
+
+            for (const rawFinding of state.findings) {
+                const finding = { ...rawFinding };
+                const rawChunks = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
+
+                // Filter chunks using deterministic evidence validator
+                const validChunks = rawChunks.filter((chunk) =>
+                    adapters.validateSopEvidenceChunk
+                        ? adapters.validateSopEvidenceChunk(chunk, finding, state.organizationId, state.documentId)
+                        : (chunk && chunk.score >= 0.50 && chunk.documentType === "sop")
+                );
+
+                if (validChunks.length > 0) {
+                    finding.validated = true;
+                    finding.sopEvidence = validChunks;
+                    validatedFindings.push(finding);
+
+                    for (const chunk of validChunks) {
+                        const key = `${chunk.documentId}:${chunk.page}:${chunk.chunkIndex}`;
+                        if (!seenKeys.has(key)) {
+                            seenKeys.add(key);
+                            allValidatedSopEvidence.push(chunk);
+                        }
+                    }
+                } else {
+                    finding.validated = false;
+                    finding.sopEvidence = [];
+                    // Unsupported candidate observation is discarded and NEVER presented as a finding
+                }
+            }
+
+            if (validatedFindings.length === 0) {
+                return {
+                    sopEvidenceStatus: "NO_EVIDENCE",
+                    findings: [],
+                    sopEvidence: [],
+                    currentNode: "check_sop_evidence",
+                    executionOrder,
+                };
+            }
 
             return {
-                sopEvidenceStatus: hasEvidence ? "EVIDENCE_FOUND" : "NO_EVIDENCE",
+                sopEvidenceStatus: "EVIDENCE_FOUND",
+                findings: validatedFindings,
+                sopEvidence: allValidatedSopEvidence,
                 currentNode: "check_sop_evidence",
                 executionOrder,
             };
         } catch (err) {
             return {
                 sopEvidenceStatus: "NO_EVIDENCE",
+                findings: [],
+                sopEvidence: [],
                 currentNode: "check_sop_evidence",
                 executionOrder,
             };
@@ -650,41 +727,54 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 8: Insufficient Evidence Termination (Phase 4)
-     * Safe termination without LLM hallucination when no SOP evidence exists.
+     * Node 8: Insufficient Evidence Termination (Phase 6: Safe Stop)
+     * Returns a structured safe result without hallucinating findings, risks, or recommendations.
      */
     async function insufficientEvidenceNode(state) {
         const executionOrder = ["insufficient_evidence"];
 
-        const riskAssessment = {
-            ...INSUFFICIENT_EVIDENCE_RESULT.riskAssessment,
-            grounded: false,
-        };
-        const recommendation = INSUFFICIENT_EVIDENCE_RESULT.recommendation;
-
         return {
-            riskAssessment,
-            riskAssessments: [riskAssessment],
-            recommendation,
-            recommendations: [recommendation],
+            findings: [],
+            riskAssessment: null,
+            riskAssessments: [],
+            recommendation: null,
+            recommendations: [],
             citations: [],
+            sopEvidence: [],
             sopEvidenceStatus: "NO_EVIDENCE",
             workflowOutcome: "INSUFFICIENT_EVIDENCE",
             status: "completed",
-            failureReason: "No authoritative SOP evidence exists in the knowledge base matching findings.",
+            failureReason: "Analysis stopped because no sufficiently relevant Knowledge Base evidence was found.",
+            message: "Analysis stopped because no sufficiently relevant Knowledge Base evidence was found.",
             currentNode: "insufficient_evidence",
             executionOrder,
         };
     }
 
     /**
-     * Node 9: Assess Risk and Formulate Recommendations (Phase 6: Independent Per-Finding)
+     * Node 9: Assess Risk and Formulate Recommendations (Phase 6: Strictly Gated by Validated Findings)
+     * Risk assessment is allowed ONLY after at least one validated finding exists.
+     * Does NOT call the risk model if findings are empty.
      */
     async function assessRiskNode(state) {
         const executionOrder = ["assess_risk"];
         try {
             if (state.status === "failed") {
                 return { currentNode: "assess_risk", executionOrder };
+            }
+
+            // GATED STRICTLY: Risk assessment allowed ONLY if validated findings exist
+            if (!Array.isArray(state.findings) || state.findings.length === 0) {
+                return {
+                    findings: [],
+                    riskAssessment: null,
+                    riskAssessments: [],
+                    recommendation: null,
+                    recommendations: [],
+                    citations: [],
+                    currentNode: "assess_risk",
+                    executionOrder,
+                };
             }
 
             const riskAssessments = [];
@@ -697,61 +787,43 @@ export function createInspectionNodes(customAdapters = {}) {
                 ...state.metadata?.riskOptions,
             };
 
-            if (Array.isArray(state.findings) && state.findings.length > 0) {
-                // Bounded concurrency (limit 2) for independent finding risk evaluations
-                const maxConcurrency = Math.min(2, state.findings.length);
-                const assessedFindings = new Array(state.findings.length);
+            // Bounded concurrency (limit 2) for independent finding risk evaluations
+            const maxConcurrency = Math.min(2, state.findings.length);
+            const assessedFindings = new Array(state.findings.length);
 
-                let nextIndex = 0;
-                const workers = Array.from({ length: maxConcurrency }, async () => {
-                    while (nextIndex < state.findings.length) {
-                        const idx = nextIndex++;
-                        const rawFinding = state.findings[idx];
-                        const finding = { ...rawFinding };
-                        const findingEvidence = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
+            let nextIndex = 0;
+            const workers = Array.from({ length: maxConcurrency }, async () => {
+                while (nextIndex < state.findings.length) {
+                    const idx = nextIndex++;
+                    const rawFinding = state.findings[idx];
+                    const finding = { ...rawFinding };
+                    const findingEvidence = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
 
-                        let itemRiskAssessment = null;
-                        let itemRecommendation = null;
-                        let itemCitations = [];
+                    let itemRiskAssessment = null;
+                    let itemRecommendation = null;
+                    let itemCitations = [];
 
-                        if (findingEvidence.length > 0) {
-                            // Finding has authoritative SOP evidence -> run risk assessment using ONLY its evidence
-                            const findingRiskOptions = {
-                                ...baseRiskOptions,
-                                searchSop: async () => findingEvidence,
-                            };
-                            const riskResult = await adapters.runRiskAssessment(finding, findingRiskOptions);
+                    if (findingEvidence.length > 0) {
+                        // Finding has authoritative SOP evidence -> run risk assessment using ONLY its evidence
+                        const findingRiskOptions = {
+                            ...baseRiskOptions,
+                            searchSop: async () => findingEvidence,
+                        };
+                        const riskResult = await adapters.runRiskAssessment(finding, findingRiskOptions);
 
-                            if (riskResult.riskAssessment) {
-                                finding.riskAssessment = riskResult.riskAssessment;
-                                itemRiskAssessment = riskResult.riskAssessment;
-                            }
-                            if (riskResult.recommendation) {
-                                finding.recommendation = riskResult.recommendation;
-                                itemRecommendation = riskResult.recommendation;
-                            }
-                            if (Array.isArray(riskResult.citations)) {
-                                finding.citations = riskResult.citations;
-                                itemCitations = riskResult.citations;
-                            }
-                            finding.grounded = riskResult.grounded !== false;
-                        } else {
-                            // Unsupported finding (STEP 11 — Partial Failure Handling)
-                            const ungroundedRisk = {
-                                level: null,
-                                reason: `Insufficient SOP evidence is available to determine risk level for ${finding.finding}.`,
-                                grounded: false,
-                            };
-                            const ungroundedRec = "Insufficient SOP evidence is available to provide a validated recommendation.";
-
-                            finding.riskAssessment = ungroundedRisk;
-                            finding.recommendation = ungroundedRec;
-                            finding.citations = [];
-                            finding.grounded = false;
-
-                            itemRiskAssessment = ungroundedRisk;
-                            itemRecommendation = ungroundedRec;
+                        if (riskResult.riskAssessment) {
+                            finding.riskAssessment = riskResult.riskAssessment;
+                            itemRiskAssessment = riskResult.riskAssessment;
                         }
+                        if (riskResult.recommendation) {
+                            finding.recommendation = riskResult.recommendation;
+                            itemRecommendation = riskResult.recommendation;
+                        }
+                        if (Array.isArray(riskResult.citations)) {
+                            finding.citations = riskResult.citations;
+                            itemCitations = riskResult.citations;
+                        }
+                        finding.grounded = riskResult.grounded !== false;
 
                         assessedFindings[idx] = {
                             finding,
@@ -760,49 +832,54 @@ export function createInspectionNodes(customAdapters = {}) {
                             citations: itemCitations,
                         };
                     }
-                });
-
-                await Promise.all(workers);
-
-                for (const item of assessedFindings) {
-                    if (item) {
-                        updatedFindings.push(item.finding);
-                        if (item.riskAssessment) riskAssessments.push(item.riskAssessment);
-                        if (item.recommendation) recommendations.push(item.recommendation);
-                        if (item.citations && item.citations.length > 0) rawCitations.push(...item.citations);
-                    }
                 }
-            } else {
-                // Safe default when 0 findings detected
-                riskAssessments.push({
-                    level: null,
-                    reason: "No significant inspection findings were detected in the report.",
-                    grounded: false,
-                });
-                recommendations.push("Continue standard operating and inspection schedule.");
+            });
+
+            await Promise.all(workers);
+
+            for (const item of assessedFindings) {
+                if (item && item.finding) {
+                    updatedFindings.push(item.finding);
+                    if (item.riskAssessment) riskAssessments.push(item.riskAssessment);
+                    if (item.recommendation) recommendations.push(item.recommendation);
+                    if (item.citations && item.citations.length > 0) rawCitations.push(...item.citations);
+                }
+            }
+
+            if (updatedFindings.length === 0) {
+                return {
+                    findings: [],
+                    riskAssessment: null,
+                    riskAssessments: [],
+                    recommendation: null,
+                    recommendations: [],
+                    citations: [],
+                    currentNode: "assess_risk",
+                    executionOrder,
+                };
             }
 
             // Primary risk assessment prioritizes highest risk level
             const primaryRisk =
+                riskAssessments.find((r) => r.level === "CRITICAL") ||
                 riskAssessments.find((r) => r.level === "HIGH") ||
                 riskAssessments.find((r) => r.level === "MEDIUM") ||
                 riskAssessments.find((r) => r.level === "LOW") ||
-                riskAssessments[0] || {
-                    level: null,
-                    reason: "No risk assessment available.",
-                    grounded: false,
-                };
+                riskAssessments[0] || null;
 
             const primaryRecommendation =
-                recommendations.filter(Boolean).join(" ") || "No specific recommendation generated.";
+                recommendations.filter(Boolean).join(" ") ||
+                (primaryRisk?.level === null
+                    ? "Insufficient SOP evidence is available to provide a validated recommendation."
+                    : (primaryRisk?.reason ? `Adhere to documented SOP guidelines: ${primaryRisk.reason}` : "Adhere to documented operating procedures."));
 
             const orderedRiskAssessments = [
                 primaryRisk,
                 ...riskAssessments.filter((r) => r !== primaryRisk),
-            ];
+            ].filter(Boolean);
 
             return {
-                findings: updatedFindings.length > 0 ? updatedFindings : state.findings,
+                findings: updatedFindings,
                 riskAssessment: primaryRisk,
                 riskAssessments: orderedRiskAssessments,
                 recommendation: primaryRecommendation,
@@ -855,6 +932,9 @@ export function createInspectionNodes(customAdapters = {}) {
             return {
                 riskValidation: { isValid: false, status: "INVALID", error: validation.error },
                 failureReason: validation.error,
+                workflowOutcome: "RISK_VALIDATION_FAILED",
+                riskAssessment: null,
+                recommendation: null,
                 currentNode: "validate_risk",
                 executionOrder,
             };
@@ -862,6 +942,9 @@ export function createInspectionNodes(customAdapters = {}) {
             return {
                 riskValidation: { isValid: false, status: "INVALID", error: err.message },
                 failureReason: err.message,
+                workflowOutcome: "RISK_VALIDATION_FAILED",
+                riskAssessment: null,
+                recommendation: null,
                 currentNode: "validate_risk",
                 executionOrder,
             };
@@ -869,7 +952,7 @@ export function createInspectionNodes(customAdapters = {}) {
     }
 
     /**
-     * Node 11: Safe Failure Node (Phase 4)
+     * Node 11: Safe Failure Node (Phase 4 & 7)
      * Handles unrecoverable validation failures without process crashes.
      */
     async function safeFailureNode(state) {
@@ -884,7 +967,12 @@ export function createInspectionNodes(customAdapters = {}) {
 
         return {
             status: "failed",
-            workflowOutcome: "SAFE_FAILURE",
+            workflowOutcome: state.workflowOutcome || "SAFE_FAILURE",
+            riskAssessment: null,
+            riskAssessments: [],
+            recommendation: null,
+            recommendations: [],
+            report: null,
             failureReason,
             errors: [
                 {
@@ -981,20 +1069,40 @@ export function createInspectionNodes(customAdapters = {}) {
                 return { currentNode: "generate_report", executionOrder };
             }
 
-            // Phase 6 STEP 14: Report Validation before generation
+            // Phase 8: Strict Approval Note Preconditions
+            if (!Array.isArray(state.findings) || state.findings.length === 0) {
+                throw new Error("Cannot generate Approval Note DOCX without validated findings");
+            }
+
+            for (const f of state.findings) {
+                if (!f || (!f.validated && (!Array.isArray(f.sopEvidence) || f.sopEvidence.length === 0))) {
+                    throw new Error("Cannot generate Approval Note DOCX: finding lacks supporting Knowledge Base evidence");
+                }
+            }
+
+            if (!state.riskAssessment || typeof state.riskAssessment !== "object" || !state.riskAssessment.reason) {
+                throw new Error("Cannot generate Approval Note DOCX without a validated risk assessment");
+            }
+
+            if (!state.recommendation || typeof state.recommendation !== "string" || !state.recommendation.trim()) {
+                throw new Error("Cannot generate Approval Note DOCX without a validated recommendation");
+            }
+
+            if (!Array.isArray(state.citations) || state.citations.length === 0) {
+                throw new Error("Cannot generate Approval Note DOCX without authoritative Knowledge Base citations");
+            }
+
+            // Phase 6 & 8: Organization verification
             if (state.organizationId && (typeof state.organizationId !== "string" || !state.organizationId.trim())) {
                 throw new Error("organizationId must be a valid non-empty string when provided");
             }
 
             const docxData = {
                 subject: `Inspection Report Analysis and Approval Recommendation — ${state.documentId || "Report"}`,
-                findings: state.findings || [],
-                riskAssessment: state.riskAssessment || {
-                    level: null,
-                    reason: "No risk assessment available.",
-                },
-                recommendation: state.recommendation || "No specific recommendation generated.",
-                citations: state.citations || [],
+                findings: state.findings,
+                riskAssessment: state.riskAssessment,
+                recommendation: state.recommendation,
+                citations: state.citations,
             };
 
             const reportOptions = {

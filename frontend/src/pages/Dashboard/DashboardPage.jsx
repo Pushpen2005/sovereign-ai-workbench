@@ -103,7 +103,7 @@ export function DashboardPage() {
             <span className={`w-2 h-2 rounded-full ${isLlmLocal !== false ? 'bg-emerald-400' : 'bg-amber-400'}`} />
             <div className="min-w-0">
               <p className="text-[10px] text-slate-400 font-medium truncate">Local LLM</p>
-              <p className="text-xs font-bold text-slate-200 truncate">{secStatus?.llm?.model || 'llama3.2:3b'}</p>
+              <p className="text-xs font-bold text-slate-200 truncate">{secStatus?.llm?.model || 'gemma-2-2b-it-4bit'}</p>
             </div>
           </div>
 
@@ -135,7 +135,7 @@ export function DashboardPage() {
             <span className="w-2 h-2 rounded-full bg-emerald-400" />
             <div className="min-w-0">
               <p className="text-[10px] text-slate-400 font-medium truncate">Local Vision</p>
-              <p className="text-xs font-bold text-slate-200 truncate">moondream:latest</p>
+              <p className="text-xs font-bold text-slate-200 truncate">qwen2.5-vl:3b-4bit</p>
             </div>
           </div>
 

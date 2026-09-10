@@ -17,9 +17,10 @@ import {
 } from "./organization.js";
 
 const { Pool } = pg;
-const isDocker = Boolean(process.env.DOCKER_CONTAINER || process.env.IS_DOCKER);
+import fs from "fs";
+const isDocker = Boolean(process.env.DOCKER_CONTAINER || process.env.IS_DOCKER || fs.existsSync("/.dockerenv"));
 const dbHost = (!isDocker && process.env.POSTGRES_HOST === "postgres") ? "127.0.0.1" : (process.env.POSTGRES_HOST || "localhost");
-const dbPort = (!isDocker && process.env.POSTGRES_HOST === "postgres") ? 5433 : parseInt(process.env.POSTGRES_PORT || "5433", 10);
+const dbPort = (!isDocker && process.env.POSTGRES_HOST === "postgres") ? 5433 : parseInt(process.env.POSTGRES_PORT || "5432", 10);
 
 const pool = new Pool({
   host: dbHost,

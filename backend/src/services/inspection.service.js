@@ -16,6 +16,8 @@ import {
     getReportStoragePath,
     validateFilename,
     UPLOADS_ROOT,
+    GENERATED_ROOT,
+    assertPathContained,
 } from "../utils/storage.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -161,7 +163,8 @@ export async function runFindingRiskAssessment(finding, options = {}) {
  * Generates an Approval Note DOCX from trusted findings and risk assessment.
  */
 export async function runApprovalNoteGeneration(data, options = {}) {
-    const defaultFilename = options.filename ? validateFilename(options.filename) : "Approval_Note.docx";
+    const rawFilename = options.filename ? path.basename(options.filename) : "Approval_Note.docx";
+    const defaultFilename = validateFilename(rawFilename);
     let defaultOutputPath;
 
     if (options.organizationId && typeof options.organizationId === "string" && options.organizationId.trim()) {
@@ -174,6 +177,7 @@ export async function runApprovalNoteGeneration(data, options = {}) {
     }
 
     const outputPath = options.outputPath || defaultOutputPath;
+    assertPathContained(outputPath, GENERATED_ROOT);
 
     const generatedPath = await generateApprovalNote(data, {
         ...options,
@@ -232,12 +236,19 @@ export async function runLegacyCompleteWorkflow(input, options = {}) {
             }
         }
     } else {
-        // Safe default if 0 findings extracted
-        riskAssessments.push({
-            level: null,
-            reason: "No significant inspection findings were detected in the report.",
-        });
-        recommendations.push("Continue standard operating and inspection schedule.");
+        return {
+            documentId,
+            filename: ingestionResult.filename,
+            chunksStored: ingestionResult.chunksStored,
+            findings: [],
+            riskAssessments: [],
+            recommendations: [],
+            citations: [],
+            approvalNote: {
+                filename: null,
+                filePath: null,
+            },
+        };
     }
 
     // Deduplicate citations
@@ -248,6 +259,22 @@ export async function runLegacyCompleteWorkflow(input, options = {}) {
         seenCitations.add(key);
         return true;
     });
+
+    if (uniqueCitations.length === 0) {
+        return {
+            documentId,
+            filename: ingestionResult.filename,
+            chunksStored: ingestionResult.chunksStored,
+            findings,
+            riskAssessments,
+            recommendations,
+            citations: [],
+            approvalNote: {
+                filename: null,
+                filePath: null,
+            },
+        };
+    }
 
     // Primary risk assessment & recommendation for Approval Note
     const primaryRisk = riskAssessments[0] || {

@@ -38,8 +38,7 @@ export function getSystemHealth() {
  * @returns {Promise<{
  *   registry: object,
  *   installedModels: Array<{name: string, size: number}>,
- *   diagnostic: object,
- *   ollamaUrl: string
+ *   diagnostic: object
  * }>}
  */
 export function getModelGovernanceStatus() {

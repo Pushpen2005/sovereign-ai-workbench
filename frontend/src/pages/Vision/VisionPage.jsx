@@ -190,7 +190,7 @@ export function VisionPage() {
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              Image bytes remain in-memory and route strictly to local Ollama. Zero cloud APIs used.
+              Image bytes remain in-memory and route strictly to local MLX. Zero cloud APIs used.
             </p>
           </div>
         </div>
@@ -200,10 +200,10 @@ export function VisionPage() {
             Task: <strong className="text-blue-400">Vision Analysis</strong>
           </span>
           <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            Model: <strong className="text-emerald-400">moondream:latest</strong>
+            Model: <strong className="text-emerald-400">qwen2.5-vl:3b-4bit</strong>
           </span>
           <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            Runtime: <strong className="text-emerald-400">Local Ollama</strong>
+            Runtime: <strong className="text-emerald-400">Local MLX</strong>
           </span>
         </div>
       </div>

@@ -7,7 +7,7 @@
  *   - Overall timeout limit (default: 60s)
  *   - Robust JSON action validation & single-attempt repair
  *   - No arbitrary tool execution (strict whitelist in toolRegistry)
- *   - Zero external cloud AI calls (100% on-premise local Ollama)
+ *   - Zero external cloud AI calls (100% on-premise local inference)
  *   - Zero hidden chain-of-thought exposed to the frontend
  */
 
@@ -244,12 +244,12 @@ export async function runLegacyAgentLoop({
     let stoppedReason = "completed";
 
     // 1. Determine local model via router
-    let model = "llama3.2:3b";
+    let model = "gemma-2-2b-it-4bit";
     try {
         const routing = await routeTask(cleanGoal);
         model = routing.selectedModel;
     } catch {
-        model = process.env.DEFAULT_MODEL || "llama3.2:3b";
+        model = process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
     }
 
     const stepHistory = [];

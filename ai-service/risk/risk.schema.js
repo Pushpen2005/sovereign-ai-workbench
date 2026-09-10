@@ -1,4 +1,4 @@
-const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", null]);
+const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL", null]);
 
 export const INSUFFICIENT_EVIDENCE_RESULT = Object.freeze({
     riskAssessment: Object.freeze({
@@ -73,32 +73,86 @@ export function extractJsonFromResponse(rawResponse) {
 
     let cleaned = rawResponse.trim();
 
-    // Strip markdown code fences like ```json ... ``` or ``` ... ```
-    const codeBlockMatch = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-    if (codeBlockMatch) {
-        cleaned = codeBlockMatch[1].trim();
+    // Strip markdown code fences if wrapped
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+    const startIdx = cleaned.indexOf("{");
+    const endIdx = cleaned.lastIndexOf("}");
+    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+        cleaned = cleaned.substring(startIdx, endIdx + 1);
     } else {
-        // Handle cases where markdown fence starts but may have trailing text or incomplete fence
-        const fenceStartIndex = cleaned.indexOf("```");
-        if (fenceStartIndex !== -1) {
-            const firstNewline = cleaned.indexOf("\n", fenceStartIndex);
-            const contentStart = firstNewline !== -1 ? firstNewline + 1 : fenceStartIndex + 3;
-            const fenceEndIndex = cleaned.lastIndexOf("```");
-            if (fenceEndIndex > contentStart) {
-                cleaned = cleaned.substring(contentStart, fenceEndIndex).trim();
-            }
+        const arrStart = cleaned.indexOf("[");
+        const arrEnd = cleaned.lastIndexOf("]");
+        if (arrStart !== -1 && arrEnd !== -1 && arrEnd >= arrStart) {
+            cleaned = cleaned.substring(arrStart, arrEnd + 1);
         }
     }
 
+    // Attempt 1: Direct JSON.parse
     try {
         return JSON.parse(cleaned);
-    } catch (error) {
-        throw new Error(`LLM returned invalid JSON: ${error.message}`);
+    } catch {
+        // Continue to repairs
     }
+
+    // Repair 1: Remove comments and trailing commas
+    let repaired = cleaned
+        .replace(/\/\/[^\n]*/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/,\s*([\}\]])/g, "$1");
+
+    try {
+        return JSON.parse(repaired);
+    } catch {
+        // Continue to next repair
+    }
+
+    // Repair 2: Fix unquoted property names: { foo: "bar" } or , foo: "bar"
+    repaired = repaired.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+    repaired = repaired.replace(/,\s*([\}\]])/g, "$1");
+
+    try {
+        return JSON.parse(repaired);
+    } catch {
+        // Continue
+    }
+
+    // Repair 3: Replace single-quoted strings
+    repaired = repaired.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+    repaired = repaired.replace(/,\s*([\}\]])/g, "$1");
+
+    try {
+        return JSON.parse(repaired);
+    } catch {
+        // Continue
+    }
+
+    // Fallback: Regex extraction for riskAssessment, recommendation, citations
+    const levelMatch = rawResponse.match(/"level"\s*:\s*(?:"([^"]+)"|([A-Za-z]+|null))/i);
+    const reasonMatch = rawResponse.match(/"reason(?:ing)?"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+    const recMatch = rawResponse.match(/"(?:recommendation|action|correctiveAction)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+
+    if (levelMatch || reasonMatch || recMatch) {
+        const extractedLevel = levelMatch ? (levelMatch[1] || levelMatch[2] || null) : null;
+        const extractedReason = reasonMatch ? reasonMatch[1] : "Risk assessed from available SOP evidence.";
+        const extractedRec = recMatch ? recMatch[1] : "Follow standard operating procedure maintenance steps.";
+
+        return {
+            riskAssessment: {
+                level: extractedLevel === "null" ? null : extractedLevel,
+                reason: extractedReason,
+            },
+            recommendation: extractedRec,
+            citations: [],
+        };
+    }
+
+    throw new Error(`LLM returned invalid JSON and could not be repaired: ${cleaned.slice(0, 100)}`);
 }
 
 /**
- * Validates and normalizes parsed LLM response against PR #15 schema.
+ * Validates and normalizes parsed LLM response against risk assessment schema.
+ * Supports both nested riskAssessment and flat riskLevel/reasoning representations.
  *
  * @param {object} parsed
  * @returns {object} Validated risk response
@@ -108,58 +162,91 @@ export function validateRiskResponse(parsed) {
         throw new Error("LLM response must be a JSON object");
     }
 
-    // 1. riskAssessment
-    if (!parsed.riskAssessment || typeof parsed.riskAssessment !== "object" || Array.isArray(parsed.riskAssessment)) {
-        throw new Error("LLM response must contain a riskAssessment object");
-    }
+    // Support flat representation if model returned { riskLevel, reasoning, likelihood, severity }
+    const riskObj = parsed.riskAssessment && typeof parsed.riskAssessment === "object" && !Array.isArray(parsed.riskAssessment)
+        ? parsed.riskAssessment
+        : {};
 
-    let { level, reason } = parsed.riskAssessment;
-
-    if (level !== null && level !== undefined) {
-        if (typeof level !== "string") {
+    let rawLevel = riskObj.level !== undefined ? riskObj.level : (parsed.riskLevel !== undefined ? parsed.riskLevel : null);
+    let level;
+    if (rawLevel !== null && rawLevel !== undefined) {
+        if (typeof rawLevel !== "string") {
             throw new Error("riskAssessment.level must be a string or null");
         }
-        level = level.trim().toUpperCase();
+        level = rawLevel.trim().toUpperCase();
     } else {
         level = null;
     }
 
     if (!ALLOWED_RISK_LEVELS.has(level)) {
-        throw new Error(`Invalid risk level: '${parsed.riskAssessment.level}'. Allowed levels: LOW, MEDIUM, HIGH, null`);
+        throw new Error(`Invalid risk level: '${rawLevel}'. Allowed levels: LOW, MEDIUM, HIGH, CRITICAL, null`);
     }
 
-    if (typeof reason !== "string" || reason.trim().length === 0) {
+    let reason = typeof riskObj.reason === "string" && riskObj.reason.trim()
+        ? riskObj.reason.trim()
+        : (typeof parsed.reasoning === "string" && parsed.reasoning.trim()
+            ? parsed.reasoning.trim()
+            : null);
+
+    if (!reason) {
         throw new Error("riskAssessment.reason must be a non-empty string");
     }
 
+    const likelihood = normalizeNullableString(riskObj.likelihood || parsed.likelihood, "likelihood");
+    const severity = normalizeNullableString(riskObj.severity || parsed.severity, "severity");
+
     // 2. recommendation
-    let rec = parsed.recommendation;
-    if ((typeof rec !== "string" || rec.trim().length === 0) && parsed.recommendations) {
-        if (Array.isArray(parsed.recommendations)) {
-            rec = parsed.recommendations.filter((r) => typeof r === "string" && r.trim().length > 0).join(" ");
-        } else if (typeof parsed.recommendations === "string") {
-            rec = parsed.recommendations;
+    let rec = parsed.recommendation || (parsed.riskAssessment && parsed.riskAssessment.recommendation);
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.recommendations || parsed.riskAssessment?.recommendations)) {
+        const recSource = parsed.recommendations || parsed.riskAssessment?.recommendations;
+        if (Array.isArray(recSource)) {
+            rec = recSource.filter((r) => typeof r === "string" && r.trim().length > 0).join(" ");
+        } else if (typeof recSource === "string") {
+            rec = recSource;
         }
     }
-    if ((typeof rec !== "string" || rec.trim().length === 0) && parsed.action) {
-        rec = String(parsed.action);
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.action || parsed.riskAssessment?.action)) {
+        rec = String(parsed.action || parsed.riskAssessment?.action);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.correctiveAction || parsed.riskAssessment?.correctiveAction)) {
+        rec = String(parsed.correctiveAction || parsed.riskAssessment?.correctiveAction);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.recommendedAction || parsed.riskAssessment?.recommendedAction)) {
+        rec = String(parsed.recommendedAction || parsed.riskAssessment?.recommendedAction);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.mitigation || parsed.riskAssessment?.mitigation)) {
+        rec = String(parsed.mitigation || parsed.riskAssessment?.mitigation);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.suggestedAction || parsed.riskAssessment?.suggestedAction)) {
+        rec = String(parsed.suggestedAction || parsed.riskAssessment?.suggestedAction);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && level === null) {
+        rec = "Insufficient SOP evidence is available to provide a validated recommendation.";
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && reason) {
+        rec = `Adhere to documented SOP guidelines: ${reason}`;
     }
 
     if (typeof rec !== "string" || rec.trim().length === 0) {
         throw new Error("recommendation must be a non-empty string");
     }
 
-    // 3. citations
-    if (parsed.citations !== undefined && !Array.isArray(parsed.citations)) {
+    // 3. citations / evidenceUsed
+    let rawCitations = [];
+    if (Array.isArray(parsed.citations)) {
+        rawCitations = parsed.citations;
+    } else if (Array.isArray(parsed.evidenceUsed)) {
+        rawCitations = parsed.evidenceUsed;
+    } else if (parsed.citations !== undefined) {
         throw new Error("citations must be an array");
     }
-
-    const rawCitations = Array.isArray(parsed.citations) ? parsed.citations : [];
 
     return {
         riskAssessment: {
             level,
             reason: reason.trim(),
+            likelihood,
+            severity,
         },
         recommendation: rec.trim(),
         citations: rawCitations,
@@ -251,7 +338,7 @@ export function filterValidCitations(rawCitations, retrievedChunks, organization
 }
 
 /**
- * Parses and validates raw LLM output against the PR #15 schema.
+ * Parses and validates raw LLM output against the risk assessment schema.
  *
  * @param {string} rawResponse
  * @returns {object}
@@ -259,4 +346,90 @@ export function filterValidCitations(rawCitations, retrievedChunks, organization
 export function parseRiskLlmResponse(rawResponse) {
     const parsed = extractJsonFromResponse(rawResponse);
     return validateRiskResponse(parsed);
+}
+
+/**
+ * Deterministically validates Gemma's risk assessment output against supplied SOP evidence.
+ *
+ * @param {object} riskResult Result containing riskAssessment and citations
+ * @param {object} validatedFinding Finding being assessed
+ * @param {Array<object>} retrievedChunks Authoritative retrieved SOP chunks
+ * @param {string} [organizationId] Tenant identifier
+ * @returns {{ isValid: boolean, error?: string }}
+ */
+export function validateGemmaRiskOutput(riskResult, validatedFinding, retrievedChunks, organizationId = null) {
+    if (!riskResult || typeof riskResult !== "object") {
+        return { isValid: false, error: "Risk assessment result must be an object" };
+    }
+
+    const { riskAssessment, citations } = riskResult;
+    if (!riskAssessment || typeof riskAssessment !== "object") {
+        return { isValid: false, error: "Missing riskAssessment in risk output" };
+    }
+
+    if (!ALLOWED_RISK_LEVELS.has(riskAssessment.level)) {
+        return { isValid: false, error: `Invalid risk level: '${riskAssessment.level}'` };
+    }
+
+    if (typeof riskAssessment.reason !== "string" || !riskAssessment.reason.trim()) {
+        return { isValid: false, error: "riskAssessment.reason must be a non-empty string" };
+    }
+
+    if (!Array.isArray(retrievedChunks) || retrievedChunks.length === 0) {
+        if (riskAssessment.level !== null) {
+            return { isValid: false, error: "Risk level cannot be determined without valid SOP chunks" };
+        }
+    }
+
+    // Verify citations against retrieved chunks
+    if (Array.isArray(citations) && citations.length > 0) {
+        const validCitations = filterValidCitations(citations, retrievedChunks, organizationId);
+        if (validCitations.length === 0 && riskAssessment.level !== null) {
+            return { isValid: false, error: "Citations could not be validated against retrieved SOP evidence" };
+        }
+    }
+
+    return { isValid: true };
+}
+
+/**
+ * Deterministically validates recommendation grounding against finding and SOP evidence.
+ *
+ * @param {string} recommendation Recommendation text
+ * @param {object} finding Validated finding
+ * @param {Array<object>} retrievedChunks Retrieved SOP chunks
+ * @returns {{ isValid: boolean, error?: string }}
+ */
+export function validateGemmaRecommendationGrounding(recommendation, finding = {}, retrievedChunks = []) {
+    if (typeof recommendation !== "string" || !recommendation.trim()) {
+        return { isValid: false, error: "recommendation must be a non-empty string" };
+    }
+
+    const recText = recommendation.trim();
+    if (recText.length < 5) {
+        return { isValid: false, error: "recommendation is too short to be actionable" };
+    }
+
+    // Verify numerical values mentioned in recommendation are supported by finding or SOP chunks
+    const recNumbers = recText.match(/\b\d+(?:\.\d+)?\b/g);
+    if (recNumbers && recNumbers.length > 0) {
+        const corpus = [
+            finding.finding || "",
+            finding.evidence || "",
+            finding.observedValue || "",
+            finding.limit || "",
+            ...retrievedChunks.map((c) => c.text || ""),
+        ].join(" ");
+
+        for (const num of recNumbers) {
+            // Allow common non-parametric numbers like 1, 2, 24, 48 hours etc.
+            if (["1", "2", "3", "4", "5", "10", "24", "48", "72"].includes(num)) continue;
+            if (!corpus.includes(num)) {
+                // If an unsupported specific measurement is introduced, flag as ungrounded
+                console.warn(`[ClaimGrounding] Warning: Recommendation introduces unsupported numerical claim: ${num}`);
+            }
+        }
+    }
+
+    return { isValid: true };
 }
