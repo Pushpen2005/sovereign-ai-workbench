@@ -227,7 +227,7 @@ export function CodingPage() {
 
           <div className="flex justify-between items-center">
             <span className="text-xs text-slate-400">
-              Routed to configured local coding model via Ollama
+              Routed to configured local coding model via MLX
             </span>
             <Button
               onClick={handleGenerate}
@@ -311,12 +311,12 @@ export function CodingPage() {
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Model</span>
                 <span className="font-mono font-bold text-slate-800">
-                  {generationMeta?.model || 'llama3.2:3b'}
+                  {generationMeta?.model || 'qwen2.5-coder:3b-4bit'}
                 </span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Runtime</span>
-                <span className="font-mono font-semibold text-emerald-700">Local Ollama</span>
+                <span className="font-mono font-semibold text-emerald-700">Local MLX</span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Sandbox</span>

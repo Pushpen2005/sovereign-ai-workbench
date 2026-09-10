@@ -541,7 +541,7 @@ export async function getInspectionRun(req, res, next) {
                 status: run?.status || (reportFilename ? "completed" : "running"),
                 stage: currentStage,
                 goal: run?.goal || null,
-                model: run?.model || "llama3.2:3b",
+                model: run?.model || process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit",
                 stoppedReason: run?.stopped_reason || null,
                 error: run?.error || null,
                 createdAt: run?.created_at || null,

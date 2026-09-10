@@ -3,7 +3,8 @@
  *
  * Centralized inference gateway orchestrating local model runtime adapters:
  *   - GemmaMlxAdapter (Native macOS MLX server via :8080)
- *   - OllamaAdapter (Local Ollama daemon via :11434)
+ *   - QwenCoderMlxAdapter (Native macOS MLX server via :8081)
+ *   - QwenVlMlxAdapter (Native macOS MLX server via :8082)
  *
  * INVARIANTS PRESERVED:
  *   - Identical external signature: generateAnswer(prompt, modelOrOptions, maybeOptions)
@@ -13,7 +14,6 @@
  */
 
 import { isModelAllowed } from "../router/modelRouter.js";
-import { OllamaAdapter } from "./adapters/ollama.adapter.js";
 import { GemmaMlxAdapter } from "./adapters/gemmaMlx.adapter.js";
 import { QwenCoderMlxAdapter } from "./adapters/qwenCoderMlx.adapter.js";
 import { QwenVlMlxAdapter } from "./adapters/qwenVlMlx.adapter.js";
@@ -32,13 +32,11 @@ export class LLMError extends Error {
 }
 
 // Instantiate singleton adapters
-const ollamaAdapter = new OllamaAdapter();
 const gemmaMlxAdapter = new GemmaMlxAdapter();
 const qwenCoderMlxAdapter = new QwenCoderMlxAdapter();
 const qwenVlMlxAdapter = new QwenVlMlxAdapter();
 
 const ADAPTERS = Object.freeze({
-    ollama: ollamaAdapter,
     mlx: gemmaMlxAdapter,
     gemma_mlx: gemmaMlxAdapter,
     qwen_coder_mlx: qwenCoderMlxAdapter,
@@ -69,11 +67,9 @@ export function resolveAdapter(modelName, options = {}) {
     if (norm.startsWith("qwen") || norm.includes("qwen2.5-coder") || norm.includes("coder-mlx")) {
         return qwenCoderMlxAdapter;
     }
-    if (norm.startsWith("gemma") || norm.includes("mlx")) {
-        return gemmaMlxAdapter;
-    }
 
-    return ollamaAdapter;
+    // Default: Gemma MLX adapter
+    return gemmaMlxAdapter;
 }
 
 /**
@@ -137,9 +133,8 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
 
     const defaultModel =
         process.env.DEFAULT_MODEL ||
-        process.env.OLLAMA_MODEL ||
         process.env.MLX_MODEL ||
-        "llama3.2:3b";
+        "gemma-2-2b-it-4bit";
 
     const selectedModel = normalized.model || defaultModel;
 
@@ -160,17 +155,6 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
             await localModelRuntimeManager.ensureRunning(selectedModel);
         } catch (startupErr) {
             console.warn(`[RUNTIME-MANAGER] ensureRunning failed for '${selectedModel}': ${startupErr.message}`);
-            const norm = String(selectedModel).toLowerCase();
-            if (norm.includes("vl") || norm.includes("vision")) {
-                const fallbackVision = process.env.VISION_MODEL || "moondream";
-                console.log(`[RUNTIME-MANAGER] Falling back to vision fallback: ${fallbackVision}`);
-                return await ollamaAdapter.generate(normalized.prompt, fallbackVision, options);
-            }
-            if (norm.includes("coder") || norm.includes("qwen")) {
-                const fallbackCoding = process.env.DEFAULT_MODEL || "llama3.2:3b";
-                console.log(`[RUNTIME-MANAGER] Falling back to coding fallback: ${fallbackCoding}`);
-                return await ollamaAdapter.generate(normalized.prompt, fallbackCoding, options);
-            }
             throw new LLMError(`Failed to start local model server for '${selectedModel}': ${startupErr.message}`, {
                 cause: startupErr,
                 code: "STARTUP_FAILED",
@@ -262,7 +246,7 @@ async function generateVisionAnswer(prompt, images, model, options = {}) {
  * @param {string[]} [models]
  * @returns {Promise<Array<{ model: string, success: boolean, durationMs: number, provider: string }>>}
  */
-async function warmLocalModels(models = ["llama3.2:3b", "gemma-2-2b-it-4bit"]) {
+async function warmLocalModels(models = ["gemma-2-2b-it-4bit"]) {
     const results = [];
 
     for (const model of models) {
@@ -288,23 +272,18 @@ async function warmLocalModels(models = ["llama3.2:3b", "gemma-2-2b-it-4bit"]) {
 }
 
 /**
- * Diagnostic helper to check health across all registered adapters.
+ * Diagnostic helper to check health across all registered MLX adapters.
  *
  * @returns {Promise<Record<string, { healthy: boolean, url: string }>>}
  */
 async function checkGatewayHealth() {
-    const [ollamaHealthy, mlxHealthy, qwenHealthy, qwenVlHealthy] = await Promise.all([
-        ollamaAdapter.checkHealth(),
+    const [mlxHealthy, qwenHealthy, qwenVlHealthy] = await Promise.all([
         gemmaMlxAdapter.checkHealth(),
         qwenCoderMlxAdapter.checkHealth(),
         qwenVlMlxAdapter.checkHealth(),
     ]);
 
     return {
-        ollama: {
-            healthy: ollamaHealthy,
-            url: ollamaAdapter.getBaseUrl(),
-        },
         mlx: {
             healthy: mlxHealthy,
             url: gemmaMlxAdapter.getBaseUrl(),
@@ -326,7 +305,6 @@ export {
     warmLocalModels,
     checkGatewayHealth,
     ADAPTERS,
-    ollamaAdapter,
     gemmaMlxAdapter,
     qwenCoderMlxAdapter,
     qwenVlMlxAdapter,

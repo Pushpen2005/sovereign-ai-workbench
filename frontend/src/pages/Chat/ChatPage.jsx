@@ -96,9 +96,9 @@ function MessageRow({ message, documents, onPreviewSource }) {
                   : '⚡ General Task'}
               </span>
               <span>·</span>
-              <span className="font-medium text-slate-800">{message.selectedModel || 'llama3.2:3b'}</span>
+              <span className="font-medium text-slate-800">{message.selectedModel || 'gemma-2-2b-it-4bit'}</span>
               <span>·</span>
-              <span className="text-emerald-700 font-semibold">Local Ollama</span>
+              <span className="text-emerald-700 font-semibold">Local MLX</span>
             </div>
           )}
 
@@ -372,7 +372,7 @@ export function ChatPage() {
               {/* Model indicator */}
               <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-[10px] font-mono text-slate-600 border border-slate-200">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                llama3.2:3b · Local
+                gemma-2-2b-it-4bit · Local
               </span>
             </div>
 

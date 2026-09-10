@@ -37,7 +37,7 @@ function mergeReducer(current, update) {
  * - userId: User identifier (when authenticated)
  * - organizationId: Multi-tenant tenant identifier
  * - goal: User inquiry or instruction
- * - model: Selected local Ollama model (e.g. llama3.2:3b)
+ * - model: Selected local model (e.g. gemma-2-2b-it-4bit)
  * - currentStep: Current step index (1-based)
  * - maxSteps: Hard ceiling for total tool executions (default: 8)
  * - timeoutMs: Execution deadline in milliseconds (default: 60000)
@@ -78,7 +78,7 @@ export const AgentAgentState = Annotation.Root({
 
     model: Annotation({
         reducer: replaceReducer,
-        default: () => "llama3.2:3b",
+        default: () => process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit",
     }),
 
     currentStep: Annotation({

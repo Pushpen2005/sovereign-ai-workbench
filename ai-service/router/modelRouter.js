@@ -8,7 +8,7 @@
  *   - GENERAL_CHAT
  *   - INSPECTION
  *
- * Selects the appropriate local Ollama model from the verified local registry
+ * Selects the appropriate local MLX model from the verified local registry
  * and returns routing metadata including `local: true`.
  *
  * Enforces a strict server-side model allowlist to prevent unauthorized or
@@ -216,14 +216,14 @@ export function classifyTask(questionOrInput, options = {}) {
 
 /**
  * Read the model registry from environment variables.
- * All values fall back to DEFAULT_MODEL / OLLAMA_MODEL so the router remains fully operational.
+ * All values fall back to DEFAULT_MODEL so the router remains fully operational.
  */
 export function getModelRegistry() {
-    const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
+    const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
     const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
     const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
 
-    // Coding model: by default uses CODING_MODEL (llama3.2:3b), prepared for Qwen Coder MLX in Phase 3
+    // Coding model: Qwen Coder MLX (host-native :8081)
     const codingMlxEnabled = (process.env.CODING_MLX_ENABLED || "false").toLowerCase() === "true" ||
                              (process.env.CODING_MODEL_PROVIDER || "").toLowerCase() === "mlx";
     const qwenCoderModel   = process.env.QWEN_CODER_MODEL || "qwen2.5-coder:3b-4bit";
@@ -231,13 +231,13 @@ export function getModelRegistry() {
         ? qwenCoderModel
         : (process.env.CODING_MODEL || process.env.MODEL_CODING || defaultModel);
 
-    // Vision model: by default uses VISION_MODEL (moondream), prepared for Qwen VL MLX in Phase 4
+    // Vision model: Qwen VL MLX (host-native :8082)
     const visionMlxEnabled = (process.env.VISION_MLX_ENABLED || "false").toLowerCase() === "true" ||
                              (process.env.VISION_MODEL_PROVIDER || "").toLowerCase() === "mlx";
     const qwenVlModel      = process.env.QWEN_VL_MODEL || "qwen2.5-vl:3b-4bit";
     const visionModel      = visionMlxEnabled
         ? qwenVlModel
-        : (process.env.VISION_MODEL || process.env.MODEL_VISION || "moondream");
+        : (process.env.VISION_MODEL || process.env.MODEL_VISION || "qwen2.5-vl:3b-4bit");
 
     const codingFallbackEnabled =
         (process.env.CODING_MODEL_FALLBACK || "true").toLowerCase() !== "false";
@@ -276,10 +276,6 @@ export function getAllowedModels() {
         registry[TASK_TYPE.VISION],
         registry[TASK_TYPE.GENERAL_CHAT],
         registry[TASK_TYPE.INSPECTION],
-        "llama3.2:3b",
-        "llama3.2",
-        "moondream",
-        "moondream:latest",
         "gemma-2-2b-it-4bit",
         "gemma-2-2b-it",
         "gemma-2-2b",
@@ -302,6 +298,10 @@ export function getAllowedModels() {
     }
 
     return allowed;
+}
+
+export async function getAvailableModels() {
+    return Array.from(getAllowedModels());
 }
 
 /**
@@ -327,54 +327,6 @@ export function isModelAllowed(modelName) {
 }
 
 // ─── Availability Check ───────────────────────────────────────────────────────
-
-async function fetchOllamaTags(ollamaUrl) {
-    let res;
-    try {
-        res = await fetch(`${ollamaUrl}/api/tags`, {
-            signal: AbortSignal.timeout(3000),
-        });
-    } catch (err) {
-        if (ollamaUrl.includes("host.docker.internal")) {
-            const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
-            res = await fetch(`${fallbackUrl}/api/tags`, {
-                signal: AbortSignal.timeout(3000),
-            });
-        } else {
-            throw err;
-        }
-    }
-    return res;
-}
-
-let cachedModelsData = null;
-let modelsCacheTimestamp = 0;
-const MODELS_CACHE_TTL_MS = 15000; // 15 seconds cache
-
-export function clearModelCache() {
-    cachedModelsData = null;
-    modelsCacheTimestamp = 0;
-}
-
-async function getCachedOllamaModels(forceRefresh = false) {
-    const now = Date.now();
-    if (!forceRefresh && cachedModelsData && (now - modelsCacheTimestamp < MODELS_CACHE_TTL_MS)) {
-        return cachedModelsData;
-    }
-
-    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
-    try {
-        const res = await fetchOllamaTags(ollamaUrl);
-        if (!res.ok) return cachedModelsData || [];
-        const data = await res.json();
-        const models = Array.isArray(data.models) ? data.models : [];
-        cachedModelsData = models;
-        modelsCacheTimestamp = now;
-        return models;
-    } catch {
-        return cachedModelsData || [];
-    }
-}
 
 export async function checkModelAvailability(modelName) {
     if (!modelName || typeof modelName !== "string") return false;
@@ -422,66 +374,27 @@ export async function checkModelAvailability(modelName) {
         }
     }
 
-    // Check MLX runtime for Gemma models (Port :8080)
-    if (lower.startsWith("gemma") || lower.includes("mlx")) {
-        const mlxUrl = process.env.MLX_URL || "http://127.0.0.1:8080";
-        try {
-            let res;
-            try {
-                res = await fetch(`${mlxUrl}/health`, { signal: AbortSignal.timeout(2000) });
-            } catch {
-                if (mlxUrl.includes("host.docker.internal")) {
-                    res = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(2000) });
-                }
-            }
-            return Boolean(res && res.ok);
-        } catch {
-            return false;
-        }
-    }
-
+    // Check MLX runtime for Gemma models (Port :8080) — also the default fallback for unknown models
+    const mlxUrl = process.env.MLX_URL || "http://127.0.0.1:8080";
     try {
-        const models = await getCachedOllamaModels();
-        const installed = models.map((m) => m.name);
-
-        const base = modelName.split(":")[0];
-        const isFound = installed.some(
-            (m) => m === modelName || m.startsWith(base + ":")
-        );
-
-        if (!isFound) {
-            // Force one live refresh before failing closed in case model was just pulled
-            const refreshed = await getCachedOllamaModels(true);
-            const refInstalled = refreshed.map((m) => m.name);
-            return refInstalled.some(
-                (m) => m === modelName || m.startsWith(base + ":")
-            );
+        let res;
+        try {
+            res = await fetch(`${mlxUrl}/health`, { signal: AbortSignal.timeout(2000) });
+        } catch {
+            if (mlxUrl.includes("host.docker.internal")) {
+                res = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(2000) });
+            }
         }
-
-        return true;
+        return Boolean(res && res.ok);
     } catch {
         return false;
-    }
-}
-
-/**
- * Return the full list of locally installed Ollama model names.
- *
- * @returns {Promise<Array<{name: string, size: number}>>}
- */
-export async function getAvailableModels() {
-    try {
-        const models = await getCachedOllamaModels();
-        return models.map((m) => ({ name: m.name, size: m.size }));
-    } catch {
-        return [];
     }
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 /**
- * Classify a request and select the appropriate local Ollama model.
+ * Classify a request and select the appropriate local MLX model.
  *
  * Accepts either:
  * - `routeTask(questionString, options)`
@@ -571,37 +484,11 @@ export async function routeTask(requestOrInput, options = {}) {
         };
     }
 
-    // Model not installed ─────────────────────────────────────────────────────
+    // Model not available ──────────────────────────────────────────────────────
     if (taskType === TASK_TYPE.VISION) {
-        const isQwenVl = registryModel.toLowerCase().includes("vl") || registryModel.toLowerCase().includes("qwen");
-        const fallbackVisionModel = "moondream";
-        const visionFallbackEnabled = registry.visionFallbackEnabled !== false;
-
-        if (isQwenVl && visionFallbackEnabled && registryModel !== fallbackVisionModel) {
-            const fallbackAvailable = await checkModelAvailability(fallbackVisionModel);
-            if (fallbackAvailable) {
-                const latencyMs = Date.now() - tStart;
-                const reason = `Vision model '${registryModel}' is unavailable. Falling back to '${fallbackVisionModel}'.`;
-                console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: fallbackVisionModel, latencyMs, isFallback: true, local: true })}`);
-                return {
-                    taskType,
-                    canonicalTaskType: toCanonicalTaskType(taskType),
-                    model:         fallbackVisionModel,
-                    selectedModel: fallbackVisionModel,
-                    reason,
-                    routingReason: reason,
-                    local:         true,
-                    isFallback:    true,
-                    registryModel,
-                    latencyMs,
-                };
-            }
-        }
-
         console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "vision_model_unavailable", model: registryModel })}`);
         const err = new RouterError(
-            `Configured local vision model '${registryModel}' is not available in Ollama. ` +
-            `Run: ollama pull ${registryModel}`
+            `Configured local vision model '${registryModel}' is not available. Ensure the MLX vision server is running on port 8082.`
         );
         err.code = "MODEL_UNAVAILABLE";
         err.taskType = taskType;
@@ -612,8 +499,7 @@ export async function routeTask(requestOrInput, options = {}) {
     if (registryModel === defaultModel) {
         console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "default_model_unavailable", model: registryModel })}`);
         const err = new RouterError(
-            `Configured local model '${registryModel}' is not available in Ollama. ` +
-            `Run: ollama pull ${registryModel}`
+            `Configured local model '${registryModel}' is not available. Ensure the MLX server is running on port 8080.`
         );
         err.code = "MODEL_UNAVAILABLE";
         err.taskType = taskType;
@@ -630,7 +516,7 @@ export async function routeTask(requestOrInput, options = {}) {
             const err = new RouterError(
                 `Configured coding model '${registryModel}' is unavailable and ` +
                 `fallback model '${defaultModel}' is also unavailable. ` +
-                `Run: ollama pull ${defaultModel}`
+                `Ensure the MLX servers are running on ports 8080 and 8081.`
             );
             err.code = "MODEL_UNAVAILABLE";
             err.taskType = taskType;
@@ -639,7 +525,7 @@ export async function routeTask(requestOrInput, options = {}) {
         }
 
         const latencyMs = Date.now() - tStart;
-        const reason = `Coding model '${registryModel}' is not installed. Falling back to '${defaultModel}'.`;
+        const reason = `Coding model '${registryModel}' is not available. Falling back to '${defaultModel}'.`;
         console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: defaultModel, latencyMs, isFallback: true, local: true })}`);
         return {
             taskType,
@@ -658,8 +544,8 @@ export async function routeTask(requestOrInput, options = {}) {
     // No fallback configured — return a structured RouterError
     console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "model_unavailable", model: registryModel })}`);
     const err = new RouterError(
-        `Configured local model '${registryModel}' is not available in Ollama. ` +
-        `Run: ollama pull ${registryModel}  (or set CODING_MODEL_FALLBACK=true)`
+        `Configured local model '${registryModel}' is not available. ` +
+        `Ensure the MLX server is running and CODING_MODEL_FALLBACK is set.`
     );
     err.code = "MODEL_UNAVAILABLE";
     err.taskType = taskType;
@@ -700,61 +586,62 @@ export class RouterError extends Error {
  */
 export async function getRouterDiagnostic() {
     const registry = getModelRegistry();
-    const installed = await getAvailableModels();
-    const installedNames = new Set(installed.map((m) => m.name));
 
-    const isInstalled = (target) => {
-        if (!target) return false;
-        const base = target.split(":")[0];
-        for (const name of installedNames) {
-            if (name === target || name.startsWith(base + ":")) return true;
-        }
-        return false;
-    };
+    // Check availability for each model via MLX health endpoints
+    const [gemmaOk, qwenCoderOk, qwenVlOk] = await Promise.all([
+        checkModelAvailability(registry[TASK_TYPE.DOCUMENT_ANALYSIS]),
+        checkModelAvailability(registry[TASK_TYPE.CODING]),
+        checkModelAvailability(registry[TASK_TYPE.VISION]),
+    ]);
 
     const models = [
         {
             taskType:  TASK_TYPE.DOCUMENT_ANALYSIS,
             model:     registry[TASK_TYPE.DOCUMENT_ANALYSIS],
-            available: isInstalled(registry[TASK_TYPE.DOCUMENT_ANALYSIS]),
+            available: gemmaOk,
             purpose:   "Industrial document & SOP RAG analysis",
             local:     true,
+            runtime:   "MLX :8080",
         },
         {
             taskType:  TASK_TYPE.INSPECTION,
             model:     registry[TASK_TYPE.INSPECTION],
-            available: isInstalled(registry[TASK_TYPE.INSPECTION]),
+            available: gemmaOk,
             purpose:   "Industrial inspection finding extraction & approval workflow",
             local:     true,
+            runtime:   "MLX :8080",
         },
         {
             taskType:  TASK_TYPE.CODING,
             model:     registry[TASK_TYPE.CODING],
-            available: isInstalled(registry[TASK_TYPE.CODING]),
+            available: qwenCoderOk,
             purpose:   "Isolated sandbox Python code generation",
             local:     true,
+            runtime:   "MLX :8081",
         },
         {
             taskType:  TASK_TYPE.VISION,
             model:     registry[TASK_TYPE.VISION],
-            available: isInstalled(registry[TASK_TYPE.VISION]),
+            available: qwenVlOk,
             purpose:   "Local multimodal visual inspection & gauge reading",
             local:     true,
+            runtime:   "MLX :8082",
         },
         {
             taskType:  TASK_TYPE.GENERAL_CHAT,
             model:     registry[TASK_TYPE.GENERAL_CHAT],
-            available: isInstalled(registry[TASK_TYPE.GENERAL_CHAT]),
+            available: gemmaOk,
             purpose:   "General conversation & explanations",
             local:     true,
+            runtime:   "MLX :8080",
         },
     ];
 
     return {
         models,
-        installedCount: installed.length,
+        registry,
         zeroCloudDependencies: true,
         externalApiKeysCount: 0,
-        localOllamaExecution: true,
+        localMlxExecution: true,
     };
 }

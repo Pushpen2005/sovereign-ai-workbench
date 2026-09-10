@@ -1,7 +1,7 @@
 /**
  * Dedicated Local Vision Service
  *
- * Implements 100% on-premise local multimodal AI inference using Ollama.
+ * Implements 100% on-premise local multimodal AI inference using MLX.
  * Supported image types: image/jpeg, image/png, image/webp.
  * External cloud vision APIs: 0.
  */
@@ -245,7 +245,7 @@ export async function analyzeImage({
     // 3. Resolve local vision model
     const routing = await resolveVisionModel(model);
 
-    // 4. Prepare base64 image string for Ollama
+    // 4. Prepare base64 image string for MLX vision model
     const base64Image = imageBuffer.toString("base64");
 
     const tStart = Date.now();

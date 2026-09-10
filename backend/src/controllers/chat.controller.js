@@ -17,7 +17,7 @@ import { telemetryService } from "../services/telemetry.service.js";
  *
  * PR #23 — Model Router integrated.
  * Classifies the question (DOCUMENT / CODING / GENERAL), selects the
- * appropriate local Ollama model, executes RAG with that model, and
+ * appropriate local MLX model, executes RAG with that model, and
  * returns routing metadata alongside the existing answer/sources.
  */
 export async function askQuestion(req, res, next) {

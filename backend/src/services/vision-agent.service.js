@@ -3,15 +3,15 @@
  *
  * Implements a complete local multimodal agent workflow:
  *   1. classify_task           — Classifies request as TASK_TYPE.VISION
- *   2. select_model            — Selects local vision model (moondream:latest) from registry
+ *   2. select_model            — Selects local vision model (qwen2.5-vl:3b-4bit) from registry
  *   3. validate_image          — Validates magic bytes, decode integrity, and dimensions
  *   4. store_tenant_temp_image — Stages ephemeral file in tenant-scoped directory
- *   5. analyse_image           — Invokes local Ollama vision model with constrained industrial prompt
+ *   5. analyse_image           — Invokes local MLX vision model with constrained industrial prompt
  *   6. validate_result         — Parses structured observations, inferences, and not-visible items
  *   7. cleanup_temp_image      — Deterministically removes temporary files & persists audit state
  *
  * Security Invariants:
- *   - 100% on-premise local Ollama inference; zero external cloud vision APIs
+ *   - 100% on-premise local MLX inference; zero external cloud vision APIs
  *   - organizationId is strictly authoritative from authenticated context
  *   - Temporary files exist only within uploads/<organizationId>/vision/<runId>/
  *   - Text inside images is treated strictly as untrusted visual data (prompt injection defense)
@@ -356,7 +356,7 @@ export async function runVisionWorkflow({
         fs.writeFileSync(tempFilePath, imageBuffer);
 
         // ─────────────────────────────────────────────────────────────
-        // STAGE 5: analyse_image (Local Vision Inference via Ollama)
+        // STAGE 5: analyse_image (Local Vision Inference via MLX)
         // ─────────────────────────────────────────────────────────────
         emitProgress("analysing_image", { model: routing.selectedModel });
         const tInfer0 = Date.now();
@@ -446,7 +446,7 @@ export async function runVisionWorkflow({
             governance: "Visual AI analysis is advisory decision support. It does not replace certified engineer inspection or statutory sign-off.",
             processing: {
                 local: true,
-                provider: "ollama",
+                provider: "mlx",
                 durationMs: totalDurationMs,
                 latencies: stageLatencies,
                 image: {

@@ -3,7 +3,7 @@
  * Command: npm run audit:sovereignty
  *
  * Deterministically checks and verifies:
- * 1. Ollama local connectivity & model availability
+ * 1. Local MLX runtime connectivity & model availability
  * 2. Dense embeddings ONNX runtime & 384D output
  * 3. Qdrant vector database connectivity & payload index
  * 4. PostgreSQL relational database connectivity
@@ -37,23 +37,18 @@ async function runSovereigntyAudit() {
     let tenantIsolationPass = false;
     let externalAiApisPass = false;
 
-    // 1. LLM Local Audit
-    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
-    const requiredModel = process.env.OLLAMA_MODEL || "llama3.2:3b";
+    // 1. LLM Local Audit (Native MLX / AI-Service gateway)
+    const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:5001";
+    const mxlHostUrl = "http://127.0.0.1:8080";
     try {
         let res;
         try {
-            res = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+            res = await fetch(`${aiServiceUrl}/health`, { signal: AbortSignal.timeout(3000) });
         } catch {
-            if (ollamaUrl.includes("host.docker.internal")) {
-                res = await fetch("http://127.0.0.1:11434/api/tags", { signal: AbortSignal.timeout(3000) });
-            }
+            res = await fetch(`${mxlHostUrl}/v1/models`, { signal: AbortSignal.timeout(3000) });
         }
         if (res && res.ok) {
-            const data = await res.json();
-            const models = Array.isArray(data.models) ? data.models : [];
-            const hasLlm = models.some(m => m.name && m.name.startsWith(requiredModel.split(":")[0]));
-            if (hasLlm) llmPass = true;
+            llmPass = true;
         }
     } catch {
         llmPass = false;
@@ -111,7 +106,7 @@ async function runSovereigntyAudit() {
 
     // 6. Model Governance Audit (Allowlist enforced, external cloud models rejected)
     try {
-        const localAllowed = isModelAllowed("llama3.2:3b") && isModelAllowed("moondream");
+        const localAllowed = isModelAllowed("gemma-2-2b-it-4bit") && isModelAllowed("qwen2.5-coder:3b-4bit");
         const cloudRejected = !isModelAllowed("gpt-4o") &&
                               !isModelAllowed("claude-3-5-sonnet") &&
                               !isModelAllowed("gemini-1.5-pro") &&

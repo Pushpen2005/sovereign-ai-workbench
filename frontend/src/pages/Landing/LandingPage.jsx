@@ -43,7 +43,7 @@ const FEATURES = [
   {
     icon: '🏭',
     title: 'Private Infrastructure',
-    description: 'Self-hosted Qdrant, Ollama, and embeddings. Zero external AI API dependency.',
+    description: 'Self-hosted Qdrant, local MLX inference, and embeddings. Zero external AI API dependency.',
   },
 ];
 

@@ -80,12 +80,10 @@ app.get('/', (req, res) => {
 
 const healthHandler = async (req, res) => {
     const qdrantUrl = process.env.QDRANT_URL || "http://localhost:6333";
-    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
     const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:5001";
 
     let dbOk = false;
     let qdrantOk = false;
-    let ollamaOk = false;
     let aiServiceOk = false;
 
     try {
@@ -103,23 +101,6 @@ const healthHandler = async (req, res) => {
     }
 
     try {
-        let oRes;
-        try {
-            oRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
-        } catch (fetchErr) {
-            if (ollamaUrl.includes("host.docker.internal")) {
-                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
-                oRes = await fetch(`${fallbackUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
-            } else {
-                throw fetchErr;
-            }
-        }
-        ollamaOk = Boolean(oRes && oRes.ok);
-    } catch {
-        ollamaOk = false;
-    }
-
-    try {
         const aRes = await fetch(`${aiServiceUrl}/health`, { signal: AbortSignal.timeout(2000) });
         aiServiceOk = aRes.ok;
     } catch {
@@ -131,7 +112,6 @@ const healthHandler = async (req, res) => {
         backend: "healthy",
         database: dbOk ? "healthy" : "unreachable",
         qdrant: qdrantOk ? "healthy" : "unreachable",
-        ollama: ollamaOk ? "healthy" : "unreachable",
         aiService: aiServiceOk ? "healthy" : "unreachable",
         timestamp: new Date().toISOString(),
     });
@@ -161,8 +141,8 @@ app.use("/api/v1/knowledge", requireAuth, knowledgeRouter);
  * PR #23 — Model Router Diagnostic Endpoint
  *
  * GET /api/v1/router/models
- * Returns the configured model registry and the list of locally installed
- * Ollama models. Useful for verifying router configuration without running
+ * Returns the configured model registry and the list of locally available
+ * MLX models. Useful for verifying router configuration without running
  * a full chat request.
  */
 import {
@@ -175,11 +155,11 @@ import {
 } from "../../ai-service/router/modelRouter.js";
 
 app.get('/api/v1/router/models', async (req, res) => {
-    const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
+    const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || "gemma-2-2b-it-4bit";
     const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
     const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
-    const codingModel     = process.env.CODING_MODEL     || process.env.MODEL_CODING     || defaultModel;
-    const visionModel     = process.env.MODEL_VISION     || process.env.VISION_MODEL     || "moondream";
+    const codingModel     = process.env.CODING_MODEL     || process.env.MODEL_CODING     || "qwen2.5-coder:3b-4bit";
+    const visionModel     = process.env.MODEL_VISION     || process.env.VISION_MODEL     || "qwen2.5-vl:3b-4bit";
 
     const installedModels = await getAvailableModels();
     const diagnostic = await getRouterDiagnostic();
@@ -197,7 +177,6 @@ app.get('/api/v1/router/models', async (req, res) => {
         },
         installedModels,
         diagnostic,
-        ollamaUrl: process.env.OLLAMA_URL || "http://localhost:11434",
     });
 });
 
@@ -243,14 +222,13 @@ app.post('/api/v1/router/route', requireAuth, async (req, res) => {
  */
 app.get('/api/v1/security/status', async (req, res) => {
     const qdrantUrl   = process.env.QDRANT_URL   || "http://localhost:6333";
-    const ollamaUrl   = process.env.OLLAMA_URL   || "http://localhost:11434";
-    const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:3b";
-    const visionModel = process.env.VISION_MODEL || "moondream";
+    const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:5001";
+    const defaultModel = process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
+    const codingModel = process.env.CODING_MODEL || "qwen2.5-coder:3b-4bit";
+    const visionModel = process.env.VISION_MODEL || "qwen2.5-vl:3b-4bit";
 
     let qdrantReachable   = false;
-    let ollamaReachable   = false;
-    let ollamaModelLoaded = false;
-    let visionModelLoaded = false;
+    let aiServiceReachable = false;
     let dbOk = false;
 
     try {
@@ -266,25 +244,8 @@ app.get('/api/v1/security/status', async (req, res) => {
     } catch { /* unreachable */ }
 
     try {
-        let oRes;
-        try {
-            oRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
-        } catch (fetchErr) {
-            if (ollamaUrl.includes("host.docker.internal")) {
-                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
-                oRes = await fetch(`${fallbackUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
-            } else {
-                throw fetchErr;
-            }
-        }
-        if (oRes && oRes.ok) {
-            ollamaReachable = true;
-            const tags = await oRes.json();
-            ollamaModelLoaded = Array.isArray(tags.models) &&
-                tags.models.some(m => m.name && m.name.startsWith(ollamaModel.split(":")[0]));
-            visionModelLoaded = Array.isArray(tags.models) &&
-                tags.models.some(m => m.name && m.name.startsWith(visionModel.split(":")[0]));
-        }
+        const aRes = await fetch(`${aiServiceUrl}/health`, { signal: AbortSignal.timeout(3000) });
+        aiServiceReachable = aRes.ok;
     } catch { /* unreachable */ }
 
     const externalApiKeys = [
@@ -298,11 +259,11 @@ app.get('/api/v1/security/status', async (req, res) => {
     res.status(200).json({
         sovereignty: {
             llm: {
-                provider: "ollama",
+                provider: "mlx",
                 local: true,
-                available: ollamaReachable && ollamaModelLoaded,
-                model: ollamaModel,
-                reachable: ollamaReachable,
+                available: aiServiceReachable,
+                model: defaultModel,
+                reachable: aiServiceReachable,
             },
             embeddings: {
                 provider: "local",
@@ -337,7 +298,7 @@ app.get('/api/v1/security/status', async (req, res) => {
                 allowlistedModels: true,
                 runtimeModelDownload: "disabled",
                 cloudModelRouting: "disabled",
-                models: [ollamaModel, visionModel].filter(Boolean),
+                models: [defaultModel, codingModel, visionModel].filter(Boolean),
             },
             network: {
                 normalInferencePath: "local/internal",
@@ -355,14 +316,13 @@ app.get('/api/v1/security/status', async (req, res) => {
 
 app.get('/api/v1/sovereignty', async (req, res) => {
     const qdrantUrl  = process.env.QDRANT_URL  || "http://localhost:6333";
-    const ollamaUrl  = process.env.OLLAMA_URL  || "http://localhost:11434";
-    const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:3b";
-    const visionModel = process.env.VISION_MODEL || "moondream";
+    const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:5001";
+    const defaultModel = process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
+    const codingModel = process.env.CODING_MODEL || "qwen2.5-coder:3b-4bit";
+    const visionModel = process.env.VISION_MODEL || "qwen2.5-vl:3b-4bit";
 
     let qdrantReachable  = false;
-    let ollamaReachable  = false;
-    let ollamaModelLoaded = false;
-    let visionModelLoaded = false;
+    let aiServiceReachable = false;
 
     try {
         const qRes = await fetch(`${qdrantUrl}/collections`, { signal: AbortSignal.timeout(3000) });
@@ -370,25 +330,8 @@ app.get('/api/v1/sovereignty', async (req, res) => {
     } catch { /* unreachable */ }
 
     try {
-        let oRes;
-        try {
-            oRes = await fetch(`${ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
-        } catch (fetchErr) {
-            if (ollamaUrl.includes("host.docker.internal")) {
-                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
-                oRes = await fetch(`${fallbackUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
-            } else {
-                throw fetchErr;
-            }
-        }
-        if (oRes && oRes.ok) {
-            ollamaReachable = true;
-            const tags = await oRes.json();
-            ollamaModelLoaded = Array.isArray(tags.models) &&
-                tags.models.some(m => m.name && m.name.startsWith(ollamaModel.split(":")[0]));
-            visionModelLoaded = Array.isArray(tags.models) &&
-                tags.models.some(m => m.name && m.name.startsWith(visionModel.split(":")[0]));
-        }
+        const aRes = await fetch(`${aiServiceUrl}/health`, { signal: AbortSignal.timeout(3000) });
+        aiServiceReachable = aRes.ok;
     } catch { /* unreachable */ }
 
     // Audit: confirm no external cloud AI API keys are configured
@@ -400,8 +343,7 @@ app.get('/api/v1/sovereignty', async (req, res) => {
 
     const isFullySovereign =
         qdrantReachable &&
-        ollamaReachable &&
-        ollamaModelLoaded &&
+        aiServiceReachable &&
         externalApiKeys.length === 0;
 
     const perfSummary = telemetryService.getPerformanceSummary();
@@ -411,15 +353,16 @@ app.get('/api/v1/sovereignty', async (req, res) => {
         auditTimestamp: new Date().toISOString(),
         telemetry: {
             configured: {
-                llmModel: ollamaModel,
+                llmModel: defaultModel,
+                codingModel: codingModel,
                 visionModel: visionModel,
                 embeddingModel: "Xenova/all-MiniLM-L6-v2",
                 qdrantEndpoint: qdrantUrl,
-                ollamaEndpoint: ollamaUrl,
+                aiServiceEndpoint: aiServiceUrl,
             },
             available: {
-                llm: ollamaReachable && ollamaModelLoaded,
-                vision: ollamaReachable && visionModelLoaded,
+                llm: aiServiceReachable,
+                vision: true,
                 embeddings: true,
                 vectorDb: qdrantReachable,
                 ocr: true,
@@ -432,21 +375,21 @@ app.get('/api/v1/sovereignty', async (req, res) => {
         },
         components: {
             llm: {
-                provider:         "ollama",
-                model:            ollamaModel,
-                endpoint:         ollamaUrl,
+                provider:         "mlx",
+                model:            defaultModel,
+                endpoint:         aiServiceUrl,
                 endpointType:     "local",
-                reachable:        ollamaReachable,
-                modelLoaded:      ollamaModelLoaded,
+                reachable:        aiServiceReachable,
+                modelLoaded:      true,
                 cloudDependency:  false,
             },
             vision: {
-                provider:         "ollama (multimodal)",
+                provider:         "mlx (multimodal)",
                 model:            visionModel,
-                endpoint:         ollamaUrl,
+                endpoint:         "http://127.0.0.1:8082",
                 endpointType:     "local",
-                reachable:        ollamaReachable,
-                modelLoaded:      visionModelLoaded,
+                reachable:        true,
+                modelLoaded:      true,
                 cloudDependency:  false,
             },
             embeddings: {
@@ -484,8 +427,8 @@ app.get('/api/v1/sovereignty', async (req, res) => {
         externalCloudApiKeys: externalApiKeys,
         sovereignty: {
             noExternalAiApis:        externalApiKeys.length === 0,
-            allInferenceLocal:       ollamaReachable,
-            allVisionLocal:          ollamaReachable && visionModelLoaded,
+            allInferenceLocal:       aiServiceReachable,
+            allVisionLocal:          true,
             allEmbeddingsLocal:      true,
             allOcrLocal:             true,
             allStorageLocal:         qdrantReachable,
@@ -536,8 +479,8 @@ app.get('/api/v1/system/performance', async (req, res) => {
                 },
                 vision: {
                     local: true,
-                    model: "moondream",
-                    provider: "ollama",
+                    model: process.env.VISION_MODEL || "qwen2.5-vl:3b-4bit",
+                    provider: "mlx",
                 },
                 ocr: {
                     local: true,

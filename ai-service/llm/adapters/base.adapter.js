@@ -1,7 +1,7 @@
 /**
  * Base Model Provider Adapter
  *
- * Defines the standard contract for local inference runtime adapters (Ollama, MLX, etc.).
+ * Defines the standard contract for local inference runtime adapters (MLX, etc.).
  */
 
 export class BaseAdapter {

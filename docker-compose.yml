@@ -36,24 +36,6 @@ services:
     networks:
       - sovereign_net
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: sovereign-ai-ollama
-    restart: unless-stopped
-    ports:
-      - "${BIND_IP:-127.0.0.1}:${OLLAMA_HOST_PORT:-11435}:11434"
-    environment:
-      OLLAMA_KEEP_ALIVE: "24h"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD-SHELL", "ollama list || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-    networks:
-      - sovereign_net
-
   ai-service:
     build:
       context: .
@@ -65,24 +47,20 @@ services:
     environment:
       PORT: 5001
       QDRANT_URL: http://qdrant:6333
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.2:3b}
-      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-llama3.2:3b}
-      CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
-      CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
-      VISION_MODEL: ${VISION_MODEL:-moondream}
-      # Phase 4 — Qwen VL MLX Vision (host-native, NOT inside Docker)
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gemma-2-2b-it-4bit}
+      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-gemma-2-2b-it-4bit}
+      INSPECTION_MODEL: ${INSPECTION_MODEL:-gemma-2-2b-it-4bit}
+      GEMMA_MLX_URL: ${GEMMA_MLX_URL:-http://host.docker.internal:8080}
+      CODING_MODEL: ${CODING_MODEL:-qwen2.5-coder:3b-4bit}
+      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
+      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
+      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
+      VISION_MODEL: ${VISION_MODEL:-qwen2.5-vl:3b-4bit}
       VISION_MLX_ENABLED: ${VISION_MLX_ENABLED:-true}
       QWEN_VL_MLX_URL: ${QWEN_VL_MLX_URL:-http://host.docker.internal:8082}
       QWEN_VL_MODEL: ${QWEN_VL_MODEL:-qwen2.5-vl:3b-4bit}
       QWEN_VL_SERVER_MODEL: ${QWEN_VL_SERVER_MODEL:-models/qwen2.5-vl-3b-4bit}
       QWEN_VL_TIMEOUT_MS: ${QWEN_VL_TIMEOUT_MS:-60000}
-      VISION_MODEL_FALLBACK: ${VISION_MODEL_FALLBACK:-true}
-      # Phase 3 — Qwen Coder MLX (host-native)
-      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
-      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
-      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -112,24 +90,20 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-workbench_secret}
       POSTGRES_DB: ${POSTGRES_DB:-workbench_db}
       QDRANT_URL: http://qdrant:6333
-      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.2:3b}
-      DEFAULT_MODEL: ${DEFAULT_MODEL:-llama3.2:3b}
-      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-llama3.2:3b}
-      CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
-      CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
-      VISION_MODEL: ${VISION_MODEL:-moondream}
-      # Phase 4 — Qwen VL MLX Vision (host-native, NOT inside Docker)
+      DEFAULT_MODEL: ${DEFAULT_MODEL:-gemma-2-2b-it-4bit}
+      DOCUMENT_MODEL: ${DOCUMENT_MODEL:-gemma-2-2b-it-4bit}
+      INSPECTION_MODEL: ${INSPECTION_MODEL:-gemma-2-2b-it-4bit}
+      GEMMA_MLX_URL: ${GEMMA_MLX_URL:-http://host.docker.internal:8080}
+      CODING_MODEL: ${CODING_MODEL:-qwen2.5-coder:3b-4bit}
+      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
+      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
+      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
+      VISION_MODEL: ${VISION_MODEL:-qwen2.5-vl:3b-4bit}
       VISION_MLX_ENABLED: ${VISION_MLX_ENABLED:-true}
       QWEN_VL_MLX_URL: ${QWEN_VL_MLX_URL:-http://host.docker.internal:8082}
       QWEN_VL_MODEL: ${QWEN_VL_MODEL:-qwen2.5-vl:3b-4bit}
       QWEN_VL_SERVER_MODEL: ${QWEN_VL_SERVER_MODEL:-models/qwen2.5-vl-3b-4bit}
       QWEN_VL_TIMEOUT_MS: ${QWEN_VL_TIMEOUT_MS:-60000}
-      VISION_MODEL_FALLBACK: ${VISION_MODEL_FALLBACK:-true}
-      # Phase 3 — Qwen Coder MLX (host-native)
-      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
-      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
-      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
       AI_SERVICE_URL: http://ai-service:5001
       DEFAULT_ORGANIZATION_ID: ${DEFAULT_ORGANIZATION_ID:-0bd5dba2-05e1-4f5c-9047-25843d338622}
       DEFAULT_ORGANIZATION_NAME: ${DEFAULT_ORGANIZATION_NAME:-Demo Organization}
@@ -182,8 +156,6 @@ volumes:
     name: postgres_data
   qdrant_storage:
     external: true
-  ollama_data:
-    name: ollama_data
   uploads_data:
     name: uploads_data
   reports_data:

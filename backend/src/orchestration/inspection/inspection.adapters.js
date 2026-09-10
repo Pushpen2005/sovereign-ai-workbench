@@ -5,7 +5,7 @@
  * tested SovereignAI service implementations.
  *
  * CONSTRAINTS:
- * - DO NOT duplicate business logic, Qdrant queries, Ollama calls, or DOCX generation.
+ * - DO NOT duplicate business logic, Qdrant queries, MLX calls, or DOCX generation.
  * - Call existing service functions directly.
  * - Map input state and output results cleanly to and from InspectionAgentState.
  */

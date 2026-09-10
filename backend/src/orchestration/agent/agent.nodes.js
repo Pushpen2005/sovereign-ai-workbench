@@ -112,15 +112,15 @@ export function createAgentNodes(customServices = {}) {
         const cleanGoal = state.goal.trim();
 
         // Determine model via router if not explicitly supplied
-        let model = state.model || "llama3.2:3b";
-        if (!state.model || state.model === "llama3.2:3b") {
+        let model = state.model || process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
+        if (!state.model || state.model === "gemma-2-2b-it-4bit") {
             try {
                 const routing = await services.routeTask(cleanGoal);
                 if (routing?.selectedModel) {
                     model = routing.selectedModel;
                 }
             } catch {
-                model = process.env.DEFAULT_MODEL || "llama3.2:3b";
+                model = process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
             }
         }
 
