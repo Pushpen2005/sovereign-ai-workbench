@@ -24,4 +24,5 @@ backend/src/uploads/*
 backend/generated/*
 !backend/generated/.gitkeep
 backups/
+*.snapshot
 *.tar.gz

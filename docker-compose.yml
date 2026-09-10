@@ -72,6 +72,17 @@ services:
       CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
       CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
       VISION_MODEL: ${VISION_MODEL:-moondream}
+      # Phase 4 — Qwen VL MLX Vision (host-native, NOT inside Docker)
+      VISION_MLX_ENABLED: ${VISION_MLX_ENABLED:-true}
+      QWEN_VL_MLX_URL: ${QWEN_VL_MLX_URL:-http://host.docker.internal:8082}
+      QWEN_VL_MODEL: ${QWEN_VL_MODEL:-qwen2.5-vl:3b-4bit}
+      QWEN_VL_SERVER_MODEL: ${QWEN_VL_SERVER_MODEL:-models/qwen2.5-vl-3b-4bit}
+      QWEN_VL_TIMEOUT_MS: ${QWEN_VL_TIMEOUT_MS:-60000}
+      VISION_MODEL_FALLBACK: ${VISION_MODEL_FALLBACK:-true}
+      # Phase 3 — Qwen Coder MLX (host-native)
+      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
+      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
+      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -108,6 +119,17 @@ services:
       CODING_MODEL: ${CODING_MODEL:-llama3.2:3b}
       CODING_MODEL_FALLBACK: ${CODING_MODEL_FALLBACK:-true}
       VISION_MODEL: ${VISION_MODEL:-moondream}
+      # Phase 4 — Qwen VL MLX Vision (host-native, NOT inside Docker)
+      VISION_MLX_ENABLED: ${VISION_MLX_ENABLED:-true}
+      QWEN_VL_MLX_URL: ${QWEN_VL_MLX_URL:-http://host.docker.internal:8082}
+      QWEN_VL_MODEL: ${QWEN_VL_MODEL:-qwen2.5-vl:3b-4bit}
+      QWEN_VL_SERVER_MODEL: ${QWEN_VL_SERVER_MODEL:-models/qwen2.5-vl-3b-4bit}
+      QWEN_VL_TIMEOUT_MS: ${QWEN_VL_TIMEOUT_MS:-60000}
+      VISION_MODEL_FALLBACK: ${VISION_MODEL_FALLBACK:-true}
+      # Phase 3 — Qwen Coder MLX (host-native)
+      CODING_MLX_ENABLED: ${CODING_MLX_ENABLED:-true}
+      QWEN_CODER_MLX_URL: ${QWEN_CODER_MLX_URL:-http://host.docker.internal:8081}
+      QWEN_CODER_MODEL: ${QWEN_CODER_MODEL:-qwen2.5-coder:3b-4bit}
       AI_SERVICE_URL: http://ai-service:5001
       DEFAULT_ORGANIZATION_ID: ${DEFAULT_ORGANIZATION_ID:-0bd5dba2-05e1-4f5c-9047-25843d338622}
       DEFAULT_ORGANIZATION_NAME: ${DEFAULT_ORGANIZATION_NAME:-Demo Organization}
@@ -159,7 +181,7 @@ volumes:
   postgres_data:
     name: postgres_data
   qdrant_storage:
-    name: qdrant_storage
+    external: true
   ollama_data:
     name: ollama_data
   uploads_data:
