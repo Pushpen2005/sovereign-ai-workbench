@@ -23,6 +23,7 @@ export const TASK_TYPE = Object.freeze({
     VISION:            "VISION",
     GENERAL_CHAT:      "GENERAL_CHAT",
     INSPECTION:        "INSPECTION",
+    RISK:              "RISK",
     // Backward-compatibility & Phase 9 aliases
     DOCUMENT:          "DOCUMENT_ANALYSIS",
     GENERAL:           "GENERAL_CHAT",
@@ -34,12 +35,13 @@ export const VALID_TASK_TYPES = Object.freeze(new Set([
     TASK_TYPE.VISION,
     TASK_TYPE.GENERAL_CHAT,
     TASK_TYPE.INSPECTION,
+    TASK_TYPE.RISK,
     "DOCUMENT",
     "GENERAL",
 ]));
 
 /**
- * Normalizes task type to minimum canonical taxonomy (DOCUMENT, CODING, GENERAL, VISION, INSPECTION).
+ * Normalizes task type to minimum canonical taxonomy (DOCUMENT, CODING, GENERAL, VISION, INSPECTION, RISK).
  */
 export function toCanonicalTaskType(taskType) {
     if (taskType === TASK_TYPE.DOCUMENT_ANALYSIS || taskType === "DOCUMENT" || taskType === TASK_TYPE.INSPECTION) {
@@ -53,6 +55,9 @@ export function toCanonicalTaskType(taskType) {
     }
     if (taskType === TASK_TYPE.VISION) {
         return "VISION";
+    }
+    if (taskType === TASK_TYPE.RISK) {
+        return "RISK";
     }
     return taskType;
 }
@@ -216,46 +221,24 @@ export function classifyTask(questionOrInput, options = {}) {
 
 /**
  * Read the model registry from environment variables.
- * All values fall back to DEFAULT_MODEL so the router remains fully operational.
+ * Gemma workloads have a fixed provider route and never fail over to another model.
  */
 export function getModelRegistry() {
-    const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL || "gemma-2-2b-it-4bit";
-    const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
-    const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
-
-    // Coding model: Qwen Coder MLX (host-native :8081)
-    const codingMlxEnabled = (process.env.CODING_MLX_ENABLED || "false").toLowerCase() === "true" ||
-                             (process.env.CODING_MODEL_PROVIDER || "").toLowerCase() === "mlx";
-    const qwenCoderModel   = process.env.QWEN_CODER_MODEL || "qwen2.5-coder:3b-4bit";
-    const codingModel      = codingMlxEnabled
-        ? qwenCoderModel
-        : (process.env.CODING_MODEL || process.env.MODEL_CODING || defaultModel);
-
-    // Vision model: Qwen VL MLX (host-native :8082)
-    const visionMlxEnabled = (process.env.VISION_MLX_ENABLED || "false").toLowerCase() === "true" ||
-                             (process.env.VISION_MODEL_PROVIDER || "").toLowerCase() === "mlx";
-    const qwenVlModel      = process.env.QWEN_VL_MODEL || "qwen2.5-vl:3b-4bit";
-    const visionModel      = visionMlxEnabled
-        ? qwenVlModel
-        : (process.env.VISION_MODEL || process.env.MODEL_VISION || "qwen2.5-vl:3b-4bit");
-
-    const codingFallbackEnabled =
-        (process.env.CODING_MODEL_FALLBACK || "true").toLowerCase() !== "false";
-    const visionFallbackEnabled =
-        (process.env.VISION_MODEL_FALLBACK || "true").toLowerCase() !== "false";
+    const gemmaModel = process.env.GEMMA_MLX_MODEL || "gemma-2-2b-it-4bit";
+    const qwenCoderModel = process.env.QWEN_CODER_MODEL || "qwen2.5-coder:3b-4bit";
+    const qwenVlModel = process.env.QWEN_VL_MODEL || "qwen2.5-vl:3b-4bit";
 
     return {
-        [TASK_TYPE.DOCUMENT_ANALYSIS]: documentModel,
-        [TASK_TYPE.CODING]:            codingModel,
-        [TASK_TYPE.VISION]:            visionModel,
-        [TASK_TYPE.GENERAL_CHAT]:      defaultModel,
-        [TASK_TYPE.INSPECTION]:        inspectionModel,
-        DOCUMENT:                      documentModel,
-        GENERAL:                       defaultModel,
-        defaultModel,
-        visionModel,
-        codingFallbackEnabled,
-        visionFallbackEnabled,
+        [TASK_TYPE.DOCUMENT_ANALYSIS]: gemmaModel,
+        [TASK_TYPE.CODING]:            qwenCoderModel,
+        [TASK_TYPE.VISION]:            qwenVlModel,
+        [TASK_TYPE.GENERAL_CHAT]:      gemmaModel,
+        [TASK_TYPE.INSPECTION]:        gemmaModel,
+        [TASK_TYPE.RISK]:              gemmaModel,
+        DOCUMENT:                      gemmaModel,
+        GENERAL:                       gemmaModel,
+        defaultModel:                  gemmaModel,
+        visionModel:                   qwenVlModel,
         qwenCoderModel,
         qwenVlModel,
     };
@@ -276,6 +259,7 @@ export function getAllowedModels() {
         registry[TASK_TYPE.VISION],
         registry[TASK_TYPE.GENERAL_CHAT],
         registry[TASK_TYPE.INSPECTION],
+        registry[TASK_TYPE.RISK],
         "gemma-2-2b-it-4bit",
         "gemma-2-2b-it",
         "gemma-2-2b",
@@ -336,18 +320,11 @@ export async function checkModelAvailability(modelName) {
     if (lower.includes("vl") || lower.includes("qwen2.5-vl") || lower.includes("vision-mlx")) {
         const qwenVlUrl =
             process.env.QWEN_VL_MLX_URL ||
-            process.env.MLX_VISION_URL ||
-            "http://127.0.0.1:8082";
+            process.env.MLX_VISION_URL;
+        if (!qwenVlUrl) return false;
         try {
-            let res;
-            try {
-                res = await fetch(`${qwenVlUrl}/health`, { signal: AbortSignal.timeout(2000) });
-            } catch {
-                if (qwenVlUrl.includes("host.docker.internal")) {
-                    res = await fetch("http://127.0.0.1:8082/health", { signal: AbortSignal.timeout(2000) });
-                }
-            }
-            return Boolean(res && res.ok);
+            const res = await fetch(`${qwenVlUrl}/health`, { signal: AbortSignal.timeout(2000) });
+            return res.ok;
         } catch {
             return false;
         }
@@ -357,35 +334,22 @@ export async function checkModelAvailability(modelName) {
     if (lower.startsWith("qwen") || lower.includes("qwen2.5-coder") || lower.includes("coder-mlx")) {
         const qwenUrl =
             process.env.QWEN_CODER_MLX_URL ||
-            process.env.MLX_CODER_URL ||
-            "http://127.0.0.1:8081";
+            process.env.MLX_CODER_URL;
+        if (!qwenUrl) return false;
         try {
-            let res;
-            try {
-                res = await fetch(`${qwenUrl}/health`, { signal: AbortSignal.timeout(2000) });
-            } catch {
-                if (qwenUrl.includes("host.docker.internal")) {
-                    res = await fetch("http://127.0.0.1:8081/health", { signal: AbortSignal.timeout(2000) });
-                }
-            }
-            return Boolean(res && res.ok);
+            const res = await fetch(`${qwenUrl}/health`, { signal: AbortSignal.timeout(2000) });
+            return res.ok;
         } catch {
             return false;
         }
     }
 
-    // Check MLX runtime for Gemma models (Port :8080) — also the default fallback for unknown models
-    const mlxUrl = process.env.MLX_URL || "http://127.0.0.1:8080";
+    // Check the configured host-native Gemma MLX runtime (Port :8080).
+    const mlxUrl = process.env.GEMMA_MLX_URL;
+    if (!mlxUrl) return false;
     try {
-        let res;
-        try {
-            res = await fetch(`${mlxUrl}/health`, { signal: AbortSignal.timeout(2000) });
-        } catch {
-            if (mlxUrl.includes("host.docker.internal")) {
-                res = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(2000) });
-            }
-        }
-        return Boolean(res && res.ok);
+        const res = await fetch(`${mlxUrl}/health`, { signal: AbortSignal.timeout(2000) });
+        return res.ok;
     } catch {
         return false;
     }

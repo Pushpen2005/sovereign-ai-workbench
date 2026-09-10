@@ -149,7 +149,7 @@ export async function resolveVisionModel(requestedModel = null) {
     });
 
     return {
-        selectedModel: routing.selectedModel || "moondream:latest",
+        selectedModel: routing.selectedModel,
         taskType: routing.taskType || TASK_TYPE.VISION,
         local: routing.local !== false,
     };
