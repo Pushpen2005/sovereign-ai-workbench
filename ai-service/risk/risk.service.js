@@ -65,7 +65,7 @@ export async function assessFindingRisk(finding, options = {}) {
         format: "json",
         task: "risk_assessment",
         temperature: 0.1,
-        num_predict: 384,
+        num_predict: 1024,
         timeoutMs: 180000, // 3 minutes timeout to accommodate longer inference
     });
 

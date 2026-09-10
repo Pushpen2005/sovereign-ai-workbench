@@ -70,10 +70,16 @@ export function parseInspectionLlmResponse(rawResponse) {
 
     let cleaned = rawResponse.trim();
 
-    // Strip markdown code fences if present (e.g. ```json ... ```)
-    const codeBlockMatch = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-    if (codeBlockMatch) {
-        cleaned = codeBlockMatch[1].trim();
+    const startIdx = cleaned.indexOf("{");
+    const endIdx = cleaned.lastIndexOf("}");
+    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+        cleaned = cleaned.substring(startIdx, endIdx + 1);
+    } else {
+        const arrStart = cleaned.indexOf("[");
+        const arrEnd = cleaned.lastIndexOf("]");
+        if (arrStart !== -1 && arrEnd !== -1 && arrEnd >= arrStart) {
+            cleaned = cleaned.substring(arrStart, arrEnd + 1);
+        }
     }
 
     let parsed;

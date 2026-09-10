@@ -73,20 +73,15 @@ export function extractJsonFromResponse(rawResponse) {
 
     let cleaned = rawResponse.trim();
 
-    // Strip markdown code fences like ```json ... ``` or ``` ... ```
-    const codeBlockMatch = cleaned.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
-    if (codeBlockMatch) {
-        cleaned = codeBlockMatch[1].trim();
+    const startIdx = cleaned.indexOf("{");
+    const endIdx = cleaned.lastIndexOf("}");
+    if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
+        cleaned = cleaned.substring(startIdx, endIdx + 1);
     } else {
-        // Handle cases where markdown fence starts but may have trailing text or incomplete fence
-        const fenceStartIndex = cleaned.indexOf("```");
-        if (fenceStartIndex !== -1) {
-            const firstNewline = cleaned.indexOf("\n", fenceStartIndex);
-            const contentStart = firstNewline !== -1 ? firstNewline + 1 : fenceStartIndex + 3;
-            const fenceEndIndex = cleaned.lastIndexOf("```");
-            if (fenceEndIndex > contentStart) {
-                cleaned = cleaned.substring(contentStart, fenceEndIndex).trim();
-            }
+        const arrStart = cleaned.indexOf("[");
+        const arrEnd = cleaned.lastIndexOf("]");
+        if (arrStart !== -1 && arrEnd !== -1 && arrEnd >= arrStart) {
+            cleaned = cleaned.substring(arrStart, arrEnd + 1);
         }
     }
 
