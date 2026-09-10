@@ -53,7 +53,7 @@ const ADAPTERS = Object.freeze({
  * @returns {import("./adapters/base.adapter.js").BaseAdapter}
  */
 export function resolveAdapter(modelName, options = {}) {
-    const explicitProvider = options.provider || process.env.LLM_PROVIDER;
+    const explicitProvider = options.provider;
 
     if (explicitProvider && ADAPTERS[explicitProvider.toLowerCase()]) {
         return ADAPTERS[explicitProvider.toLowerCase()];
@@ -132,8 +132,7 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
     const options = normalized.options;
 
     const defaultModel =
-        process.env.DEFAULT_MODEL ||
-        process.env.MLX_MODEL ||
+        process.env.GEMMA_MLX_MODEL ||
         "gemma-2-2b-it-4bit";
 
     const selectedModel = normalized.model || defaultModel;
@@ -149,7 +148,9 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         throw err;
     }
 
-    const managed = isManagedModel(selectedModel);
+    // Containers must only consume host-native MLX over host.docker.internal.
+    // Process lifecycle management is host-only and explicitly opt-in.
+    const managed = process.env.MLX_RUNTIME_MANAGED === "true" && isManagedModel(selectedModel);
     if (managed) {
         try {
             await localModelRuntimeManager.ensureRunning(selectedModel);
@@ -192,19 +193,19 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
             });
         }
 
-        if (error.statusCode === 404 || error.message?.includes("Model unavailable")) {
-            throw new LLMError("Model unavailable", {
+        if (error.code === "LOCAL_RUNTIME_UNAVAILABLE" || error.statusCode === 503) {
+            throw new LLMError("Local Gemma MLX runtime is unavailable.", {
                 cause: error,
-                code: "MODEL_UNAVAILABLE",
-                statusCode: 404,
+                code: "LOCAL_RUNTIME_UNAVAILABLE",
+                statusCode: 503,
                 model: selectedModel,
             });
         }
 
         if (error instanceof TypeError || error.code === "ECONNREFUSED" || error.message?.includes("fetch failed")) {
-            throw new LLMError(`${adapter.name.toUpperCase()} connection failed: ${error.message}`, {
+            throw new LLMError(`Local MLX runtime connection failed: ${error.message}`, {
                 cause: error,
-                code: "CONNECTION_FAILED",
+                code: "LOCAL_RUNTIME_UNAVAILABLE",
                 statusCode: 503,
                 model: selectedModel,
             });
