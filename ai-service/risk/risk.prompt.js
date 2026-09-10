@@ -53,6 +53,15 @@ export function buildSopQuery(finding) {
  * @returns {string}
  */
 export function formatFindingContext(finding) {
+    let sourceDesc = "null";
+    if (finding.source) {
+        if (Array.isArray(finding.source)) {
+            sourceDesc = finding.source.map((s) => `${s.filename || s.documentId || "doc"}:p${s.page ?? "1"}`).join(", ");
+        } else if (typeof finding.source === "object") {
+            sourceDesc = `${finding.source.filename || finding.source.documentId || "doc"}:p${finding.source.page ?? "1"}`;
+        }
+    }
+
     return [
         `finding: ${finding.finding ?? "N/A"}`,
         `equipment: ${finding.equipment ?? "N/A"}`,
@@ -60,7 +69,7 @@ export function formatFindingContext(finding) {
         `limit: ${finding.limit ?? "N/A"}`,
         `severity: ${finding.severity ?? "N/A"}`,
         `evidence: ${finding.evidence ?? "N/A"}`,
-        `source: ${JSON.stringify(finding.source ?? null)}`,
+        `source: ${sourceDesc}`,
     ].join("\n");
 }
 
@@ -126,15 +135,15 @@ CRITICAL RULES:
 6. Do NOT invent facts, operating limits, procedures, or citations.
 7. If the SOP evidence does not contain sufficient information to determine a risk level or provide a validated recommendation, set "level": null and explain the lack of evidence in "reason".
 8. In "citations", only cite sources that appear directly in SOP EVIDENCE. Each citation must strictly copy documentId, filename, page, and chunkIndex from the SOP SOURCE. Do not fabricate citations.
-9. Return ONLY a valid JSON object matching the schema below. Do not wrap in markdown or include additional explanation.
+9. Return ONLY a valid JSON object matching the schema below. Keep "reason" and "recommendation" concise, specific, and grounded (1-2 sentences each). Do not wrap in markdown or include additional explanation.
 
 SCHEMA:
 {
   "riskAssessment": {
     "level": "LOW" | "MEDIUM" | "HIGH" | null,
-    "reason": "string"
+    "reason": "concise rationale (1-2 sentences) citing observed value, limit, and SOP clause"
   },
-  "recommendation": "string",
+  "recommendation": "concise actionable directive (1-2 sentences) specifying required maintenance action",
   "citations": [
     {
       "documentId": "string",

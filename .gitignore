@@ -26,3 +26,8 @@ backend/generated/*
 backups/
 *.snapshot
 *.tar.gz
+
+# MLX local model weights and logs
+ai-service/mlx-runtime/models/
+ai-service/mlx-runtime/logs/
+*.safetensors

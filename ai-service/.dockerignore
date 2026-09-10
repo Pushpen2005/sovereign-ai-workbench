@@ -3,4 +3,7 @@ node_modules
 .env.local
 .DS_Store
 *.log
+mlx-runtime/models/
+mlx-runtime/venv/
+mlx-runtime/logs/
 
