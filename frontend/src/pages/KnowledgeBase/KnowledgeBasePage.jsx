@@ -14,7 +14,7 @@ import { PageHeader } from '../../components/layout/PageHeader.jsx';
 import { Button } from '../../components/ui/Button.jsx';
 import { StatusBadge } from '../../components/ui/Badge.jsx';
 import { useDocuments } from '../../hooks/useDocuments.js';
-import { searchKnowledgeBase } from '../../api/knowledge.api.js';
+import { searchKnowledgeBase, askKnowledgeBaseChat } from '../../api/knowledge.api.js';
 
 function formatDate(iso) {
   if (!iso) return '—';
@@ -147,6 +147,12 @@ export function KnowledgeBasePage() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchError, setSearchError] = useState(null);
 
+  // ─── Knowledge Base Chat State (Phase F) ─────────────────────────────────
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState([]);
+  const [chatting, setChatting] = useState(false);
+  const [chatError, setChatError] = useState(null);
+
   const handleDragOver = useCallback((e) => {
     e.preventDefault();
     setDragOver(true);
@@ -225,6 +231,35 @@ export function KnowledgeBasePage() {
       setSearchResults([]);
     } finally {
       setSearching(false);
+    }
+  };
+
+  // ─── Knowledge Base Chat Trigger ─────────────────────────────────────────
+  const handleExecuteChat = async (e) => {
+    if (e) e.preventDefault();
+    if (!chatInput.trim() || chatting) return;
+
+    const userMessage = { role: 'user', text: chatInput.trim() };
+    setChatHistory((prev) => [...prev, userMessage]);
+    setChatInput('');
+    setChatting(true);
+    setChatError(null);
+
+    try {
+      const response = await askKnowledgeBaseChat(userMessage.text);
+      if (response && response.success) {
+        setChatHistory((prev) => [
+          ...prev,
+          { role: 'assistant', text: response.answer, citations: response.citations || [] },
+        ]);
+      } else {
+        throw new Error(response.message || "Failed to generate answer");
+      }
+    } catch (err) {
+      console.error('KB Chat error:', err);
+      setChatError('Unable to reach the Knowledge Base Assistant.');
+    } finally {
+      setChatting(false);
     }
   };
 
@@ -627,6 +662,90 @@ export function KnowledgeBasePage() {
               </div>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* ─── SECTION 3: KNOWLEDGE BASE CHAT (Phase F) ──────────────────────── */}
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm flex flex-col gap-5">
+        <div className="border-b border-slate-100 pb-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <span>🤖</span> Knowledge Base Assistant
+            </h2>
+            <span className="text-[11px] bg-emerald-50 text-emerald-700 font-mono font-semibold px-2.5 py-1 rounded-md border border-emerald-200/60">
+              Isolated SOP AI Chat
+            </span>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">
+            Ask questions directly against your organization's approved SOPs. The assistant will only use validated Knowledge Base documents.
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          {/* Chat History */}
+          <div className="bg-slate-50/50 border border-slate-200 rounded-xl p-4 min-h-[250px] max-h-[400px] overflow-y-auto flex flex-col gap-4">
+            {chatHistory.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 text-xs">
+                <span className="text-2xl mb-2">💬</span>
+                Ask a question like "What is the maximum permitted bearing temperature?"
+              </div>
+            ) : (
+              chatHistory.map((msg, idx) => (
+                <div key={idx} className={`flex flex-col max-w-[85%] gap-1.5 ${msg.role === 'user' ? 'self-end items-end' : 'self-start items-start'}`}>
+                  <div className={`px-4 py-2.5 rounded-2xl text-xs leading-relaxed ${msg.role === 'user' ? 'bg-blue-600 text-white rounded-br-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-bl-sm shadow-xs'}`}>
+                    {msg.text}
+                  </div>
+                  {msg.role === 'assistant' && msg.citations && msg.citations.length > 0 && (
+                    <div className="flex flex-col gap-1 mt-1 w-full">
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Sources:</span>
+                      {msg.citations.map((c, cIdx) => (
+                        <div key={cIdx} className="text-[11px] text-slate-600 bg-white border border-slate-200 px-2 py-1 rounded-md inline-flex items-center gap-1.5">
+                          <span>📄</span> <span className="font-semibold text-slate-800 truncate max-w-[150px]">{c.filename || 'Unknown SOP'}</span>
+                          <span className="text-slate-400">·</span> Page {c.page} <span className="text-slate-400">·</span> Chunk {c.chunkIndex}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+            {chatting && (
+              <div className="self-start flex items-center gap-2 bg-white border border-slate-200 px-4 py-2.5 rounded-2xl rounded-bl-sm shadow-xs">
+                <div className="flex gap-1">
+                  <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+                <span className="text-[10px] text-slate-500 font-semibold ml-1">Analyzing SOPs...</span>
+              </div>
+            )}
+            {chatError && (
+              <div className="self-start bg-red-50 border border-red-200 text-red-700 text-xs px-4 py-2.5 rounded-2xl rounded-bl-sm">
+                ⚠️ {chatError}
+              </div>
+            )}
+          </div>
+
+          {/* Chat Input Form */}
+          <form onSubmit={handleExecuteChat} className="flex gap-3">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Ask a question about your SOPs..."
+              className="flex-1 text-xs bg-white border border-slate-300 rounded-lg px-4 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-slate-50"
+              disabled={chatting}
+            />
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={chatting || !chatInput.trim()}
+              className="px-6"
+            >
+              Send
+            </Button>
+          </form>
         </div>
       </div>
 

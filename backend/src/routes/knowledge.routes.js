@@ -5,6 +5,7 @@ import {
   uploadKnowledgeDocument,
   searchKnowledge,
   deleteKnowledgeDocument,
+  askKnowledgeBase,
 } from "../controllers/knowledge.controller.js";
 
 const router = express.Router();
@@ -33,6 +34,12 @@ router.post("/search", searchKnowledge);
  * Delete a knowledge base document, its database record, and its vector embeddings.
  */
 router.delete("/:id", deleteKnowledgeDocument);
+
+/**
+ * POST /api/v1/knowledge/chat
+ * Knowledge Base chat using isolated SOP context.
+ */
+router.post("/chat", askKnowledgeBase);
 
 export default router;
 

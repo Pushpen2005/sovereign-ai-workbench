@@ -6,6 +6,7 @@ import {
   deleteDocumentById,
 } from "../services/documents.service.js";
 import { query } from "../config/db.js";
+import { generateAnswer } from "../../../ai-service/llm/llm.service.js";
 
 const DEFAULT_TOP_K = 5;
 const MAX_TOP_K = 20;
@@ -237,6 +238,88 @@ export async function deleteKnowledgeDocument(req, res, next) {
     return res.status(200).json({
       success: true,
       message: `Knowledge Base document '${cleanDocId}' deleted successfully`,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * POST /api/v1/knowledge/chat
+ * Dedicated KB Chat endpoint. Strictly isolated to SOP evidence.
+ */
+export async function askKnowledgeBase(req, res, next) {
+  try {
+    const organizationId = resolveAuthenticatedOrganization(req);
+    const { question, topK = DEFAULT_TOP_K } = req.body || {};
+
+    if (typeof question !== "string" || !question.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "A valid question is required",
+      });
+    }
+
+    const trimmedQuestion = question.trim();
+    if (trimmedQuestion.length > MAX_QUERY_LENGTH) {
+      return res.status(400).json({
+        success: false,
+        message: `Question exceeds maximum allowed length of ${MAX_QUERY_LENGTH} characters`,
+      });
+    }
+
+    // 1. Search SOPs in Qdrant
+    const searchResults = await searchSop(trimmedQuestion, {
+      organizationId,
+      limit: Math.min(topK, MAX_TOP_K),
+      scoreThreshold: DEFAULT_SOP_SCORE_THRESHOLD,
+    });
+
+    // 2. Strict Evidence Rule
+    if (!searchResults || searchResults.length === 0) {
+      return res.status(200).json({
+        success: true,
+        answer: "I couldn't find sufficient supporting information for this question in the Knowledge Base.",
+        citations: [],
+      });
+    }
+
+    // 3. Build Prompt Context
+    const contextText = searchResults.map((chunk, idx) => {
+      return `--- Evidence ${idx + 1} ---\nDocument: ${chunk.filename || 'Unknown'}\nPage: ${chunk.page || 'Unknown'}\nChunk: ${chunk.chunkIndex || 'Unknown'}\nContent:\n${chunk.text}`;
+    }).join("\n\n");
+
+    const systemPrompt = `SYSTEM:
+You are a SovereignAI Knowledge Base Assistant.
+Answer the user's question ONLY using the supplied Knowledge Base context below.
+
+CRITICAL RULES:
+1. If the answer is not supported by the supplied Knowledge Base context, explicitly state that the information is not available in the Knowledge Base.
+2. Do NOT invent procedures, limits, standards, values, maintenance intervals, or safety requirements.
+3. Do NOT use your general knowledge.
+4. Keep your answer professional, direct, and concise.
+
+CONTEXT EVIDENCE:
+${contextText}
+
+QUESTION:
+${trimmedQuestion}`;
+
+    // 4. Generate Answer using Gemma MLX
+    const answer = await generateAnswer(systemPrompt, "gemma-2-2b-it-4bit");
+
+    // 5. Format citations
+    const citations = searchResults.map((item) => ({
+      documentId: item.documentId || null,
+      filename: item.filename || null,
+      page: item.page ?? 1,
+      chunkIndex: item.chunkIndex ?? 0,
+    }));
+
+    return res.status(200).json({
+      success: true,
+      answer,
+      citations,
     });
   } catch (error) {
     next(error);

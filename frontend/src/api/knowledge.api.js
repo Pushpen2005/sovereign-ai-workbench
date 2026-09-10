@@ -53,3 +53,13 @@ export function searchKnowledgeBase({ query, topK = 5, scoreThreshold = 0.5 }) {
   });
 }
 
+/**
+ * Ask a question strictly against the Knowledge Base SOPs.
+ *
+ * @param {string} question - The user's question
+ * @returns {Promise<{ success: boolean, answer: string, citations: Array }>}
+ */
+export function askKnowledgeBaseChat(question) {
+  return post('/api/v1/knowledge/chat', { question });
+}
+

@@ -87,7 +87,12 @@ export function parseInspectionLlmResponse(rawResponse) {
     try {
         parsed = JSON.parse(cleaned);
     } catch (error) {
-        throw new InspectionValidationError(`LLM returned invalid JSON: ${error.message}`);
+        try {
+            const repaired = cleaned.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+            parsed = JSON.parse(repaired);
+        } catch {
+            throw new InspectionValidationError(`LLM returned invalid JSON: ${error.message}`);
+        }
     }
 
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {

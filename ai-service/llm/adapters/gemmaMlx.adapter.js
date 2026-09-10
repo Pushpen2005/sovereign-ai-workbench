@@ -7,6 +7,14 @@
 
 import { BaseAdapter } from "./base.adapter.js";
 
+let gemmaQueue = Promise.resolve();
+
+function enqueueGemma(fn) {
+    const next = gemmaQueue.then(fn, fn);
+    gemmaQueue = next.catch(() => {});
+    return next;
+}
+
 export class GemmaMlxAdapter extends BaseAdapter {
     constructor(options = {}) {
         super("gemma_mlx");
@@ -50,6 +58,10 @@ export class GemmaMlxAdapter extends BaseAdapter {
     }
 
     async generate(prompt, model, options = {}) {
+        return enqueueGemma(() => this._executeGenerate(prompt, model, options));
+    }
+
+    async _executeGenerate(prompt, model, options = {}) {
         const isStreaming = typeof options.onChunk === "function" || options.stream === true;
         const taskName = options.task || "general";
         const startTime = Date.now();

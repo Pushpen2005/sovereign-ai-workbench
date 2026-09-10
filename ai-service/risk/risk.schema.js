@@ -88,7 +88,12 @@ export function extractJsonFromResponse(rawResponse) {
     try {
         return JSON.parse(cleaned);
     } catch (error) {
-        throw new Error(`LLM returned invalid JSON: ${error.message}`);
+        try {
+            const repaired = cleaned.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+            return JSON.parse(repaired);
+        } catch {
+            throw new Error(`LLM returned invalid JSON: ${error.message}`);
+        }
     }
 }
 
