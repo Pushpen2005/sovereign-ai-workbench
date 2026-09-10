@@ -75,4 +75,29 @@ export function runInspectionAgentApi(documentId, goal) {
   });
 }
 
+/**
+ * Phase 7 — Execute inspection analysis agent workflow.
+ *
+ * @param {string} documentId
+ * @param {string} [organizationId]
+ * @returns {Promise<{ success: boolean, runId: string, status: string, result: object }>}
+ */
+export function analyzeInspectionAgent(documentId, organizationId) {
+  return post('/api/v1/agents/inspection/analyze', {
+    documentId,
+    organizationId,
+  });
+}
+
+/**
+ * Phase 7 — Fetch activity / status for an inspection run.
+ *
+ * @param {string} runId
+ * @returns {Promise<object>}
+ */
+export function fetchInspectionRunActivity(runId) {
+  return get(`/api/v1/agents/inspection/runs/${encodeURIComponent(runId)}`);
+}
+
+
 

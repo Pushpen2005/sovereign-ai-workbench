@@ -6,7 +6,7 @@
  * - notification state
  */
 
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
 
 const initialState = {
   sidebarOpen: true,
@@ -64,14 +64,14 @@ export function useAppDispatch() {
 // Convenience action creators
 export function useAppActions() {
   const dispatch = useAppDispatch();
-  return {
-    toggleSidebar: useCallback(() => dispatch({ type: 'TOGGLE_SIDEBAR' }), [dispatch]),
-    setSidebar: useCallback((open) => dispatch({ type: 'SET_SIDEBAR', payload: open }), [dispatch]),
-    notify: useCallback(
-      (message, level = 'info') =>
+  return useMemo(
+    () => ({
+      toggleSidebar: () => dispatch({ type: 'TOGGLE_SIDEBAR' }),
+      setSidebar: (open) => dispatch({ type: 'SET_SIDEBAR', payload: open }),
+      notify: (message, level = 'info') =>
         dispatch({ type: 'ADD_NOTIFICATION', payload: { message, level } }),
-      [dispatch],
-    ),
-    dismiss: useCallback((id) => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }), [dispatch]),
-  };
+      dismiss: (id) => dispatch({ type: 'DISMISS_NOTIFICATION', payload: id }),
+    }),
+    [dispatch],
+  );
 }
