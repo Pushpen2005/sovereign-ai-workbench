@@ -146,6 +146,85 @@ export async function runFindingsExtraction(state, options = {}) {
     return analysisResult.findings || [];
 }
 
+const STOP_WORDS = new Set([
+    "the", "and", "or", "a", "an", "in", "on", "at", "to", "for", "of", "with", "by", "from",
+    "is", "are", "was", "were", "be", "been", "this", "that", "these", "those", "it", "its",
+    "as", "if", "shall", "should", "must", "can", "could", "may", "might", "will", "would",
+    "not", "no", "yes", "all", "any", "some", "every", "per", "into", "over", "than"
+]);
+
+function extractKeywords(text) {
+    if (!text || typeof text !== "string") return new Set();
+    const words = text
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, " ")
+        .split(/\s+/)
+        .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+    return new Set(words);
+}
+
+/**
+ * Deterministically validates a Knowledge Base SOP evidence chunk.
+ * Enforces:
+ * 1. score >= threshold (default 0.50)
+ * 2. organizationId matches authenticated tenant
+ * 3. documentType === "sop"
+ * 4. documentId, filename, page, chunkIndex, non-empty text
+ * 5. Cannot be the inspection report itself (chunk.documentId !== inspectionDocId)
+ * 6. Semantic / keyword relevance between candidate observation and SOP chunk
+ */
+export function validateSopEvidenceChunk(chunk, finding = {}, organizationId = null, inspectionDocId = null, minScore = 0.50) {
+    if (!chunk || typeof chunk !== "object") return false;
+
+    // 1. Minimum similarity threshold (canonical 0.50)
+    const score = typeof chunk.score === "number" ? chunk.score : 0;
+    if (score < minScore) return false;
+
+    // 2. Strict tenant boundary
+    if (organizationId && chunk.organizationId && String(chunk.organizationId).trim() !== String(organizationId).trim()) {
+        return false;
+    }
+
+    // 3. Canonical KB document type
+    const docType = (chunk.documentType || "").toLowerCase();
+    if (docType !== "sop") return false;
+
+    // 4. Required metadata
+    if (!chunk.documentId || typeof chunk.documentId !== "string" || !chunk.documentId.trim()) return false;
+    if (!chunk.filename || typeof chunk.filename !== "string" || !chunk.filename.trim()) return false;
+    if (chunk.page === undefined || chunk.page === null || isNaN(Number(chunk.page))) return false;
+    if (chunk.chunkIndex === undefined || chunk.chunkIndex === null || isNaN(Number(chunk.chunkIndex))) return false;
+    if (!chunk.text || typeof chunk.text !== "string" || !chunk.text.trim()) return false;
+
+    // 5. Inspection report cannot be its own SOP evidence authority
+    if (inspectionDocId && String(chunk.documentId).trim() === String(inspectionDocId).trim()) {
+        return false;
+    }
+
+    // 6. Semantic relevance check between candidate observation and SOP text
+    const findingKeywords = new Set([
+        ...extractKeywords(finding.finding || ""),
+        ...extractKeywords(finding.equipment || ""),
+        ...extractKeywords(finding.evidence || ""),
+    ]);
+
+    if (findingKeywords.size > 0) {
+        const chunkKeywords = extractKeywords(chunk.text);
+        let matchCount = 0;
+        for (const kw of findingKeywords) {
+            if (chunkKeywords.has(kw)) {
+                matchCount++;
+            }
+        }
+        // At least 1 shared core domain keyword/concept required for relevance
+        if (matchCount === 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /**
  * Adapter 4: SOP Retrieval Adapter
  * Calls existing searchSop() enforcing documentType='sop' filter.
@@ -168,7 +247,7 @@ export async function runSopRetrieval(finding, options = {}) {
 
     const searchSopFn = options.searchSop ?? searchSop;
     const sopOptions = {
-        scoreThreshold: options.scoreThreshold ?? (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.35),
+        scoreThreshold: options.scoreThreshold ?? (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.50),
         ...options,
     };
     const sopChunks = await searchSopFn(query.trim(), sopOptions);

@@ -10,6 +10,7 @@ import sys
 import json
 import os
 import argparse
+from datetime import datetime, timezone
 from docx import Document
 from docx.shared import Inches, Pt, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -101,12 +102,91 @@ def create_document(data, output_path):
     sub_p = doc.add_paragraph()
     sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     sub_p.paragraph_format.space_before = Pt(0)
-    sub_p.paragraph_format.space_after = Pt(16)
+    sub_p.paragraph_format.space_after = Pt(12)
     sub_run = sub_p.add_run("Automated Operational Assessment & Executive Review")
     sub_run.font.name = "Arial"
     sub_run.font.size = Pt(10)
     sub_run.font.italic = True
     sub_run.font.color.rgb = RGBColor(100, 116, 139)
+
+    # ─── Metadata Summary Block ──────────────────────────────────────────────
+    meta = data.get("metadata") or {}
+    gen_time = meta.get("generatedAt") or datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    org_id = sanitize_value(meta.get("organizationId") or data.get("organizationId"))
+    doc_id = sanitize_value(meta.get("documentId") or data.get("documentId"))
+    model_rt = sanitize_value(meta.get("model") or "SovereignAI Gemma MLX Engine")
+
+    meta_table = doc.add_table(rows=2, cols=2)
+    meta_table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    meta_table.autofit = False
+    m_widths = [Inches(3.25), Inches(3.25)]
+    for r in meta_table.rows:
+        r.cells[0].width = m_widths[0]
+        r.cells[1].width = m_widths[1]
+
+    # Meta cell 0,0: Generated
+    c00 = meta_table.rows[0].cells[0]
+    set_cell_background(c00, "F7FAFC")
+    set_cell_margins(c00, top=40, bottom=40, left=60, right=60)
+    p00 = c00.paragraphs[0]
+    p00.paragraph_format.space_before = Pt(1)
+    p00.paragraph_format.space_after = Pt(1)
+    r00_lbl = p00.add_run("Generated: ")
+    r00_lbl.font.bold = True
+    r00_lbl.font.size = Pt(8.5)
+    r00_lbl.font.name = "Arial"
+    r00_val = p00.add_run(gen_time)
+    r00_val.font.size = Pt(8.5)
+    r00_val.font.name = "Arial"
+
+    # Meta cell 0,1: Organization
+    c01 = meta_table.rows[0].cells[1]
+    set_cell_background(c01, "F7FAFC")
+    set_cell_margins(c01, top=40, bottom=40, left=60, right=60)
+    p01 = c01.paragraphs[0]
+    p01.paragraph_format.space_before = Pt(1)
+    p01.paragraph_format.space_after = Pt(1)
+    r01_lbl = p01.add_run("Organization: ")
+    r01_lbl.font.bold = True
+    r01_lbl.font.size = Pt(8.5)
+    r01_lbl.font.name = "Arial"
+    r01_val = p01.add_run(org_id)
+    r01_val.font.size = Pt(8.5)
+    r01_val.font.name = "Arial"
+
+    # Meta cell 1,0: Document Reference
+    c10 = meta_table.rows[1].cells[0]
+    set_cell_background(c10, "F7FAFC")
+    set_cell_margins(c10, top=40, bottom=40, left=60, right=60)
+    p10 = c10.paragraphs[0]
+    p10.paragraph_format.space_before = Pt(1)
+    p10.paragraph_format.space_after = Pt(1)
+    r10_lbl = p10.add_run("Document: ")
+    r10_lbl.font.bold = True
+    r10_lbl.font.size = Pt(8.5)
+    r10_lbl.font.name = "Arial"
+    r10_val = p10.add_run(doc_id)
+    r10_val.font.size = Pt(8.5)
+    r10_val.font.name = "Arial"
+
+    # Meta cell 1,1: Runtime Engine
+    c11 = meta_table.rows[1].cells[1]
+    set_cell_background(c11, "F7FAFC")
+    set_cell_margins(c11, top=40, bottom=40, left=60, right=60)
+    p11 = c11.paragraphs[0]
+    p11.paragraph_format.space_before = Pt(1)
+    p11.paragraph_format.space_after = Pt(1)
+    r11_lbl = p11.add_run("Engine: ")
+    r11_lbl.font.bold = True
+    r11_lbl.font.size = Pt(8.5)
+    r11_lbl.font.name = "Arial"
+    r11_val = p11.add_run(model_rt)
+    r11_val.font.size = Pt(8.5)
+    r11_val.font.name = "Arial"
+
+    p_meta_space = doc.add_paragraph()
+    p_meta_space.paragraph_format.space_before = Pt(0)
+    p_meta_space.paragraph_format.space_after = Pt(6)
 
     # ─── Section 1: Subject ──────────────────────────────────────────────────
     add_heading_with_spacing(doc, "1. Subject", level=1, space_before=10)
@@ -251,7 +331,9 @@ def create_document(data, output_path):
 
     c_rl_val = risk_table.rows[0].cells[1]
     # Set background tint according to level
-    if risk_level_str == "HIGH":
+    if risk_level_str == "CRITICAL":
+        set_cell_background(c_rl_val, "FED7D7")  # light red
+    elif risk_level_str == "HIGH":
         set_cell_background(c_rl_val, "FED7D7")  # light red
     elif risk_level_str == "MEDIUM":
         set_cell_background(c_rl_val, "FEEBC8")  # light amber
@@ -266,7 +348,9 @@ def create_document(data, output_path):
     r_rl_val.font.name = "Arial"
     r_rl_val.font.bold = True
     r_rl_val.font.size = Pt(11)
-    if risk_level_str == "HIGH":
+    if risk_level_str == "CRITICAL":
+        r_rl_val.font.color.rgb = RGBColor(180, 0, 0)
+    elif risk_level_str == "HIGH":
         r_rl_val.font.color.rgb = RGBColor(197, 48, 48)
     elif risk_level_str == "MEDIUM":
         r_rl_val.font.color.rgb = RGBColor(183, 121, 31)

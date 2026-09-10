@@ -14,6 +14,9 @@ import { createReportRecord } from "../services/reports.service.js";
 import { createDocument } from "../repositories/documents.repository.js";
 import { query } from "../config/db.js";
 import { executionEvents } from "../services/execution-events.service.js";
+import { searchSop } from "../../../ai-service/knowledge/sop.service.js";
+import { validateSopEvidenceChunk } from "../orchestration/inspection/inspection.adapters.js";
+import { buildSopQuery } from "../../../ai-service/risk/risk.prompt.js";
 
 import {
     validateFilename,
@@ -133,15 +136,65 @@ export async function analyzeInspection(req, res, next) {
                 ? task.trim()
                 : "Analyze this inspection report and extract all significant findings.";
 
+        // Extract candidate observations from inspection report
         const result = await runInspectionAnalysis({
             documentId: documentId.trim(),
             task: taskText,
         }, { organizationId });
 
+        const rawCandidates = Array.isArray(result.findings) ? result.findings : [];
+        const validatedFindings = [];
+
+        // Deterministic Knowledge Base Evidence Gate
+        for (const candidate of rawCandidates) {
+            try {
+                let sopQuery;
+                try {
+                    sopQuery = buildSopQuery(candidate);
+                } catch {
+                    sopQuery = candidate.finding || candidate.equipment || taskText;
+                }
+
+                const sopChunks = await searchSop(sopQuery, {
+                    organizationId,
+                    scoreThreshold: 0.50,
+                });
+
+                const validChunks = (Array.isArray(sopChunks) ? sopChunks : []).filter((chunk) =>
+                    validateSopEvidenceChunk(chunk, candidate, organizationId, documentId.trim())
+                );
+
+                if (validChunks.length > 0) {
+                    validatedFindings.push({
+                        ...candidate,
+                        validated: true,
+                        sopEvidence: validChunks,
+                    });
+                }
+            } catch (err) {
+                console.warn(`[InspectionController] Warning: Error checking SOP evidence for candidate: ${err.message}`);
+            }
+        }
+
+        if (validatedFindings.length === 0) {
+            return res.status(200).json({
+                success: true,
+                status: "INSUFFICIENT_EVIDENCE",
+                documentId: documentId.trim(),
+                findings: [],
+                risk: null,
+                recommendation: null,
+                approvalNote: null,
+                sources: [],
+                message: "Analysis stopped because no sufficiently relevant Knowledge Base evidence was found.",
+            });
+        }
+
         return res.status(200).json({
             success: true,
+            status: "EVIDENCE_FOUND",
             documentId: documentId.trim(),
-            findings: result.findings || [],
+            findings: validatedFindings,
         });
     } catch (error) {
         next(error);
@@ -150,6 +203,7 @@ export async function analyzeInspection(req, res, next) {
 
 /**
  * Evaluate risk and recommendations for an inspection finding.
+ * Strictly gated: risk evaluation allowed ONLY if valid KB evidence exists.
  */
 export async function assessRisk(req, res, next) {
     try {
@@ -175,13 +229,48 @@ export async function assessRisk(req, res, next) {
             });
         }
 
-        const result = await runFindingRiskAssessment(finding, { organizationId });
+        // Validate that candidate finding has supporting Knowledge Base SOP evidence
+        let sopChunks = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
+        if (sopChunks.length === 0) {
+            let sopQuery;
+            try {
+                sopQuery = buildSopQuery(finding);
+            } catch {
+                sopQuery = finding.finding;
+            }
+            sopChunks = await searchSop(sopQuery, {
+                organizationId,
+                scoreThreshold: 0.50,
+            });
+        }
+
+        const validChunks = (Array.isArray(sopChunks) ? sopChunks : []).filter((chunk) =>
+            validateSopEvidenceChunk(chunk, finding, organizationId, documentId)
+        );
+
+        if (validChunks.length === 0) {
+            return res.status(200).json({
+                success: true,
+                status: "INSUFFICIENT_EVIDENCE",
+                documentId: documentId || null,
+                riskAssessment: null,
+                recommendation: null,
+                citations: [],
+                message: "Risk assessment blocked because finding lacks valid Knowledge Base evidence",
+            });
+        }
+
+        const result = await runFindingRiskAssessment(finding, {
+            organizationId,
+            searchSop: async () => validChunks,
+        });
 
         return res.status(200).json({
             success: true,
+            status: "SUCCESS",
             documentId: documentId || null,
-            riskAssessment: result.riskAssessment,
-            recommendation: result.recommendation,
+            riskAssessment: result.riskAssessment || null,
+            recommendation: result.recommendation || null,
             citations: result.citations || [],
         });
     } catch (error) {
@@ -191,6 +280,7 @@ export async function assessRisk(req, res, next) {
 
 /**
  * Assemble and generate an Approval Note DOCX.
+ * Gated: Cannot generate approval note without validated findings and citations.
  */
 export async function generateApprovalNoteDocx(req, res, next) {
     try {
@@ -204,9 +294,129 @@ export async function generateApprovalNoteDocx(req, res, next) {
             });
         }
 
+        // Enforce Evidence Gate & Preconditions (Phase 8.1): Reject if any condition fails
+        const findings = Array.isArray(data.findings) ? data.findings : [];
+        const citations = Array.isArray(data.citations) ? data.citations : [];
+
+        if (findings.length === 0 || citations.length === 0) {
+            return res.status(400).json({
+                success: false,
+                code: "INSUFFICIENT_EVIDENCE",
+                message: "Cannot generate approval note without validated findings and authoritative Knowledge Base citations",
+            });
+        }
+
+        // Validate findings and evidence
+        for (let i = 0; i < findings.length; i++) {
+            const f = findings[i];
+            if (!f || typeof f !== "object") {
+                return res.status(400).json({
+                    success: false,
+                    code: "INSUFFICIENT_EVIDENCE",
+                    message: `Invalid finding at index ${i}`,
+                });
+            }
+            if (!f.finding || typeof f.finding !== "string" || !f.finding.trim()) {
+                return res.status(400).json({
+                    success: false,
+                    code: "INSUFFICIENT_EVIDENCE",
+                    message: `Finding at index ${i} lacks a description`,
+                });
+            }
+            const hasEvidence = (typeof f.evidence === "string" && f.evidence.trim().length > 0) ||
+                (Array.isArray(f.sopEvidence) && f.sopEvidence.length > 0);
+            if (!hasEvidence) {
+                return res.status(400).json({
+                    success: false,
+                    code: "INSUFFICIENT_EVIDENCE",
+                    message: `Finding at index ${i} lacks supporting evidence`,
+                });
+            }
+        }
+
+        // Validate citations
+        for (let i = 0; i < citations.length; i++) {
+            const c = citations[i];
+            if (!c || typeof c !== "object") {
+                return res.status(400).json({
+                    success: false,
+                    code: "INSUFFICIENT_EVIDENCE",
+                    message: `Invalid citation at index ${i}`,
+                });
+            }
+            if (!c.documentId && !c.filename) {
+                return res.status(400).json({
+                    success: false,
+                    code: "INSUFFICIENT_EVIDENCE",
+                    message: `Citation at index ${i} missing documentId and filename`,
+                });
+            }
+            if (c.organizationId && c.organizationId !== organizationId) {
+                return res.status(403).json({
+                    success: false,
+                    code: "FORBIDDEN",
+                    message: "Forbidden: cross-tenant citation references are prohibited",
+                });
+            }
+        }
+
+        // Validate risk assessment
+        if (!data.riskAssessment || typeof data.riskAssessment !== "object" || Array.isArray(data.riskAssessment)) {
+            return res.status(400).json({
+                success: false,
+                code: "INSUFFICIENT_EVIDENCE",
+                message: "Cannot generate approval note without a validated risk assessment",
+            });
+        }
+        const allowedLevels = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL", null]);
+        let riskLevel = data.riskAssessment.level;
+        if (riskLevel !== null && riskLevel !== undefined) {
+            riskLevel = String(riskLevel).trim().toUpperCase();
+        } else {
+            riskLevel = null;
+        }
+        if (!allowedLevels.has(riskLevel)) {
+            return res.status(400).json({
+                success: false,
+                code: "INSUFFICIENT_EVIDENCE",
+                message: `Invalid risk level: '${data.riskAssessment.level}'`,
+            });
+        }
+        if (typeof data.riskAssessment.reason !== "string" || !data.riskAssessment.reason.trim()) {
+            return res.status(400).json({
+                success: false,
+                code: "INSUFFICIENT_EVIDENCE",
+                message: "riskAssessment.reason must be a non-empty string",
+            });
+        }
+
+        // Validate recommendation
+        if (typeof data.recommendation !== "string" || !data.recommendation.trim()) {
+            return res.status(400).json({
+                success: false,
+                code: "INSUFFICIENT_EVIDENCE",
+                message: "Cannot generate approval note without a validated recommendation",
+            });
+        }
+
+        // Sanitize filename against directory traversal
+        let safeFilename = "Approval_Note.docx";
+        if (data.filename) {
+            try {
+                safeFilename = validateFilename(path.basename(data.filename));
+            } catch {
+                safeFilename = "Approval_Note.docx";
+            }
+        }
+
         const result = await runApprovalNoteGeneration(data, {
             organizationId,
-            filename: data.filename,
+            filename: safeFilename,
+            metadata: {
+                organizationId,
+                documentId: data.documentId || null,
+                model: "SovereignAI Gemma MLX Engine",
+            },
         });
 
         // Bind generated report to authenticated organization in reports repository
@@ -419,8 +629,33 @@ export async function runWorkflow(req, res, next) {
             }
             : null;
 
+        if (workflowResult.orchestration?.workflowOutcome === "INSUFFICIENT_EVIDENCE") {
+            return res.status(200).json({
+                success: true,
+                status: "INSUFFICIENT_EVIDENCE",
+                message: workflowResult.orchestration?.failureReason || "Analysis stopped because no sufficiently relevant Knowledge Base evidence was found.",
+                data: {
+                    reportId: null,
+                    documentId: workflowResult.documentId,
+                    filename: workflowResult.filename,
+                    chunksStored: workflowResult.chunksStored,
+                    findings: [],
+                    riskAssessment: null,
+                    riskAssessments: [],
+                    recommendation: null,
+                    recommendations: [],
+                    citations: [],
+                    sources: [],
+                    approvalNote: null,
+                    report: null,
+                    orchestration: workflowResult.orchestration,
+                },
+            });
+        }
+
         return res.status(200).json({
             success: true,
+            status: "SUCCESS",
             data: {
                 reportId: savedReport?.id || null,
                 documentId: workflowResult.documentId,

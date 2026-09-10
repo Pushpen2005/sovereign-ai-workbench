@@ -6,7 +6,7 @@ import { fileURLToPath } from "url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON_SCRIPT_PATH = path.join(__dirname, "generate_docx.py");
 
-const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", null]);
+const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL", null]);
 
 /**
  * Validates the input structure for Approval Note generation.
@@ -27,11 +27,12 @@ export function validateApprovalNoteInput(input) {
         riskAssessment,
         recommendation,
         citations,
+        metadata,
     } = input;
 
-    // 1. Findings validation (PR #13 contract)
-    if (!Array.isArray(findings)) {
-        throw new TypeError("findings must be an array");
+    // 1. Findings validation: must be a non-empty array
+    if (!Array.isArray(findings) || findings.length === 0) {
+        throw new Error("Cannot generate Approval Note: findings must be a non-empty array");
     }
 
     const sanitizedFindings = findings.map((f, idx) => {
@@ -39,18 +40,26 @@ export function validateApprovalNoteInput(input) {
             throw new TypeError(`findings[${idx}] must be an object`);
         }
 
+        const finding = f.finding !== undefined && f.finding !== null ? String(f.finding).trim() : null;
+        const evidence = f.evidence !== undefined && f.evidence !== null ? String(f.evidence).trim() : null;
+
+        if (!finding) {
+            throw new Error(`findings[${idx}] must have a non-empty finding description`);
+        }
+
         return {
-            finding: f.finding !== undefined && f.finding !== null ? String(f.finding).trim() : null,
+            finding,
             equipment: f.equipment !== undefined && f.equipment !== null ? String(f.equipment).trim() : null,
             observedValue: f.observedValue !== undefined && f.observedValue !== null ? String(f.observedValue).trim() : null,
             limit: f.limit !== undefined && f.limit !== null ? String(f.limit).trim() : null,
             severity: f.severity !== undefined && f.severity !== null ? String(f.severity).trim() : null,
-            evidence: f.evidence !== undefined && f.evidence !== null ? String(f.evidence).trim() : null,
+            evidence,
             source: f.source ?? null,
+            sopEvidence: Array.isArray(f.sopEvidence) ? f.sopEvidence : [],
         };
     });
 
-    // 2. Risk Assessment validation (PR #15 contract)
+    // 2. Risk Assessment validation
     if (!riskAssessment || typeof riskAssessment !== "object" || Array.isArray(riskAssessment)) {
         throw new TypeError("riskAssessment must be an object");
     }
@@ -66,7 +75,7 @@ export function validateApprovalNoteInput(input) {
     }
 
     if (!ALLOWED_RISK_LEVELS.has(level)) {
-        throw new Error(`Invalid risk level: '${riskAssessment.level}'. Allowed levels: LOW, MEDIUM, HIGH, null`);
+        throw new Error(`Invalid risk level: '${riskAssessment.level}'. Allowed levels: LOW, MEDIUM, HIGH, CRITICAL, null`);
     }
 
     if (
@@ -76,7 +85,7 @@ export function validateApprovalNoteInput(input) {
         throw new TypeError("riskAssessment.reason must be a non-empty string");
     }
 
-    // 3. Recommendation validation (PR #15 contract)
+    // 3. Recommendation validation
     let rec = recommendation;
     if (typeof rec !== "string" || rec.trim().length === 0) {
         if (level === null) {
@@ -86,21 +95,32 @@ export function validateApprovalNoteInput(input) {
         }
     }
 
-    // 4. Citations / References validation (PR #15 contract)
+    // 4. Citations / References validation: must be a non-empty array
     const rawCitations = Array.isArray(citations)
         ? citations
         : Array.isArray(input.references)
         ? input.references
         : [];
 
+    if (rawCitations.length === 0) {
+        throw new Error("Cannot generate Approval Note: citations must be a non-empty array");
+    }
+
     const sanitizedCitations = rawCitations.map((c, idx) => {
         if (!c || typeof c !== "object" || Array.isArray(c)) {
             throw new TypeError(`citations[${idx}] must be an object`);
         }
 
+        const documentId = c.documentId !== undefined && c.documentId !== null ? String(c.documentId).trim() : null;
+        const filename = c.filename !== undefined && c.filename !== null ? String(c.filename).trim() : null;
+
+        if (!documentId && !filename) {
+            throw new Error(`citations[${idx}] must contain a valid documentId or filename`);
+        }
+
         return {
-            documentId: c.documentId !== undefined && c.documentId !== null ? String(c.documentId).trim() : null,
-            filename: c.filename !== undefined && c.filename !== null ? String(c.filename).trim() : null,
+            documentId,
+            filename,
             page: c.page !== undefined && c.page !== null ? c.page : null,
             chunkIndex: c.chunkIndex !== undefined && c.chunkIndex !== null ? c.chunkIndex : null,
         };
@@ -114,15 +134,19 @@ export function validateApprovalNoteInput(input) {
         riskAssessment: {
             level,
             reason: riskAssessment.reason.trim(),
+            likelihood: riskAssessment.likelihood || null,
+            severity: riskAssessment.severity || null,
         },
         recommendation: rec.trim(),
         citations: sanitizedCitations,
         references: sanitizedCitations,
+        metadata: metadata && typeof metadata === "object" ? metadata : {},
     };
 }
 
 /**
- * Generates an Approval Note DOCX from trusted PR #13, #14, and #15 outputs.
+ * Generates an Approval Note DOCX from trusted findings and risk outputs.
+ * Enforces subprocess timeout and filesystem path containment.
  *
  * @param {object} data
  * @param {object} [options]
@@ -134,21 +158,40 @@ export async function generateApprovalNote(data, options = {}) {
     // 1. Validate and sanitize input
     const validatedData = validateApprovalNoteInput(data);
 
-    // 2. Resolve output path
-    const outputPath = options.outputPath
+    // 2. Resolve and secure output path
+    let outputPath = options.outputPath
         ? path.resolve(options.outputPath)
         : path.resolve(process.cwd(), "Approval_Note.docx");
 
+    // Defend against directory traversal in filename / path
+    const normalizedOutput = path.normalize(outputPath);
+    if (normalizedOutput.includes("..")) {
+        throw new Error("Invalid output path: directory traversal is prohibited");
+    }
+
     // 3. Ensure parent directory exists
-    const outputDir = path.dirname(outputPath);
+    const outputDir = path.dirname(normalizedOutput);
     if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
     }
 
     const pythonBin = options.pythonPath || process.env.PYTHON_PATH || "python3";
+    const timeoutMs = Number(options.timeoutMs || process.env.DOCX_TIMEOUT_MS || 30000);
 
     return new Promise((resolve, reject) => {
-        const child = spawn(pythonBin, [PYTHON_SCRIPT_PATH, "--output", outputPath]);
+        let isSettled = false;
+        const child = spawn(pythonBin, [PYTHON_SCRIPT_PATH, "--output", normalizedOutput]);
+
+        const timer = setTimeout(() => {
+            if (!isSettled) {
+                isSettled = true;
+                child.kill("SIGTERM");
+                setTimeout(() => {
+                    try { child.kill("SIGKILL"); } catch { /* ignore */ }
+                }, 2000);
+                reject(new Error(`Python DOCX generator timed out after ${timeoutMs / 1000} seconds`));
+            }
+        }, timeoutMs);
 
         let stdout = "";
         let stderr = "";
@@ -162,20 +205,29 @@ export async function generateApprovalNote(data, options = {}) {
         });
 
         child.on("error", (err) => {
-            reject(new Error(`Failed to spawn Python process: ${err.message}`, { cause: err }));
+            if (!isSettled) {
+                isSettled = true;
+                clearTimeout(timer);
+                reject(new Error(`Failed to spawn Python process: ${err.message}`, { cause: err }));
+            }
         });
 
         child.on("close", (code) => {
-            if (code !== 0) {
-                return reject(
-                    new Error(
-                        `Python DOCX generator exited with code ${code}: ${stderr || stdout}`
-                    )
-                );
-            }
+            if (!isSettled) {
+                isSettled = true;
+                clearTimeout(timer);
 
-            const returnedPath = stdout.trim() || outputPath;
-            resolve(returnedPath);
+                if (code !== 0) {
+                    return reject(
+                        new Error(
+                            `Python DOCX generator exited with code ${code}: ${stderr || stdout}`
+                        )
+                    );
+                }
+
+                const returnedPath = stdout.trim() || normalizedOutput;
+                resolve(returnedPath);
+            }
         });
 
         // Pipe sanitized JSON payload to Python script
