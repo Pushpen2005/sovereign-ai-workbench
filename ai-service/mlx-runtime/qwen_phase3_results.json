@@ -1,0 +1,38 @@
+{
+  "model_path": "/Users/pushpentiwari/sovereign-ai-workbench/ai-service/mlx-runtime/models/qwen2.5-coder-3b-4bit",
+  "cold_load_time_s": 2.691049417015165,
+  "initial_memory_mb": 91.171875,
+  "post_load_memory_mb": 355.15625,
+  "memory_delta_mb": 263.984375,
+  "cold_run": {
+    "latency": 14.054563791956753,
+    "tokens": 256,
+    "tps": 18.214723970764965,
+    "response": "Here's a Python function that calculates the average of a list of numbers, handling the case where the list might be empty:\n\n```python\ndef calculate_average(numbers):\n    \"\"\"\n    Calculate the average of a list of numbers.\n\n    Args:\n    numbers (list): A list of numbers.\n\n    Returns:\n    float: The average of the numbers. Returns 0 if the list is empty.\n    \"\"\"\n    if not numbers:\n        return 0\n    return sum(numbers) / len(numbers)\n\n# Example usage:\nnumbers = [10, 20, 30, 40, 50]\naverage = calculate_average(numbers)\nprint(\"The average is:\", average)\n```\n\n### Explanation:\n\n- **Function Definition**: The function `calculate_average` takes a single argument `numbers`, which is expected to be a list of numbers.\n- **Empty List Check**: The function first checks if the list `numbers` is empty using `if not numbers`. If the list is empty, it returns `0` to avoid division by zero.\n- **Average Calculation**: If the list is not empty, the function calculates the average by summing all the numbers in the list using `sum(numbers)` and then dividing by the number of elements in the list"
+  },
+  "warm_runs": [
+    {
+      "run": 1,
+      "latency": 12.909546250011772,
+      "tokens": 256,
+      "tps": 19.830286444015535,
+      "response": "Here's a Python function that calculates the average of a list of numbers, handling the case where the list might be empty:\n\n```python\ndef calculate_average(numbers):\n    \"\"\"\n    Calculate the average of a list of numbers.\n\n    Args:\n    numbers (list): A list of numbers.\n\n    Returns:\n    float: The average of the numbers. Returns 0 if the list is empty.\n    \"\"\"\n    if not numbers:\n        return 0\n    return sum(numbers) / len(numbers)\n\n# Example usage:\nnumbers = [10, 20, 30, 40, 50]\naverage = calculate_average(numbers)\nprint(\"The average is:\", average)\n```\n\n### Explanation:\n\n- **Function Definition**: The function `calculate_average` takes a single argument `numbers`, which is expected to be a list of numbers.\n- **Empty List Check**: The function first checks if the list `numbers` is empty using `if not numbers`. If the list is empty, it returns `0` to avoid division by zero.\n- **Average Calculation**: If the list is not empty, the function calculates the average by summing all the numbers in the list using `sum(numbers)` and then dividing by the number of elements in the list"
+    },
+    {
+      "run": 2,
+      "latency": 13.498304666019976,
+      "tokens": 256,
+      "tps": 18.965344636533718,
+      "response": "Here's a Python function that calculates the average of a list of numbers, handling the case where the list might be empty:\n\n```python\ndef calculate_average(numbers):\n    \"\"\"\n    Calculate the average of a list of numbers.\n\n    Args:\n    numbers (list): A list of numbers.\n\n    Returns:\n    float: The average of the numbers. Returns 0 if the list is empty.\n    \"\"\"\n    if not numbers:\n        return 0\n    return sum(numbers) / len(numbers)\n\n# Example usage:\nnumbers = [10, 20, 30, 40, 50]\naverage = calculate_average(numbers)\nprint(\"The average is:\", average)\n```\n\n### Explanation:\n\n- **Function Definition**: The function `calculate_average` takes a single argument `numbers`, which is expected to be a list of numbers.\n- **Empty List Check**: The function first checks if the list `numbers` is empty using `if not numbers`. If the list is empty, it returns `0` to avoid division by zero.\n- **Average Calculation**: If the list is not empty, the function calculates the average by summing all the numbers in the list using `sum(numbers)` and then dividing by the number of elements in the list"
+    },
+    {
+      "run": 3,
+      "latency": 13.598818041966297,
+      "tokens": 256,
+      "tps": 18.825165482027742,
+      "response": "Here's a Python function that calculates the average of a list of numbers, handling the case where the list might be empty:\n\n```python\ndef calculate_average(numbers):\n    \"\"\"\n    Calculate the average of a list of numbers.\n\n    Args:\n    numbers (list): A list of numbers.\n\n    Returns:\n    float: The average of the numbers. Returns 0 if the list is empty.\n    \"\"\"\n    if not numbers:\n        return 0\n    return sum(numbers) / len(numbers)\n\n# Example usage:\nnumbers = [10, 20, 30, 40, 50]\naverage = calculate_average(numbers)\nprint(\"The average is:\", average)\n```\n\n### Explanation:\n\n- **Function Definition**: The function `calculate_average` takes a single argument `numbers`, which is expected to be a list of numbers.\n- **Empty List Check**: The function first checks if the list `numbers` is empty using `if not numbers`. If the list is empty, it returns `0` to avoid division by zero.\n- **Average Calculation**: If the list is not empty, the function calculates the average by summing all the numbers in the list using `sum(numbers)` and then dividing by the number of elements in the list"
+    }
+  ],
+  "avg_warm_latency_s": 13.335556319332682,
+  "avg_warm_tps": 19.206932187525666
+}

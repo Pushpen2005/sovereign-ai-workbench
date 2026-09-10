@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<!--
+  SovereignAI Local MLX Model Runtime LaunchAgent
+  Project-local template for optional automatic startup on macOS login.
+
+  INSTALLATION INSTRUCTIONS (Optional - run only if automatic boot startup is desired):
+    1. Copy to user LaunchAgents:
+       cp com.sovereignai.mlx-servers.plist ~/Library/LaunchAgents/
+    2. Load into launchd:
+       launchctl load ~/Library/LaunchAgents/com.sovereignai.mlx-servers.plist
+    3. Check status:
+       launchctl list | grep sovereignai
+    4. Unload / remove:
+       launchctl unload ~/Library/LaunchAgents/com.sovereignai.mlx-servers.plist
+       rm ~/Library/LaunchAgents/com.sovereignai.mlx-servers.plist
+-->
+<dict>
+    <key>Label</key>
+    <string>com.sovereignai.mlx-servers</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/pushpentiwari/sovereign-ai-workbench/ai-service/mlx-runtime/start-mlx-servers.sh</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <false/>
+    <key>WorkingDirectory</key>
+    <string>/Users/pushpentiwari/sovereign-ai-workbench/ai-service/mlx-runtime</string>
+    <key>StandardOutPath</key>
+    <string>/Users/pushpentiwari/sovereign-ai-workbench/ai-service/mlx-runtime/logs/launchagent.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/pushpentiwari/sovereign-ai-workbench/ai-service/mlx-runtime/logs/launchagent.err.log</string>
+</dict>
+</plist>
