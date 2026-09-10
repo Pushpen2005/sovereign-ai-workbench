@@ -214,3 +214,117 @@ export async function runInspectionAgentController(req, res, next) {
         next(error);
     }
 }
+
+/**
+ * Dedicated Phase 7 Inspection Agent analysis endpoint.
+ * POST /api/v1/agents/inspection/analyze
+ */
+export async function analyzeInspectionController(req, res, next) {
+    try {
+        const { documentId, goal, organizationId: bodyOrgId } = req.body || {};
+
+        if (!documentId || typeof documentId !== "string" || !documentId.trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "A non-empty 'documentId' string is required.",
+            });
+        }
+
+        // Authoritatively resolve organizationId: from auth context, or bodyOrgId if unauthenticated (e.g. system test)
+        let organizationId;
+        try {
+            organizationId = resolveAuthenticatedOrganization(req);
+        } catch (authErr) {
+            if (bodyOrgId && typeof bodyOrgId === "string" && bodyOrgId.trim()) {
+                organizationId = bodyOrgId.trim();
+            } else {
+                throw authErr;
+            }
+        }
+
+        const userId = req.user?.id || req.user?.userId || null;
+
+        const result = await runInspectionAgent({
+            documentId: documentId.trim(),
+            goal: typeof goal === "string" && goal.trim() ? goal.trim() : undefined,
+            organizationId,
+            userId,
+        });
+
+        return res.status(200).json({
+            success: true,
+            runId: result.runId,
+            status: result.status,
+            result: result.result,
+        });
+    } catch (error) {
+        if (error.statusCode) {
+            return res.status(error.statusCode).json({
+                success: false,
+                message: error.message,
+            });
+        }
+        next(error);
+    }
+}
+
+/**
+ * Retrieves execution status and activity for a dedicated inspection run.
+ * GET /api/v1/agents/inspection/runs/:runId
+ */
+export async function getInspectionRunController(req, res, next) {
+    try {
+        const { runId } = req.params;
+        let organizationId = null;
+        try {
+            organizationId = resolveAuthenticatedOrganization(req);
+        } catch (_) {
+            organizationId = req.headers["x-organization-id"] || null;
+        }
+
+        const run = await getAgentRunByRunId(runId, organizationId);
+        if (!run) {
+            const foreignRun = await getAgentRunByRunId(runId);
+            if (foreignRun) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Forbidden: Run belongs to another organization.",
+                });
+            }
+            return res.status(404).json({
+                success: false,
+                message: `Inspection run '${runId}' not found.`,
+            });
+        }
+
+        const steps = await getStepsByRunId(runId, run.organizationId);
+
+        let finalResult = null;
+        if (run.finalAnswer) {
+            try {
+                finalResult = JSON.parse(run.finalAnswer);
+            } catch (_) {
+                finalResult = run.finalAnswer;
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            runId: run.runId,
+            status: run.status,
+            goal: run.goal,
+            startedAt: run.startedAt,
+            completedAt: run.completedAt,
+            result: finalResult,
+            steps: steps.map((s) => ({
+                step: s.node,
+                status: s.status,
+                timestamp: s.createdAt,
+                message: s.toolResultSummary,
+            })),
+        });
+    } catch (error) {
+        next(error);
+    }
+}
+

@@ -26,6 +26,15 @@ export function useDocuments(options = {}) {
   const documentTypeFilter = typeof options === 'string' ? options : options?.documentType;
   const state = useDocumentState();
   const actions = useDocumentActions();
+  const {
+    setDocuments,
+    uploadStart,
+    uploadSuccess,
+    uploadError,
+    uploadReset,
+    selectDocument,
+    clearSelection,
+  } = actions;
   const [loading, setLoading] = useState(false);
   const [actionError, setActionError] = useState(null);
 
@@ -38,7 +47,7 @@ export function useDocuments(options = {}) {
     try {
       const res = await fetchDocumentsApi(documentTypeFilter);
       if (res && res.success && Array.isArray(res.documents)) {
-        actions.setDocuments(res.documents);
+        setDocuments(res.documents);
       }
     } catch (err) {
       console.warn('Could not fetch persisted documents from backend:', err?.message);
@@ -46,7 +55,7 @@ export function useDocuments(options = {}) {
     } finally {
       setLoading(false);
     }
-  }, [actions, documentTypeFilter]);
+  }, [setDocuments, documentTypeFilter]);
 
   // Load documents on initial mount and when filter changes
   useEffect(() => {
@@ -75,31 +84,31 @@ export function useDocuments(options = {}) {
       }
       const sizeMb = file.size / 1024 / 1024;
       if (sizeMb > MAX_FILE_SIZE_MB) {
-        actions.uploadError(
+        uploadError(
           `File is too large (${sizeMb.toFixed(1)} MB). Maximum allowed size is ${MAX_FILE_SIZE_MB} MB.`,
         );
         return;
       }
 
       // ── Begin upload ──────────────────────────────────────────────────────
-      actions.uploadStart({ name: file.name, sizeMb: +sizeMb.toFixed(2), documentType: targetType });
+      uploadStart({ name: file.name, sizeMb: +sizeMb.toFixed(2), documentType: targetType });
 
       try {
         // Ingest into Qdrant + PostgreSQL
         const result = await uploadDocumentApi(file, targetType);
 
         // Backend returns: { success, documentId, filename, originalFilename, documentType, chunksStored }
-        actions.uploadSuccess(result);
+        uploadSuccess(result);
 
         // Refetch to sync full database state
         await loadDocuments();
       } catch (err) {
         // Never expose raw stack traces; show human-readable message
         const message = err?.message || 'Upload failed. Please try again.';
-        actions.uploadError(message);
+        uploadError(message);
       }
     },
-    [actions, loadDocuments, documentTypeFilter],
+    [uploadError, uploadStart, uploadSuccess, loadDocuments, documentTypeFilter],
   );
 
   /**
@@ -120,9 +129,9 @@ export function useDocuments(options = {}) {
   );
 
   const clearError = useCallback(() => {
-    actions.uploadReset();
+    uploadReset();
     setActionError(null);
-  }, [actions]);
+  }, [uploadReset]);
 
   return {
     // Document list (loaded from PostgreSQL backend)
@@ -132,8 +141,8 @@ export function useDocuments(options = {}) {
 
     // Selection
     selectedDocument: state.selectedDocument,
-    selectDocument: actions.selectDocument,
-    clearSelection: actions.clearSelection,
+    selectDocument,
+    clearSelection,
 
     // Upload state machine
     uploadState: state.uploadState,        // 'idle' | 'uploading' | 'indexing' | 'success' | 'error'
@@ -146,7 +155,7 @@ export function useDocuments(options = {}) {
     // Actions
     uploadDocument,
     deleteDocument,
-    resetUpload: actions.uploadReset,
+    resetUpload: uploadReset,
     clearError,
     refreshDocuments: loadDocuments,
   };

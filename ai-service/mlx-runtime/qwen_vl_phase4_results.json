@@ -1,0 +1,40 @@
+{
+  "model": "qwen2.5-vl:3b-4bit",
+  "model_path": "/Users/pushpentiwari/sovereign-ai-workbench/ai-service/mlx-runtime/models/qwen2.5-vl-3b-4bit",
+  "cold_load_s": 9.325,
+  "peak_memory_mb": 112.27,
+  "tests": [
+    {
+      "test_id": "TEST_A_PUMP",
+      "name": "OCR & Information Extraction",
+      "latency_s": 11.031,
+      "tokens": 97,
+      "tokens_per_sec": 8.79,
+      "output": "The image shows a notification or alert message related to an equipment. Here is the information displayed:\n\n- **Equipment ID:** Pump-03\n- **Bearing Temperature:** 92\u00b0C\n- **Operational Status:** High Alert\n- **Location:** Sector-4 Facility-A\n\nThis message indicates that the bearing temperature of the Pump-03 has reached 92\u00b0C, which is a high alert status, and the location is Sector-4 Facility-A."
+    },
+    {
+      "test_id": "TEST_B_DIAGRAM",
+      "name": "Engineering Diagram Description",
+      "latency_s": 5.604,
+      "tokens": 96,
+      "tokens_per_sec": 17.13,
+      "output": "The diagram displays two main components with their respective labels and measurements:\n\n1. **[TANK-T01]**\n   - **Level**: 65%\n   - **Status**: Normal\n\n2. **[VALVE-V01]**\n   - **State**: Open\n   - **Flow**: 120 L/min\n\nAdditionally, there is a note at the bottom indicating:\n- **Pressure Gauge PG-02**: 4.5 bar"
+    },
+    {
+      "test_id": "TEST_C_STRUCTURED_JSON",
+      "name": "Structured JSON Extraction",
+      "latency_s": 2.839,
+      "tokens": 36,
+      "tokens_per_sec": 12.68,
+      "output": "```json\n{\n  \"equipment_id\": \"Pump-03\",\n  \"temperature\": \"92\u00b0C\",\n  \"status\": \"High Alert\"\n}\n```"
+    },
+    {
+      "test_id": "TEST_D_NEGATIVE",
+      "name": "Negative Information Check (Hallucination Resistance)",
+      "latency_s": 1.624,
+      "tokens": 11,
+      "tokens_per_sec": 6.78,
+      "output": "The image does not show any bearing temperature information."
+    }
+  ]
+}

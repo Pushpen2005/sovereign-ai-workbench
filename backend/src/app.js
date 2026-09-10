@@ -154,6 +154,7 @@ app.use("/api/v1/reports", requireAuth, reportsRouter);
 app.use("/api/v1/coding", requireAuth, codingRouter);
 app.use("/api/v1/vision", requireAuth, visionRouter);
 app.use("/api/v1/agent", requireAuth, agentRouter);
+app.use("/api/v1/agents", requireAuth, agentRouter);
 app.use("/api/v1/knowledge", requireAuth, knowledgeRouter);
 
 /**
@@ -550,6 +551,29 @@ app.get('/api/v1/system/performance', async (req, res) => {
             success: false,
             message: `Performance diagnostic failed: ${err.message}`,
         });
+    }
+});
+
+/**
+ * PHASE 5 — Local Model Runtime Status Endpoint
+ * GET /api/v1/system/models/status
+ * GET /api/system/models/status
+ *
+ * Returns operational metadata for all managed local model servers (status, port, pid, RSS, lastUsedAt).
+ * Zero confidential prompt, image, or document content is exposed.
+ */
+app.get(['/api/v1/system/models/status', '/api/system/models/status'], async (req, res) => {
+    try {
+        const { localModelRuntimeManager } = await import("../../ai-service/llm/runtime/localModelRuntime.manager.js");
+        await Promise.all([
+            localModelRuntimeManager.discoverServer("gemma"),
+            localModelRuntimeManager.discoverServer("qwen_coder"),
+            localModelRuntimeManager.discoverServer("qwen_vl"),
+        ]);
+        const statuses = localModelRuntimeManager.getAllStatuses();
+        res.status(200).json(statuses);
+    } catch (err) {
+        res.status(500).json({ error: `Model runtime status failed: ${err.message}` });
     }
 });
 

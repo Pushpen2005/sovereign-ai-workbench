@@ -37,6 +37,7 @@ export async function createAgentRun({
     goal,
     model = "llama3.2:3b",
     status = "in_progress",
+    documentId = null,
     startedAt = new Date(),
 }) {
     if (!runId || typeof runId !== "string") {
@@ -58,19 +59,22 @@ export async function createAgentRun({
             goal,
             model,
             status,
+            document_id,
             started_at,
             created_at,
             updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
         ON CONFLICT (run_id) DO UPDATE SET
             updated_at = NOW(),
-            status = EXCLUDED.status
+            status = EXCLUDED.status,
+            document_id = COALESCE(EXCLUDED.document_id, agent_runs.document_id)
         RETURNING
             id,
             run_id AS "runId",
             user_id AS "userId",
             organization_id AS "organizationId",
+            document_id AS "documentId",
             goal,
             model,
             status,
@@ -93,6 +97,7 @@ export async function createAgentRun({
         goal,
         model,
         status,
+        documentId,
         startedAt,
     ];
 
@@ -210,6 +215,7 @@ export async function getAgentRunByRunId(runId, organizationId) {
             run_id AS "runId",
             user_id AS "userId",
             organization_id AS "organizationId",
+            document_id AS "documentId",
             goal,
             model,
             status,
@@ -253,6 +259,7 @@ export async function getAgentRunById(id, organizationId) {
             run_id AS "runId",
             user_id AS "userId",
             organization_id AS "organizationId",
+            document_id AS "documentId",
             goal,
             model,
             status,
@@ -327,6 +334,7 @@ export async function listAgentRuns(organizationId, {
             run_id AS "runId",
             user_id AS "userId",
             organization_id AS "organizationId",
+            document_id AS "documentId",
             goal,
             model,
             status,

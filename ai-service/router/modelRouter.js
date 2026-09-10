@@ -79,7 +79,8 @@ const INSPECTION_KEYWORDS = [
 const CODING_KEYWORDS = [
     // explicit code verbs
     "write code", "write a function", "write a script", "write a program",
-    "write python", "write javascript", "write java", "write sql", "write bash",
+    "write python", "write a python", "python program", "write a python program", "write a python script",
+    "write javascript", "write java", "write sql", "write bash",
     "write a query", "write a class", "write an algorithm",
     // debug / fix code
     "debug", "fix this code", "fix this function", "fix this script",
@@ -221,11 +222,27 @@ export function getModelRegistry() {
     const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || process.env.OLLAMA_MODEL || "llama3.2:3b";
     const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
     const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
-    const codingModel     = process.env.CODING_MODEL     || process.env.MODEL_CODING     || defaultModel;
-    const visionModel     = process.env.VISION_MODEL     || process.env.MODEL_VISION     || "moondream";
+
+    // Coding model: by default uses CODING_MODEL (llama3.2:3b), prepared for Qwen Coder MLX in Phase 3
+    const codingMlxEnabled = (process.env.CODING_MLX_ENABLED || "false").toLowerCase() === "true" ||
+                             (process.env.CODING_MODEL_PROVIDER || "").toLowerCase() === "mlx";
+    const qwenCoderModel   = process.env.QWEN_CODER_MODEL || "qwen2.5-coder:3b-4bit";
+    const codingModel      = codingMlxEnabled
+        ? qwenCoderModel
+        : (process.env.CODING_MODEL || process.env.MODEL_CODING || defaultModel);
+
+    // Vision model: by default uses VISION_MODEL (moondream), prepared for Qwen VL MLX in Phase 4
+    const visionMlxEnabled = (process.env.VISION_MLX_ENABLED || "false").toLowerCase() === "true" ||
+                             (process.env.VISION_MODEL_PROVIDER || "").toLowerCase() === "mlx";
+    const qwenVlModel      = process.env.QWEN_VL_MODEL || "qwen2.5-vl:3b-4bit";
+    const visionModel      = visionMlxEnabled
+        ? qwenVlModel
+        : (process.env.VISION_MODEL || process.env.MODEL_VISION || "moondream");
 
     const codingFallbackEnabled =
         (process.env.CODING_MODEL_FALLBACK || "true").toLowerCase() !== "false";
+    const visionFallbackEnabled =
+        (process.env.VISION_MODEL_FALLBACK || "true").toLowerCase() !== "false";
 
     return {
         [TASK_TYPE.DOCUMENT_ANALYSIS]: documentModel,
@@ -238,6 +255,9 @@ export function getModelRegistry() {
         defaultModel,
         visionModel,
         codingFallbackEnabled,
+        visionFallbackEnabled,
+        qwenCoderModel,
+        qwenVlModel,
     };
 }
 
@@ -260,6 +280,20 @@ export function getAllowedModels() {
         "llama3.2",
         "moondream",
         "moondream:latest",
+        "gemma-2-2b-it-4bit",
+        "gemma-2-2b-it",
+        "gemma-2-2b",
+        "gemma-2-9b-it-4bit",
+        "gemma-2-9b-it",
+        "qwen2.5-coder:3b-4bit",
+        "qwen2.5-coder:3b",
+        "qwen2.5-coder",
+        "qwen2.5-coder:7b-4bit",
+        "qwen2.5-coder:7b",
+        "qwen2.5-vl:3b-4bit",
+        "qwen2.5-vl:3b",
+        "qwen2.5-vl",
+        "models/qwen2.5-vl-3b-4bit",
     ].filter(Boolean));
 
     const extra = process.env.ALLOWED_MODELS;
@@ -344,6 +378,67 @@ async function getCachedOllamaModels(forceRefresh = false) {
 
 export async function checkModelAvailability(modelName) {
     if (!modelName || typeof modelName !== "string") return false;
+    const lower = modelName.toLowerCase();
+
+    // Check MLX runtime for Qwen VL models (Port :8082)
+    if (lower.includes("vl") || lower.includes("qwen2.5-vl") || lower.includes("vision-mlx")) {
+        const qwenVlUrl =
+            process.env.QWEN_VL_MLX_URL ||
+            process.env.MLX_VISION_URL ||
+            "http://127.0.0.1:8082";
+        try {
+            let res;
+            try {
+                res = await fetch(`${qwenVlUrl}/health`, { signal: AbortSignal.timeout(2000) });
+            } catch {
+                if (qwenVlUrl.includes("host.docker.internal")) {
+                    res = await fetch("http://127.0.0.1:8082/health", { signal: AbortSignal.timeout(2000) });
+                }
+            }
+            return Boolean(res && res.ok);
+        } catch {
+            return false;
+        }
+    }
+
+    // Check MLX runtime for Qwen Coder models (Port :8081)
+    if (lower.startsWith("qwen") || lower.includes("qwen2.5-coder") || lower.includes("coder-mlx")) {
+        const qwenUrl =
+            process.env.QWEN_CODER_MLX_URL ||
+            process.env.MLX_CODER_URL ||
+            "http://127.0.0.1:8081";
+        try {
+            let res;
+            try {
+                res = await fetch(`${qwenUrl}/health`, { signal: AbortSignal.timeout(2000) });
+            } catch {
+                if (qwenUrl.includes("host.docker.internal")) {
+                    res = await fetch("http://127.0.0.1:8081/health", { signal: AbortSignal.timeout(2000) });
+                }
+            }
+            return Boolean(res && res.ok);
+        } catch {
+            return false;
+        }
+    }
+
+    // Check MLX runtime for Gemma models (Port :8080)
+    if (lower.startsWith("gemma") || lower.includes("mlx")) {
+        const mlxUrl = process.env.MLX_URL || "http://127.0.0.1:8080";
+        try {
+            let res;
+            try {
+                res = await fetch(`${mlxUrl}/health`, { signal: AbortSignal.timeout(2000) });
+            } catch {
+                if (mlxUrl.includes("host.docker.internal")) {
+                    res = await fetch("http://127.0.0.1:8080/health", { signal: AbortSignal.timeout(2000) });
+                }
+            }
+            return Boolean(res && res.ok);
+        } catch {
+            return false;
+        }
+    }
 
     try {
         const models = await getCachedOllamaModels();
@@ -478,6 +573,31 @@ export async function routeTask(requestOrInput, options = {}) {
 
     // Model not installed ─────────────────────────────────────────────────────
     if (taskType === TASK_TYPE.VISION) {
+        const isQwenVl = registryModel.toLowerCase().includes("vl") || registryModel.toLowerCase().includes("qwen");
+        const fallbackVisionModel = "moondream";
+        const visionFallbackEnabled = registry.visionFallbackEnabled !== false;
+
+        if (isQwenVl && visionFallbackEnabled && registryModel !== fallbackVisionModel) {
+            const fallbackAvailable = await checkModelAvailability(fallbackVisionModel);
+            if (fallbackAvailable) {
+                const latencyMs = Date.now() - tStart;
+                const reason = `Vision model '${registryModel}' is unavailable. Falling back to '${fallbackVisionModel}'.`;
+                console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: fallbackVisionModel, latencyMs, isFallback: true, local: true })}`);
+                return {
+                    taskType,
+                    canonicalTaskType: toCanonicalTaskType(taskType),
+                    model:         fallbackVisionModel,
+                    selectedModel: fallbackVisionModel,
+                    reason,
+                    routingReason: reason,
+                    local:         true,
+                    isFallback:    true,
+                    registryModel,
+                    latencyMs,
+                };
+            }
+        }
+
         console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "vision_model_unavailable", model: registryModel })}`);
         const err = new RouterError(
             `Configured local vision model '${registryModel}' is not available in Ollama. ` +

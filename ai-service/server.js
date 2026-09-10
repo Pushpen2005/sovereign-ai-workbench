@@ -71,6 +71,22 @@ const server = http.createServer(async (req, res) => {
     );
   }
 
+  if (url.pathname === "/api/system/models/status" || url.pathname === "/api/v1/system/models/status") {
+    try {
+      const { localModelRuntimeManager } = await import("./llm/runtime/localModelRuntime.manager.js");
+      await Promise.all([
+        localModelRuntimeManager.discoverServer("gemma"),
+        localModelRuntimeManager.discoverServer("qwen_coder"),
+        localModelRuntimeManager.discoverServer("qwen_vl"),
+      ]);
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify(localModelRuntimeManager.getAllStatuses()));
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ error: err.message }));
+    }
+  }
+
   res.writeHead(404, { "Content-Type": "application/json" });
   res.end(JSON.stringify({ error: "Not Found" }));
 });

@@ -127,6 +127,7 @@ function findEvidenceSources(evidence, chunks) {
         })
         .map((chunk) => ({
             documentId: chunk.documentId,
+            filename: chunk.filename,
             page: chunk.page,
             chunkIndex: chunk.chunkIndex,
             score: chunk.score,
@@ -143,6 +144,7 @@ function findEvidenceSources(evidence, chunks) {
                 if (targetChunk && typeof targetChunk.text === "string") {
                     matchingSources.push({
                         documentId: targetChunk.documentId,
+                        filename: targetChunk.filename,
                         page: targetChunk.page,
                         chunkIndex: targetChunk.chunkIndex,
                         score: targetChunk.score,
@@ -162,6 +164,7 @@ function findEvidenceSources(evidence, chunks) {
                 if (matchedWords.length / words.length >= 0.7) {
                     matchingSources.push({
                         documentId: chunk.documentId,
+                        filename: chunk.filename,
                         page: chunk.page,
                         chunkIndex: chunk.chunkIndex,
                         score: chunk.score,

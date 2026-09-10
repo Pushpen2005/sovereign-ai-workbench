@@ -1,9 +1,25 @@
+/**
+ * Model Gateway (ai-service/llm/llm.service.js)
+ *
+ * Centralized inference gateway orchestrating local model runtime adapters:
+ *   - GemmaMlxAdapter (Native macOS MLX server via :8080)
+ *   - OllamaAdapter (Local Ollama daemon via :11434)
+ *
+ * INVARIANTS PRESERVED:
+ *   - Identical external signature: generateAnswer(prompt, modelOrOptions, maybeOptions)
+ *   - Identical error contract: LLMError class with status code & error codes
+ *   - Identical streaming contract: options.onChunk callback
+ *   - Defense-in-depth sovereign allowlist enforcement
+ */
+
 import { isModelAllowed } from "../router/modelRouter.js";
+import { OllamaAdapter } from "./adapters/ollama.adapter.js";
+import { GemmaMlxAdapter } from "./adapters/gemmaMlx.adapter.js";
+import { QwenCoderMlxAdapter } from "./adapters/qwenCoderMlx.adapter.js";
+import { QwenVlMlxAdapter } from "./adapters/qwenVlMlx.adapter.js";
+import { localModelRuntimeManager, isManagedModel } from "./runtime/localModelRuntime.manager.js";
 
-const OLLAMA_URL = process.env.OLLAMA_URL;
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
-
-class LLMError extends Error {
+export class LLMError extends Error {
     constructor(message, options = {}) {
         super(message, options);
         this.name = "LLMError";
@@ -15,8 +31,55 @@ class LLMError extends Error {
     }
 }
 
-async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
-    // Validate prompt
+// Instantiate singleton adapters
+const ollamaAdapter = new OllamaAdapter();
+const gemmaMlxAdapter = new GemmaMlxAdapter();
+const qwenCoderMlxAdapter = new QwenCoderMlxAdapter();
+const qwenVlMlxAdapter = new QwenVlMlxAdapter();
+
+const ADAPTERS = Object.freeze({
+    ollama: ollamaAdapter,
+    mlx: gemmaMlxAdapter,
+    gemma_mlx: gemmaMlxAdapter,
+    qwen_coder_mlx: qwenCoderMlxAdapter,
+    qwen_mlx: qwenCoderMlxAdapter,
+    qwen_vl_mlx: qwenVlMlxAdapter,
+    vision_mlx: qwenVlMlxAdapter,
+});
+
+/**
+ * Returns the active provider adapter for the specified model and options.
+ *
+ * @param {string} modelName
+ * @param {object} options
+ * @returns {import("./adapters/base.adapter.js").BaseAdapter}
+ */
+export function resolveAdapter(modelName, options = {}) {
+    const explicitProvider = options.provider || process.env.LLM_PROVIDER;
+
+    if (explicitProvider && ADAPTERS[explicitProvider.toLowerCase()]) {
+        return ADAPTERS[explicitProvider.toLowerCase()];
+    }
+
+    // Auto-selection based on model identifier:
+    const norm = String(modelName || "").toLowerCase().trim();
+    if (norm.includes("vl") || norm.includes("qwen2.5-vl") || norm.includes("vision-mlx")) {
+        return qwenVlMlxAdapter;
+    }
+    if (norm.startsWith("qwen") || norm.includes("qwen2.5-coder") || norm.includes("coder-mlx")) {
+        return qwenCoderMlxAdapter;
+    }
+    if (norm.startsWith("gemma") || norm.includes("mlx")) {
+        return gemmaMlxAdapter;
+    }
+
+    return ollamaAdapter;
+}
+
+/**
+ * Normalizes input arguments into standard prompt, model, options tuple.
+ */
+function normalizeInvocationArgs(prompt, modelOrOptions, maybeOptions = {}) {
     if (typeof prompt !== "string") {
         throw new LLMError("Prompt must be a string");
     }
@@ -34,12 +97,15 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
     } else if (modelOrOptions && typeof modelOrOptions === "object") {
         options = modelOrOptions;
         model = options.model;
-    } else if ((modelOrOptions === undefined || modelOrOptions === null) && maybeOptions && typeof maybeOptions === "object") {
+    } else if (
+        (modelOrOptions === undefined || modelOrOptions === null) &&
+        maybeOptions &&
+        typeof maybeOptions === "object"
+    ) {
         options = maybeOptions;
         model = options.model;
     }
 
-    // Validate model override
     if (model !== undefined && model !== null) {
         if (typeof model !== "string") {
             throw new LLMError("Model must be a string");
@@ -50,19 +116,32 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         }
     }
 
-    const ollamaUrl = process.env.OLLAMA_URL || OLLAMA_URL;
-    const ollamaModel = process.env.OLLAMA_MODEL || OLLAMA_MODEL;
+    return {
+        prompt: prompt.trim(),
+        model: model?.trim(),
+        options: options || {},
+    };
+}
 
-    // Validate environment configuration
-    if (!ollamaUrl) {
-        throw new LLMError("OLLAMA_URL is not configured");
-    }
+/**
+ * Primary inference entry point used by RAG, Inspection, Risk, and Agents.
+ *
+ * @param {string} prompt
+ * @param {string|object} [modelOrOptions]
+ * @param {object} [maybeOptions]
+ * @returns {Promise<string>}
+ */
+async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
+    const normalized = normalizeInvocationArgs(prompt, modelOrOptions, maybeOptions);
+    const options = normalized.options;
 
-    if (!ollamaModel) {
-        throw new LLMError("OLLAMA_MODEL is not configured");
-    }
+    const defaultModel =
+        process.env.DEFAULT_MODEL ||
+        process.env.OLLAMA_MODEL ||
+        process.env.MLX_MODEL ||
+        "llama3.2:3b";
 
-    const selectedModel = model?.trim() || ollamaModel;
+    const selectedModel = normalized.model || defaultModel;
 
     // Defense-in-depth sovereign allowlist enforcement: block unauthorized model execution
     if (!isModelAllowed(selectedModel)) {
@@ -74,195 +153,101 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         err.statusCode = 400;
         throw err;
     }
-    const keepAlive = options.keep_alive || process.env.OLLAMA_KEEP_ALIVE || "30m";
-    const isStreaming = typeof options.onChunk === "function" || options.stream === true;
-    const taskName = options.task || "general";
-    const startTime = Date.now();
-    const inputChars = prompt.length;
 
-    const requestBody = {
-        model: selectedModel,
-        prompt: prompt.trim(),
-        stream: isStreaming,
-        keep_alive: keepAlive,
-    };
-
-    if (options.format) {
-        requestBody.format = options.format;
+    const managed = isManagedModel(selectedModel);
+    if (managed) {
+        try {
+            await localModelRuntimeManager.ensureRunning(selectedModel);
+        } catch (startupErr) {
+            console.warn(`[RUNTIME-MANAGER] ensureRunning failed for '${selectedModel}': ${startupErr.message}`);
+            const norm = String(selectedModel).toLowerCase();
+            if (norm.includes("vl") || norm.includes("vision")) {
+                const fallbackVision = process.env.VISION_MODEL || "moondream";
+                console.log(`[RUNTIME-MANAGER] Falling back to vision fallback: ${fallbackVision}`);
+                return await ollamaAdapter.generate(normalized.prompt, fallbackVision, options);
+            }
+            if (norm.includes("coder") || norm.includes("qwen")) {
+                const fallbackCoding = process.env.DEFAULT_MODEL || "llama3.2:3b";
+                console.log(`[RUNTIME-MANAGER] Falling back to coding fallback: ${fallbackCoding}`);
+                return await ollamaAdapter.generate(normalized.prompt, fallbackCoding, options);
+            }
+            throw new LLMError(`Failed to start local model server for '${selectedModel}': ${startupErr.message}`, {
+                cause: startupErr,
+                code: "STARTUP_FAILED",
+                statusCode: 503,
+                model: selectedModel,
+            });
+        }
+        localModelRuntimeManager.incrementActiveRequests(selectedModel);
+        localModelRuntimeManager.recordUsage(selectedModel);
     }
 
-    if (Array.isArray(options.images) && options.images.length > 0) {
-        requestBody.images = options.images;
-    }
-
-    // Configure low-variance, deterministic parameters for structured/JSON tasks
-    const ollamaOptions = {};
-    if (typeof options.temperature === "number") {
-        ollamaOptions.temperature = options.temperature;
-    } else if (options.format === "json") {
-        ollamaOptions.temperature = 0.1;
-    }
-
-    if (typeof options.top_p === "number") {
-        ollamaOptions.top_p = options.top_p;
-    }
-
-    if (typeof options.num_predict === "number") {
-        ollamaOptions.num_predict = options.num_predict;
-    } else if (typeof options.maxTokens === "number") {
-        ollamaOptions.num_predict = options.maxTokens;
-    }
-
-    if (Object.keys(ollamaOptions).length > 0) {
-        requestBody.options = ollamaOptions;
-    }
+    const adapter = resolveAdapter(selectedModel, options);
 
     try {
-        const timeoutMs = typeof options.timeoutMs === "number" ? options.timeoutMs : 60000;
-        const abortSignal = options.signal || AbortSignal.timeout(timeoutMs);
-
-        let response;
-        try {
-            response = await fetch(`${ollamaUrl}/api/generate`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify(requestBody),
-                signal: abortSignal,
-            });
-        } catch (fetchErr) {
-            if (ollamaUrl.includes("host.docker.internal")) {
-                const fallbackUrl = ollamaUrl.replace("host.docker.internal", "127.0.0.1");
-                response = await fetch(`${fallbackUrl}/api/generate`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify(requestBody),
-                    signal: abortSignal,
-                });
-            } else {
-                throw fetchErr;
-            }
+        const result = await adapter.generate(normalized.prompt, selectedModel, options);
+        if (managed) {
+            localModelRuntimeManager.recordUsage(selectedModel);
         }
-
-        if (!response.ok) {
-            if (response.status === 404) {
-                throw new LLMError("Model unavailable");
-            }
-
-            throw new LLMError("LLM generation failed");
-        }
-
-        if (isStreaming && response.body) {
-            let fullText = "";
-            const reader = response.body.getReader();
-            const decoder = new TextDecoder("utf-8");
-            let buffer = "";
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-
-                buffer += decoder.decode(value, { stream: true });
-                const lines = buffer.split("\n");
-                buffer = lines.pop() || "";
-
-                for (const line of lines) {
-                    const trimmed = line.trim();
-                    if (!trimmed) continue;
-                    try {
-                        const parsed = JSON.parse(trimmed);
-                        if (parsed.response) {
-                            fullText += parsed.response;
-                            if (typeof options.onChunk === "function") {
-                                options.onChunk(parsed.response);
-                            }
-                        }
-                    } catch {}
-                }
-            }
-
-            if (buffer.trim()) {
-                try {
-                    const parsed = JSON.parse(buffer.trim());
-                    if (parsed.response) {
-                        fullText += parsed.response;
-                        if (typeof options.onChunk === "function") {
-                            options.onChunk(parsed.response);
-                        }
-                    }
-                } catch {}
-            }
-
-            if (!fullText.trim()) {
-                throw new LLMError("LLM generation produced empty stream response");
-            }
-
-            const durationMs = Date.now() - startTime;
-            console.log(
-                `[LLM] task=${taskName} model=${selectedModel} status=success ` +
-                `input_chars=${inputChars} output_chars=${fullText.length} duration_ms=${durationMs}`
-            );
-
-            return fullText.trim();
-        }
-
-        const data = await response.json();
-
-        if (
-            !data ||
-            typeof data.response !== "string" ||
-            !data.response.trim()
-        ) {
-            throw new LLMError("LLM generation failed");
-        }
-
-        const durationMs = Date.now() - startTime;
-        const outputChars = data.response.length;
-        const promptTokens = data.prompt_eval_count ?? "N/A";
-        const evalTokens = data.eval_count ?? "N/A";
-        const loadDurationMs = data.load_duration ? Math.round(data.load_duration / 1e6) : "N/A";
-
-        console.log(
-            `[LLM] task=${taskName} model=${selectedModel} status=success ` +
-            `input_chars=${inputChars} output_chars=${outputChars} ` +
-            `prompt_tokens=${promptTokens} eval_tokens=${evalTokens} ` +
-            `load_ms=${loadDurationMs} duration_ms=${durationMs}`
-        );
-
-        return data.response.trim();
-
+        return result;
     } catch (error) {
-        const durationMs = Date.now() - startTime;
-        console.error(
-            `[LLM] task=${taskName} model=${selectedModel} status=failure ` +
-            `input_chars=${inputChars} duration_ms=${durationMs} error=${error.message}`
-        );
-
         if (error instanceof LLMError) {
             throw error;
         }
 
-        if (error.name === "TimeoutError" || error.message?.includes("timed out") || error.message?.includes("The operation was aborted")) {
-            throw new LLMError("Inference timed out", { cause: error, code: "TIMEOUT", statusCode: 408 });
+        if (
+            error.name === "TimeoutError" ||
+            error.message?.includes("timed out") ||
+            error.message?.includes("The operation was aborted")
+        ) {
+            throw new LLMError("Inference timed out", {
+                cause: error,
+                code: "TIMEOUT",
+                statusCode: 408,
+                model: selectedModel,
+            });
         }
 
-        if (error instanceof TypeError) {
-            throw new LLMError(
-                "Ollama connection failed",
-                { cause: error }
-            );
+        if (error.statusCode === 404 || error.message?.includes("Model unavailable")) {
+            throw new LLMError("Model unavailable", {
+                cause: error,
+                code: "MODEL_UNAVAILABLE",
+                statusCode: 404,
+                model: selectedModel,
+            });
         }
 
-        throw new LLMError(
-            "LLM generation failed",
-            { cause: error }
-        );
+        if (error instanceof TypeError || error.code === "ECONNREFUSED" || error.message?.includes("fetch failed")) {
+            throw new LLMError(`${adapter.name.toUpperCase()} connection failed: ${error.message}`, {
+                cause: error,
+                code: "CONNECTION_FAILED",
+                statusCode: 503,
+                model: selectedModel,
+            });
+        }
+
+        throw new LLMError(error.message || "LLM generation failed", {
+            cause: error,
+            code: error.code || "GENERATION_FAILED",
+            statusCode: error.statusCode || 500,
+            model: selectedModel,
+        });
+    } finally {
+        if (managed) {
+            localModelRuntimeManager.decrementActiveRequests(selectedModel);
+        }
     }
 }
 
+/**
+ * Multimodal vision inference wrapper.
+ *
+ * @param {string} prompt
+ * @param {string|string[]} images - Base64 encoded image strings
+ * @param {string} [model]
+ * @param {object} [options]
+ * @returns {Promise<string>}
+ */
 async function generateVisionAnswer(prompt, images, model, options = {}) {
     const imageList = Array.isArray(images) ? images : [images];
     return generateAnswer(prompt, model, {
@@ -272,46 +257,78 @@ async function generateVisionAnswer(prompt, images, model, options = {}) {
 }
 
 /**
- * Pre-warms local Ollama models into memory without token generation.
+ * Pre-warms local models across registered adapters.
  *
  * @param {string[]} [models]
- * @returns {Promise<Array<{ model: string, success: boolean, durationMs: number }>>}
+ * @returns {Promise<Array<{ model: string, success: boolean, durationMs: number, provider: string }>>}
  */
-async function warmLocalModels(models = ["llama3.2:3b", "moondream"]) {
-    const ollamaUrl = process.env.OLLAMA_URL || "http://localhost:11434";
-    const keepAlive = process.env.OLLAMA_KEEP_ALIVE || "15m";
+async function warmLocalModels(models = ["llama3.2:3b", "gemma-2-2b-it-4bit"]) {
     const results = [];
 
     for (const model of models) {
-        const t0 = Date.now();
+        const adapter = resolveAdapter(model);
         try {
-            const res = await fetch(`${ollamaUrl}/api/generate`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ model, prompt: "", keep_alive: keepAlive }),
-            });
+            const res = await adapter.warmModel(model);
             results.push({
-                model,
-                success: res.ok,
-                durationMs: Date.now() - t0,
+                ...res,
+                provider: adapter.name,
             });
         } catch (err) {
             results.push({
                 model,
                 success: false,
-                durationMs: Date.now() - t0,
+                durationMs: 0,
+                provider: adapter.name,
                 error: err.message,
             });
         }
     }
+
     return results;
+}
+
+/**
+ * Diagnostic helper to check health across all registered adapters.
+ *
+ * @returns {Promise<Record<string, { healthy: boolean, url: string }>>}
+ */
+async function checkGatewayHealth() {
+    const [ollamaHealthy, mlxHealthy, qwenHealthy, qwenVlHealthy] = await Promise.all([
+        ollamaAdapter.checkHealth(),
+        gemmaMlxAdapter.checkHealth(),
+        qwenCoderMlxAdapter.checkHealth(),
+        qwenVlMlxAdapter.checkHealth(),
+    ]);
+
+    return {
+        ollama: {
+            healthy: ollamaHealthy,
+            url: ollamaAdapter.getBaseUrl(),
+        },
+        mlx: {
+            healthy: mlxHealthy,
+            url: gemmaMlxAdapter.getBaseUrl(),
+        },
+        qwen_mlx: {
+            healthy: qwenHealthy,
+            url: qwenCoderMlxAdapter.getBaseUrl(),
+        },
+        qwen_vl_mlx: {
+            healthy: qwenVlHealthy,
+            url: qwenVlMlxAdapter.getBaseUrl(),
+        },
+    };
 }
 
 export {
     generateAnswer,
     generateVisionAnswer,
     warmLocalModels,
-    LLMError,
+    checkGatewayHealth,
+    ADAPTERS,
+    ollamaAdapter,
+    gemmaMlxAdapter,
+    qwenCoderMlxAdapter,
+    qwenVlMlxAdapter,
+    localModelRuntimeManager,
 };
-
-

@@ -56,13 +56,14 @@ export async function assessFindingRisk(finding, options = {}) {
     // 5. Build risk analysis prompt
     const prompt = buildRiskPrompt(validatedFinding, retrievedChunks);
 
-    // 6. Invoke LLM (Ollama) with strict JSON grammar and bounded parameters
+    // 6. Invoke LLM via Model Gateway with strict JSON grammar and bounded parameters
     const generateAnswerFn = options.generateAnswer ?? generateAnswer;
-    const rawResponse = await generateAnswerFn(prompt, options.model, {
+    const selectedModel = options.model || process.env.RISK_MODEL || process.env.MODEL_RISK;
+    const rawResponse = await generateAnswerFn(prompt, selectedModel, {
         format: "json",
         task: "risk_assessment",
         temperature: 0.1,
-        num_predict: 512,
+        num_predict: 384,
         timeoutMs: 180000, // 3 minutes timeout to accommodate longer inference
     });
 

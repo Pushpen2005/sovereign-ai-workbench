@@ -32,7 +32,7 @@ export class InspectionExtractionError extends Error {
 const INSPECTION_DOCUMENT_TYPE = "inspection";
 
 const DEFAULT_CANDIDATE_LIMIT = 10;
-const DEFAULT_CONTEXT_LIMIT = 5;
+const DEFAULT_CONTEXT_LIMIT = Number(process.env.INSPECTION_CONTEXT_LIMIT || 5);
 const DEFAULT_SCORE_THRESHOLD = Number(process.env.INSPECTION_SCORE_THRESHOLD || 0.35);
 
 export function createInspectionResult(findings = []) {
@@ -227,13 +227,15 @@ export async function analyzeInspectionReport(input, options = {}) {
     let parsedResponse = null;
     let lastError = null;
 
+    const selectedModel = options.model || process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION;
+
     // Attempt 1: Standard structured extraction with format: "json"
     try {
-        const rawResponse = await generateAnswerFn(prompt, options.model, {
+        const rawResponse = await generateAnswerFn(prompt, selectedModel, {
             format: "json",
             task: "inspection_finding",
             temperature: 0.1,
-            num_predict: 768,
+            num_predict: Number(process.env.INSPECTION_NUM_PREDICT || 768),
         });
         parsedResponse = parseInspectionLlmResponse(rawResponse);
     } catch (err) {
@@ -246,11 +248,11 @@ export async function analyzeInspectionReport(input, options = {}) {
         console.log("[Inspection] Retrying structured extraction (attempt 2 of 2)...");
         try {
             const retryPrompt = buildInspectionRetryPrompt(task, context, lastError?.message);
-            const retryRawResponse = await generateAnswerFn(retryPrompt, options.model, {
+            const retryRawResponse = await generateAnswerFn(retryPrompt, selectedModel, {
                 format: "json",
                 task: "inspection_finding_retry",
                 temperature: 0.1,
-                num_predict: 768,
+                num_predict: Number(process.env.INSPECTION_NUM_PREDICT || 768),
             });
             parsedResponse = parseInspectionLlmResponse(retryRawResponse);
             console.log("[Inspection] Structured extraction succeeded on attempt 2");

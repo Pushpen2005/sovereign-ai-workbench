@@ -170,6 +170,8 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_agent_runs_organization_id ON agent_runs (organization_id);
     CREATE INDEX IF NOT EXISTS idx_agent_runs_user_id ON agent_runs (user_id);
     CREATE INDEX IF NOT EXISTS idx_agent_runs_org_created_at ON agent_runs (organization_id, created_at DESC);
+    ALTER TABLE agent_runs ADD COLUMN IF NOT EXISTS document_id VARCHAR(255);
+    CREATE INDEX IF NOT EXISTS idx_agent_runs_document_id ON agent_runs (document_id);
 
     CREATE TABLE IF NOT EXISTS agent_run_steps (
       id VARCHAR(255) PRIMARY KEY,
