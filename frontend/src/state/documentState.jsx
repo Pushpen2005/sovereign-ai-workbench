@@ -7,7 +7,7 @@
  * - upload state
  */
 
-import React, { createContext, useContext, useReducer, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
 
 const initialState = {
   documents: [],
@@ -136,29 +136,17 @@ export function useDocumentDispatch() {
 
 export function useDocumentActions() {
   const dispatch = useDocumentDispatch();
-  return {
-    setDocuments: useCallback(
-      (docs) => dispatch({ type: 'SET_DOCUMENTS', payload: docs }),
-      [dispatch],
-    ),
-    selectDocument: useCallback(
-      (doc) => dispatch({ type: 'SELECT_DOCUMENT', payload: doc }),
-      [dispatch],
-    ),
-    clearSelection: useCallback(() => dispatch({ type: 'CLEAR_SELECTION' }), [dispatch]),
-    uploadStart: useCallback(
-      (pendingFile) => dispatch({ type: 'UPLOAD_START', payload: pendingFile }),
-      [dispatch],
-    ),
-    uploadIndexing: useCallback(() => dispatch({ type: 'UPLOAD_INDEXING' }), [dispatch]),
-    uploadSuccess: useCallback(
-      (doc) => dispatch({ type: 'UPLOAD_SUCCESS', payload: doc }),
-      [dispatch],
-    ),
-    uploadError: useCallback(
-      (err) => dispatch({ type: 'UPLOAD_ERROR', payload: err }),
-      [dispatch],
-    ),
-    uploadReset: useCallback(() => dispatch({ type: 'UPLOAD_RESET' }), [dispatch]),
-  };
+  return useMemo(
+    () => ({
+      setDocuments: (docs) => dispatch({ type: 'SET_DOCUMENTS', payload: docs }),
+      selectDocument: (doc) => dispatch({ type: 'SELECT_DOCUMENT', payload: doc }),
+      clearSelection: () => dispatch({ type: 'CLEAR_SELECTION' }),
+      uploadStart: (pendingFile) => dispatch({ type: 'UPLOAD_START', payload: pendingFile }),
+      uploadIndexing: () => dispatch({ type: 'UPLOAD_INDEXING' }),
+      uploadSuccess: (doc) => dispatch({ type: 'UPLOAD_SUCCESS', payload: doc }),
+      uploadError: (err) => dispatch({ type: 'UPLOAD_ERROR', payload: err }),
+      uploadReset: () => dispatch({ type: 'UPLOAD_RESET' }),
+    }),
+    [dispatch],
+  );
 }

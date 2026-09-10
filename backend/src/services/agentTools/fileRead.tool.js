@@ -43,7 +43,7 @@ export async function executeFileRead(args, context = {}) {
         throw new FileReadError("Arguments must be an object with a 'documentId' field");
     }
 
-    const organizationId = context?.organizationId;
+    const organizationId = context?.organizationId || args.organizationId;
     if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
         throw new FileReadError("Execution context missing authenticated organizationId for file read");
     }

@@ -1,5 +1,5 @@
 /**
- * PR #26 — Document Search Agent Tool
+ * PR #26 / Phase 7 — Document Search Agent Tool
  *
  * Reuses the existing Qdrant vector retrieval pipeline:
  *   generateEmbedding(query) -> searchSimilarChunks(embedding)
@@ -21,8 +21,12 @@ export class DocumentSearchError extends Error {
  *
  * @param {object} args
  * @param {string} args.query - Natural language query string
- * @param {number} [args.limit=5] - Maximum number of chunks to retrieve (1-10)
+ * @param {string} [args.organizationId] - Tenant organization ID
+ * @param {number} [args.topK] - Maximum number of chunks to retrieve (1-10)
+ * @param {number} [args.limit] - Alias for topK
  * @param {string} [args.documentId] - Optional filter to limit search to a single document
+ * @param {string} [args.documentType] - Optional document type filter (e.g. 'sop')
+ * @param {object} [context={}] - Execution context containing authoritative organizationId
  * @returns {Promise<{ query: string, totalResults: number, results: Array<object> }>}
  */
 export async function executeDocumentSearch(args, context = {}) {
@@ -30,18 +34,19 @@ export async function executeDocumentSearch(args, context = {}) {
         throw new DocumentSearchError("Arguments must be an object with a 'query' string");
     }
 
-    const organizationId = context?.organizationId;
+    const organizationId = context?.organizationId || args.organizationId;
     if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
         throw new DocumentSearchError("Execution context missing authenticated organizationId for document search");
     }
 
-    const { query, documentId, documentType, limit: rawLimit } = args;
+    const { query, documentId, documentType, topK, limit: rawLimit } = args;
 
     if (typeof query !== "string" || !query.trim()) {
         throw new DocumentSearchError("query must be a non-empty string");
     }
 
-    const limit = Math.min(Math.max(Number.isInteger(rawLimit) ? rawLimit : 5, 1), 10);
+    const requestedLimit = Number.isInteger(topK) ? topK : rawLimit;
+    const limit = Math.min(Math.max(Number.isInteger(requestedLimit) ? requestedLimit : 5, 1), 10);
 
     let queryVector;
     try {
