@@ -158,6 +158,7 @@ app.get('/api/v1/router/models', async (req, res) => {
     const defaultModel    = process.env.GENERAL_MODEL    || process.env.MODEL_GENERAL    || process.env.DEFAULT_MODEL   || "gemma-2-2b-it-4bit";
     const documentModel   = process.env.DOCUMENT_MODEL   || process.env.MODEL_DOCUMENT   || defaultModel;
     const inspectionModel = process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION || defaultModel;
+    const riskModel       = process.env.RISK_MODEL       || process.env.MODEL_RISK       || defaultModel;
     const codingModel     = process.env.CODING_MODEL     || process.env.MODEL_CODING     || "qwen2.5-coder:3b-4bit";
     const visionModel     = process.env.MODEL_VISION     || process.env.VISION_MODEL     || "qwen2.5-vl:3b-4bit";
 
@@ -168,6 +169,7 @@ app.get('/api/v1/router/models', async (req, res) => {
         registry: {
             [TASK_TYPE.DOCUMENT_ANALYSIS]: documentModel,
             [TASK_TYPE.INSPECTION]:        inspectionModel,
+            [TASK_TYPE.RISK]:              riskModel,
             [TASK_TYPE.CODING]:            codingModel,
             [TASK_TYPE.VISION]:            visionModel,
             [TASK_TYPE.GENERAL_CHAT]:      defaultModel,

@@ -30,7 +30,10 @@ export const MODEL_RUNTIME_REGISTRY = Object.freeze({
         runtime: "mlx_lm",
         port: 8080,
         host: "127.0.0.1",
-        healthUrl: "http://127.0.0.1:8080/health",
+        get healthUrl() {
+            const base = (process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://host.docker.internal:8080").replace(/\/$/, "");
+            return `${base}/health`;
+        },
         modelRelPath: "models/gemma-2-2b-it-4bit",
         serverModule: "mlx_lm.server",
         defaultArgs: ["--host", "0.0.0.0", "--port", "8080"],
@@ -51,7 +54,10 @@ export const MODEL_RUNTIME_REGISTRY = Object.freeze({
         runtime: "mlx_lm",
         port: 8081,
         host: "127.0.0.1",
-        healthUrl: "http://127.0.0.1:8081/health",
+        get healthUrl() {
+            const base = (process.env.QWEN_CODER_MLX_URL || "http://host.docker.internal:8081").replace(/\/$/, "");
+            return `${base}/health`;
+        },
         modelRelPath: "models/qwen2.5-coder-3b-4bit",
         serverModule: "mlx_lm.server",
         defaultArgs: ["--host", "0.0.0.0", "--port", "8081"],
@@ -72,7 +78,10 @@ export const MODEL_RUNTIME_REGISTRY = Object.freeze({
         runtime: "mlx_vlm",
         port: 8082,
         host: "127.0.0.1",
-        healthUrl: "http://127.0.0.1:8082/health",
+        get healthUrl() {
+            const base = (process.env.QWEN_VL_MLX_URL || "http://host.docker.internal:8082").replace(/\/$/, "");
+            return `${base}/health`;
+        },
         modelRelPath: "models/qwen2.5-vl-3b-4bit",
         serverModule: "mlx_vlm.server",
         defaultArgs: ["--host", "0.0.0.0", "--port", "8082"],

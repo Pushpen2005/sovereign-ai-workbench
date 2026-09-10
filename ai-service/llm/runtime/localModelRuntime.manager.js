@@ -170,9 +170,20 @@ export class LocalModelRuntimeManager {
         const state = this._getState(entry);
 
         try {
-            const res = await fetch(entry.healthUrl, {
-                signal: AbortSignal.timeout(2000),
-            });
+            let res;
+            try {
+                res = await fetch(entry.healthUrl, {
+                    signal: AbortSignal.timeout(2000),
+                });
+            } catch (primaryErr) {
+                if (entry.healthUrl.includes("host.docker.internal")) {
+                    const fallbackUrl = entry.healthUrl.replace("host.docker.internal", "127.0.0.1");
+                    res = await fetch(fallbackUrl, { signal: AbortSignal.timeout(2000) });
+                } else {
+                    throw primaryErr;
+                }
+            }
+
             if (res.ok) {
                 const data = await res.json().catch(() => ({}));
                 state.status = LIFECYCLE_STATE.READY;

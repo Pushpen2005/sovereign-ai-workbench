@@ -45,6 +45,7 @@ services:
     ports:
       - "${BIND_IP:-127.0.0.1}:5001:5001"
     environment:
+      DOCKER_CONTAINER: "true"
       PORT: 5001
       QDRANT_URL: http://qdrant:6333
       DEFAULT_MODEL: ${DEFAULT_MODEL:-gemma-2-2b-it-4bit}
@@ -87,6 +88,7 @@ services:
     ports:
       - "9000:9000"
     environment:
+      DOCKER_CONTAINER: "true"
       PORT: 9000
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432

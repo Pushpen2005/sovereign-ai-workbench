@@ -28,6 +28,7 @@
     "test:phase11": "node tests/phase11.vision.test.js",
     "test:phase11-vision": "node tests/phase11.vision.test.js",
     "audit:sovereignty": "node scripts/audit.sovereignty.js",
+    "backfill:qdrant-metadata": "node scripts/backfill-qdrant-metadata.js",
     "demo:security": "node tests/demo.phase7.auth.js",
     "demo:vision": "node tests/demo.phase6.vision.js",
     "test:final-e2e": "node tests/final.evaluation.e2e.test.js",

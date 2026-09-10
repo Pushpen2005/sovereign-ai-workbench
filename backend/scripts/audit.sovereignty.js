@@ -39,7 +39,7 @@ async function runSovereigntyAudit() {
 
     // 1. LLM Local Audit (Native MLX / AI-Service gateway)
     const aiServiceUrl = process.env.AI_SERVICE_URL || "http://localhost:5001";
-    const mxlHostUrl = "http://127.0.0.1:8080";
+    const mxlHostUrl = process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://127.0.0.1:8080";
     try {
         let res;
         try {

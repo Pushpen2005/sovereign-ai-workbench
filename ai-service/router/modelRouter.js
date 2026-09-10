@@ -176,8 +176,12 @@ export function classifyTask(questionOrInput, options = {}) {
     }
 
     // 2. Explicit workflow override
-    if (opts && opts.workflow === "inspection") {
+    if (opts && (opts.workflow === "inspection" || opts.taskType === TASK_TYPE.INSPECTION)) {
         return TASK_TYPE.INSPECTION;
+    }
+
+    if (opts && (opts.workflow === "risk" || opts.taskType === TASK_TYPE.RISK)) {
+        return TASK_TYPE.RISK;
     }
 
     if (typeof rawText !== "string" || !rawText.trim()) {
@@ -212,6 +216,11 @@ export function classifyTask(questionOrInput, options = {}) {
         if (q.includes(kw)) {
             return TASK_TYPE.DOCUMENT_ANALYSIS;
         }
+    }
+
+    // Explicit document context present without coding/vision intent
+    if (opts && (opts.documentId || opts.hasDocument)) {
+        return TASK_TYPE.DOCUMENT_ANALYSIS;
     }
 
     return TASK_TYPE.GENERAL_CHAT;
@@ -326,6 +335,15 @@ export async function checkModelAvailability(modelName) {
             const res = await fetch(`${qwenVlUrl}/health`, { signal: AbortSignal.timeout(2000) });
             return res.ok;
         } catch {
+            if (qwenVlUrl.includes("host.docker.internal")) {
+                try {
+                    const fallbackUrl = qwenVlUrl.replace("host.docker.internal", "127.0.0.1");
+                    const res = await fetch(`${fallbackUrl}/health`, { signal: AbortSignal.timeout(2000) });
+                    return res.ok;
+                } catch {
+                    return false;
+                }
+            }
             return false;
         }
     }
@@ -340,17 +358,38 @@ export async function checkModelAvailability(modelName) {
             const res = await fetch(`${qwenUrl}/health`, { signal: AbortSignal.timeout(2000) });
             return res.ok;
         } catch {
+            if (qwenUrl.includes("host.docker.internal")) {
+                try {
+                    const fallbackUrl = qwenUrl.replace("host.docker.internal", "127.0.0.1");
+                    const res = await fetch(`${fallbackUrl}/health`, { signal: AbortSignal.timeout(2000) });
+                    return res.ok;
+                } catch {
+                    return false;
+                }
+            }
             return false;
         }
     }
 
     // Check the configured host-native Gemma MLX runtime (Port :8080).
-    const mlxUrl = process.env.GEMMA_MLX_URL;
-    if (!mlxUrl) return false;
+    const mlxUrl = process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://host.docker.internal:8080";
     try {
         const res = await fetch(`${mlxUrl}/health`, { signal: AbortSignal.timeout(2000) });
-        return res.ok;
+        if (res.ok) return true;
+        const mRes = await fetch(`${mlxUrl}/v1/models`, { signal: AbortSignal.timeout(2000) });
+        return mRes.ok;
     } catch {
+        if (mlxUrl.includes("host.docker.internal")) {
+            try {
+                const fallbackUrl = mlxUrl.replace("host.docker.internal", "127.0.0.1");
+                const res = await fetch(`${fallbackUrl}/health`, { signal: AbortSignal.timeout(2000) });
+                if (res.ok) return true;
+                const mRes = await fetch(`${fallbackUrl}/v1/models`, { signal: AbortSignal.timeout(2000) });
+                return mRes.ok;
+            } catch {
+                return false;
+            }
+        }
         return false;
     }
 }
@@ -434,11 +473,20 @@ export async function routeTask(requestOrInput, options = {}) {
         const latencyMs = Date.now() - tStart;
         const reason = routingReason(taskType, registryModel, false);
         console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: registryModel, latencyMs, isFallback: false, local: true })}`);
+        const runtimeLabel =
+            taskType === TASK_TYPE.CODING
+                ? "MLX :8081"
+                : taskType === TASK_TYPE.VISION
+                ? "MLX :8082"
+                : "MLX :8080";
+
         return {
             taskType,
             canonicalTaskType: toCanonicalTaskType(taskType),
             model:         registryModel,
             selectedModel: registryModel,
+            provider:      "MLX",
+            runtime:       runtimeLabel,
             reason,
             routingReason: reason,
             local:         true,
@@ -452,66 +500,37 @@ export async function routeTask(requestOrInput, options = {}) {
     if (taskType === TASK_TYPE.VISION) {
         console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "vision_model_unavailable", model: registryModel })}`);
         const err = new RouterError(
-            `Configured local vision model '${registryModel}' is not available. Ensure the MLX vision server is running on port 8082.`
+            `Local Qwen VL MLX runtime is unavailable. Ensure the MLX vision server is running on port 8082.`,
+            { code: "LOCAL_RUNTIME_UNAVAILABLE", statusCode: 503, taskType, model: registryModel }
         );
-        err.code = "MODEL_UNAVAILABLE";
+        err.code = "LOCAL_RUNTIME_UNAVAILABLE";
+        err.statusCode = 503;
         err.taskType = taskType;
         err.model = registryModel;
         throw err;
     }
 
-    if (registryModel === defaultModel) {
-        console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "default_model_unavailable", model: registryModel })}`);
+    if (taskType === TASK_TYPE.CODING) {
+        console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "coding_model_unavailable", model: registryModel })}`);
         const err = new RouterError(
-            `Configured local model '${registryModel}' is not available. Ensure the MLX server is running on port 8080.`
+            `Local Qwen Coder MLX runtime is unavailable. Ensure the MLX coder server is running on port 8081.`,
+            { code: "LOCAL_RUNTIME_UNAVAILABLE", statusCode: 503, taskType, model: registryModel }
         );
-        err.code = "MODEL_UNAVAILABLE";
+        err.code = "LOCAL_RUNTIME_UNAVAILABLE";
+        err.statusCode = 503;
         err.taskType = taskType;
         err.model = registryModel;
         throw err;
     }
 
-    if (registry.codingFallbackEnabled && taskType === TASK_TYPE.CODING) {
-        // Fallback: use default model and surface explicit isFallback flag
-        const defaultAvailable = await checkModelAvailability(defaultModel);
-
-        if (!defaultAvailable) {
-            console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "coding_and_fallback_unavailable", model: registryModel, fallback: defaultModel })}`);
-            const err = new RouterError(
-                `Configured coding model '${registryModel}' is unavailable and ` +
-                `fallback model '${defaultModel}' is also unavailable. ` +
-                `Ensure the MLX servers are running on ports 8080 and 8081.`
-            );
-            err.code = "MODEL_UNAVAILABLE";
-            err.taskType = taskType;
-            err.model = registryModel;
-            throw err;
-        }
-
-        const latencyMs = Date.now() - tStart;
-        const reason = `Coding model '${registryModel}' is not available. Falling back to '${defaultModel}'.`;
-        console.log(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.model_selected", taskType, selectedModel: defaultModel, latencyMs, isFallback: true, local: true })}`);
-        return {
-            taskType,
-            canonicalTaskType: toCanonicalTaskType(taskType),
-            model:         defaultModel,
-            selectedModel: defaultModel,
-            reason,
-            routingReason: reason,
-            local:         true,
-            isFallback:    true,
-            registryModel,
-            latencyMs,
-        };
-    }
-
-    // No fallback configured — return a structured RouterError
-    console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "model_unavailable", model: registryModel })}`);
+    // Workloads: GENERAL_CHAT, DOCUMENT_ANALYSIS, INSPECTION, RISK (all strictly routed to Gemma MLX)
+    console.warn(`[ROUTER-AUDIT] ${JSON.stringify({ event: "router.failed", reason: "gemma_runtime_unavailable", taskType, model: registryModel })}`);
     const err = new RouterError(
-        `Configured local model '${registryModel}' is not available. ` +
-        `Ensure the MLX server is running and CODING_MODEL_FALLBACK is set.`
+        `Local Gemma MLX runtime is unavailable. Ensure the Gemma MLX server is running on port 8080.`,
+        { code: "LOCAL_RUNTIME_UNAVAILABLE", statusCode: 503, taskType, model: registryModel }
     );
-    err.code = "MODEL_UNAVAILABLE";
+    err.code = "LOCAL_RUNTIME_UNAVAILABLE";
+    err.statusCode = 503;
     err.taskType = taskType;
     err.model = registryModel;
     throw err;
@@ -523,13 +542,12 @@ function routingReason(taskType, model, isFallback) {
     const labels = {
         [TASK_TYPE.DOCUMENT_ANALYSIS]: "Document / SOP RAG analysis request",
         [TASK_TYPE.INSPECTION]:        "Industrial inspection & approval note workflow",
+        [TASK_TYPE.RISK]:              "Industrial risk assessment & mitigation workflow",
         [TASK_TYPE.CODING]:            "Code generation request",
         [TASK_TYPE.VISION]:            "Multimodal visual inspection & document understanding",
         [TASK_TYPE.GENERAL_CHAT]:      "General query — routed to default model",
     };
-    return isFallback
-        ? `Fallback: ${labels[taskType] || taskType}`
-        : labels[taskType] || taskType;
+    return labels[taskType] || taskType;
 }
 
 export class RouterError extends Error {
@@ -537,6 +555,7 @@ export class RouterError extends Error {
         super(message);
         this.name = "RouterError";
         this.code = options.code || "ROUTER_ERROR";
+        this.statusCode = options.statusCode || (this.code === "MODEL_NOT_ALLOWED" || this.code === "INVALID_TASK_TYPE" ? 400 : 503);
         if (options.taskType) this.taskType = options.taskType;
         if (options.model) this.model = options.model;
     }
@@ -572,6 +591,14 @@ export async function getRouterDiagnostic() {
             model:     registry[TASK_TYPE.INSPECTION],
             available: gemmaOk,
             purpose:   "Industrial inspection finding extraction & approval workflow",
+            local:     true,
+            runtime:   "MLX :8080",
+        },
+        {
+            taskType:  TASK_TYPE.RISK,
+            model:     registry[TASK_TYPE.RISK],
+            available: gemmaOk,
+            purpose:   "Industrial risk assessment & mitigation workflow",
             local:     true,
             runtime:   "MLX :8080",
         },

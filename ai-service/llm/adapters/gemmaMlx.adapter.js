@@ -10,18 +10,12 @@ import { BaseAdapter } from "./base.adapter.js";
 export class GemmaMlxAdapter extends BaseAdapter {
     constructor(options = {}) {
         super("gemma_mlx");
-        this.baseUrl = options.baseUrl || process.env.GEMMA_MLX_URL;
-        this.defaultModel = options.defaultModel || process.env.GEMMA_MLX_MODEL;
+        this.baseUrl = options.baseUrl || process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://host.docker.internal:8080";
+        this.defaultModel = options.defaultModel || process.env.GEMMA_MLX_MODEL || process.env.MLX_MODEL || "gemma-2-2b-it-4bit";
     }
 
     getBaseUrl() {
-        const url = process.env.GEMMA_MLX_URL || this.baseUrl;
-        if (typeof url !== "string" || !url.trim()) {
-            const err = new Error("GEMMA_MLX_URL must be configured for the host Gemma MLX runtime.");
-            err.code = "LOCAL_RUNTIME_UNAVAILABLE";
-            err.statusCode = 503;
-            throw err;
-        }
+        const url = process.env.GEMMA_MLX_URL || process.env.MLX_URL || this.baseUrl || "http://host.docker.internal:8080";
         return url.trim().replace(/\/$/, "");
     }
 
@@ -30,14 +24,28 @@ export class GemmaMlxAdapter extends BaseAdapter {
         try {
             return await fetch(`${baseUrl}${endpoint}`, init);
         } catch (err) {
-            if (err.name === "TimeoutError" || err.name === "AbortError") {
-                err.code = "LOCAL_RUNTIME_TIMEOUT";
-                err.statusCode = 504;
-                throw err;
+            // If running outside Docker container directly on host, host.docker.internal may not resolve.
+            // Fall back to 127.0.0.1 on the same port for local host test scripts and diagnostic runners.
+            if (baseUrl.includes("host.docker.internal")) {
+                try {
+                    const fallbackUrl = baseUrl.replace("host.docker.internal", "127.0.0.1");
+                    return await fetch(`${fallbackUrl}${endpoint}`, init);
+                } catch {
+                    // Ignore fallback failure and report primary error below
+                }
             }
-            err.code = "LOCAL_RUNTIME_UNAVAILABLE";
-            err.statusCode = 503;
-            throw err;
+
+            if (err.name === "TimeoutError" || err.name === "AbortError") {
+                const timeoutErr = new Error(`Gemma MLX request timed out: ${err.message}`);
+                timeoutErr.code = "LOCAL_RUNTIME_TIMEOUT";
+                timeoutErr.statusCode = 504;
+                throw timeoutErr;
+            }
+
+            const unavailErr = new Error(`Local Gemma MLX runtime unavailable at ${baseUrl}: ${err.message}`);
+            unavailErr.code = "LOCAL_RUNTIME_UNAVAILABLE";
+            unavailErr.statusCode = 503;
+            throw unavailErr;
         }
     }
 
@@ -230,7 +238,11 @@ export class GemmaMlxAdapter extends BaseAdapter {
             const res = await this._fetch("/health", {
                 signal: AbortSignal.timeout(3000),
             });
-            return res.ok;
+            if (res.ok) return true;
+            const modelsRes = await this._fetch("/v1/models", {
+                signal: AbortSignal.timeout(3000),
+            });
+            return modelsRes.ok;
         } catch {
             return false;
         }

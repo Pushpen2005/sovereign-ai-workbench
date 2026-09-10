@@ -86,7 +86,7 @@ export async function askQuestion(req, res, next) {
     // ── PR #23: Route the question to the appropriate local model ────────────
     let routing;
     try {
-      routing = await routeTask(question.trim(), { model });
+      routing = await routeTask(question.trim(), { model, documentId: documentId?.trim() });
     } catch (routerErr) {
       if (routerErr instanceof RouterError) {
         if (routerErr.code === "MODEL_NOT_ALLOWED") {
@@ -130,6 +130,8 @@ export async function askQuestion(req, res, next) {
       res.write(`event: metadata\ndata: ${JSON.stringify({
         taskType: routing.taskType,
         selectedModel: routing.selectedModel,
+        provider: routing.provider || "MLX",
+        runtime: routing.runtime || "MLX :8080",
         local: routing.local ?? true,
         isFallback: routing.isFallback,
       })}\n\n`);
@@ -154,6 +156,20 @@ ${question.trim()}`;
           answer: codeAnswer,
           sources: [],
           grounded: true,
+        };
+      } else if (routing.taskType === "GENERAL_CHAT" && !documentId && (!allowedDocumentIds || allowedDocumentIds.length === 0)) {
+        const generalPrompt = `You are SovereignAI, a helpful, precise, and sovereign AI assistant.
+Answer the user's question clearly and concisely.
+
+Question:
+${question.trim()}
+
+Answer:`;
+        const generalAnswer = await generateAnswer(generalPrompt, routing.selectedModel, { onChunk, stream: true });
+        result = {
+          answer: generalAnswer,
+          sources: [],
+          grounded: false,
         };
       } else {
         result = await answerQuestion(question.trim(), {
@@ -200,6 +216,8 @@ ${question.trim()}`;
         claimGrounding: result.claimGrounding || null,
         taskType: routing.taskType,
         selectedModel: routing.selectedModel,
+        provider: routing.provider || "MLX",
+        runtime: routing.runtime || "MLX :8080",
         local: routing.local ?? true,
         timings: result.timings || null,
       })}\n\n`);
@@ -221,6 +239,20 @@ ${question.trim()}`;
       result = {
         answer: codeAnswer,
         sources: [],
+      };
+    } else if (routing.taskType === "GENERAL_CHAT" && !documentId && (!allowedDocumentIds || allowedDocumentIds.length === 0)) {
+      const generalPrompt = `You are SovereignAI, a helpful, precise, and sovereign AI assistant.
+Answer the user's question clearly and concisely.
+
+Question:
+${question.trim()}
+
+Answer:`;
+      const generalAnswer = await generateAnswer(generalPrompt, routing.selectedModel);
+      result = {
+        answer: generalAnswer,
+        sources: [],
+        grounded: false,
       };
     } else {
       // 2. Execute RAG pipeline with the router-selected model
@@ -270,6 +302,8 @@ ${question.trim()}`;
       // ── PR #23 / Phase 8 routing metadata ──────────────────────────────
       taskType:      routing.taskType,
       selectedModel: routing.selectedModel,
+      provider:      routing.provider || "MLX",
+      runtime:       routing.runtime || "MLX :8080",
       routingReason: routing.routingReason,
       local:         routing.local ?? true,
       isFallback:    routing.isFallback,

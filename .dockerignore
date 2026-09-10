@@ -11,3 +11,9 @@ backend/node_modules
 frontend/node_modules
 ai-service/node_modules
 frontend/dist
+ai-service/mlx-runtime/models
+ai-service/mlx-runtime/venv
+ai-service/mlx-runtime/logs
+**/mlx-runtime/**
+backups/
+qdrant-backup/
