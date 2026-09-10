@@ -167,6 +167,32 @@ export async function searchSop(
         options.scoreThreshold ??
         DEFAULT_SCORE_THRESHOLD;
 
+    // Authoritative Gate: Check allowedDocumentIds
+    let allowedDocumentIds = options.allowedDocumentIds;
+    if (allowedDocumentIds === undefined) {
+        try {
+            const db = await import("../../backend/src/config/db.js").catch(() => null);
+            if (db?.query) {
+                const res = await db.query(
+                    `SELECT id FROM documents WHERE organization_id = $1 AND document_type = 'sop' AND status = 'Indexed' AND chunks_stored > 0`,
+                    [options.organizationId.trim()]
+                );
+                const rows = res?.rows || [];
+                allowedDocumentIds = rows.map((r) => r.id);
+                if (allowedDocumentIds.length === 0) {
+                    console.log(`[KB_GATE] organizationId=${options.organizationId.trim()} approvedSopCount=0 qdrantSearch=SKIPPED reason=knowledge_base_empty`);
+                    return [];
+                }
+                console.log(`[KB_GATE] organizationId=${options.organizationId.trim()} approvedSopCount=${allowedDocumentIds.length} allowedDocumentIds=${JSON.stringify(allowedDocumentIds)} qdrantSearch=ENABLED`);
+            }
+        } catch {
+            // Non-blocking fallback if DB module cannot be loaded
+        }
+    } else if (Array.isArray(allowedDocumentIds) && allowedDocumentIds.length === 0) {
+        console.log(`[KB_GATE] organizationId=${options.organizationId.trim()} approvedSopCount=0 qdrantSearch=SKIPPED reason=knowledge_base_empty`);
+        return [];
+    }
+
     // 1. Convert finding/query into embedding
     const queryVector =
         await generateEmbedding(query.trim());
@@ -174,9 +200,9 @@ export async function searchSop(
     // 2. Search Qdrant
     //
     // IMPORTANT:
-    // documentType filter and organizationId filter are applied at the Qdrant level.
-    // Mixed-type or cross-tenant documents are NEVER retrieved and then filtered
-    // in JavaScript — the filter happens inside Qdrant.
+    // documentType filter, organizationId filter, and allowedDocumentIds filter
+    // are applied at the Qdrant level. Stale, orphan, or cross-tenant vectors are
+    // NEVER retrieved.
     const chunks = await searchSimilarChunks(
         queryVector,
         limit,
@@ -184,6 +210,7 @@ export async function searchSop(
         {
             documentType: SOP_DOCUMENT_TYPE,
             organizationId: options.organizationId.trim(),
+            allowedDocumentIds,
         }
     );
 

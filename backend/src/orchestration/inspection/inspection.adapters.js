@@ -26,6 +26,7 @@ import { assessFindingRisk } from "../../../../ai-service/risk/risk.service.js";
 import { filterValidCitations } from "../../../../ai-service/risk/risk.schema.js";
 import { buildSopQuery } from "../../../../ai-service/risk/risk.prompt.js";
 import { createReportRecord } from "../../services/reports.service.js";
+import { checkKnowledgeBaseSopGate } from "../../services/sop-gate.service.js";
 
 /**
  * Adapter 1: Ingestion Adapter
@@ -245,10 +246,27 @@ export async function runSopRetrieval(finding, options = {}) {
         return [];
     }
 
+    let allowedDocumentIds = options.allowedDocumentIds;
+    const organizationId = options.organizationId;
+
+    // Authoritative Gate: Check PostgreSQL for active approved SOP documents first
+    if (organizationId) {
+        if (allowedDocumentIds === undefined) {
+            const gate = await checkKnowledgeBaseSopGate(organizationId);
+            if (!gate.evidenceAvailable) {
+                return [];
+            }
+            allowedDocumentIds = gate.allowedDocumentIds;
+        } else if (Array.isArray(allowedDocumentIds) && allowedDocumentIds.length === 0) {
+            return [];
+        }
+    }
+
     const searchSopFn = options.searchSop ?? searchSop;
     const sopOptions = {
         scoreThreshold: options.scoreThreshold ?? (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.50),
         ...options,
+        allowedDocumentIds,
     };
     const sopChunks = await searchSopFn(query.trim(), sopOptions);
 

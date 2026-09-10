@@ -145,6 +145,7 @@ export function KnowledgeBasePage() {
   const [searching, setSearching] = useState(false);
   const [searchExecuted, setSearchExecuted] = useState(false);
   const [searchResults, setSearchResults] = useState([]);
+  const [searchReason, setSearchReason] = useState(null);
   const [searchError, setSearchError] = useState(null);
 
   // ─── Knowledge Base Chat State (Phase F) ─────────────────────────────────
@@ -222,8 +223,10 @@ export function KnowledgeBasePage() {
 
       if (response && response.success && Array.isArray(response.results)) {
         setSearchResults(response.results);
+        setSearchReason(response.reason || null);
       } else {
         setSearchResults([]);
+        setSearchReason(null);
       }
     } catch (err) {
       console.error('Semantic search error:', err);
@@ -598,9 +601,13 @@ export function KnowledgeBasePage() {
           ) : searchResults.length === 0 ? (
             <div className="p-8 text-center flex flex-col items-center justify-center gap-2 border border-dashed border-slate-200 rounded-xl bg-slate-50/50">
               <span className="text-2xl">📋</span>
-              <p className="text-sm font-semibold text-slate-700">No relevant knowledge-base evidence found.</p>
+              <p className="text-sm font-semibold text-slate-700">
+                {searchReason === 'knowledge_base_empty' ? 'Knowledge Base is empty.' : 'No relevant knowledge-base evidence found.'}
+              </p>
               <p className="text-xs text-slate-400 max-w-sm">
-                No matching SOP passages were found in Qdrant for this query. Try adjusting your query or upload the corresponding SOP PDF.
+                {searchReason === 'knowledge_base_empty'
+                  ? 'No approved Knowledge Base documents exist for this organization. Upload your SOP documents to enable semantic retrieval.'
+                  : 'No matching SOP passages were found in Qdrant for this query. Try adjusting your query or upload the corresponding SOP PDF.'}
               </p>
             </div>
           ) : (

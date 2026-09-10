@@ -211,6 +211,29 @@ const INSPECTION_GUIDELINES_PAGES = [
     ],
 ];
 
+const PUMP03_INSPECTION_PAGES = [
+    [
+        "EQUIPMENT INSPECTION REPORT",
+        "",
+        "Report ID: INSP-2026-0910-01",
+        "Facility: Sector 4 Pumping Station",
+        "Inspector: Lead Reliability Engineer",
+        "Date: September 10, 2026",
+        "",
+        "1. Equipment Details",
+        "Equipment ID: Pump-03",
+        "Type: Centrifugal Slurry Pump",
+        "",
+        "2. Inspection Findings",
+        "Observation 1: Pump-03 bearing temperature is 96 degrees C under continuous operating load.",
+        "Observation 2: Visual inspection shows normal oil clarity with no external seal leaks.",
+        "",
+        "3. Summary",
+        "Pump-03 bearing temperature is 96 degrees C, exceeding acceptable thermal operating range.",
+        "Immediate maintenance evaluation required.",
+    ],
+];
+
 // ─── Generate and write ───────────────────────────────────────────────────────
 
 async function generate() {
@@ -218,6 +241,7 @@ async function generate() {
         ["Demo_Maintenance_SOP.pdf", MAINTENANCE_SOP_PAGES],
         ["Demo_Safety_SOP.pdf", SAFETY_SOP_PAGES],
         ["Demo_Inspection_Guidelines.pdf", INSPECTION_GUIDELINES_PAGES],
+        ["Demo_Pump03_Inspection_Report.pdf", PUMP03_INSPECTION_PAGES],
     ];
 
     for (const [filename, pages] of files) {
@@ -227,7 +251,7 @@ async function generate() {
         console.log(`✓ Generated ${filename} (${pdfBuffer.length} bytes, ${pages.length} page(s))`);
     }
 
-    console.log("\n✅ All demo SOP PDFs generated");
+    console.log("\n✅ All demo PDFs generated");
 }
 
 await generate();

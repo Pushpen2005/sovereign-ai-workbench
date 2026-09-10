@@ -41,6 +41,7 @@ import * as defaultAdapters from "./inspection.adapters.js";
 import { INSUFFICIENT_EVIDENCE_RESULT } from "../../../../ai-service/risk/risk.schema.js";
 import { executeCalculator } from "../../services/agentTools/calculator.tool.js";
 import { getReportStoragePath } from "../../utils/storage.js";
+import { checkKnowledgeBaseSopGate } from "../../services/sop-gate.service.js";
 import fs from "fs";
 
 const ALLOWED_RISK_LEVELS = new Set(["LOW", "MEDIUM", "HIGH", "CRITICAL", null]);
@@ -537,6 +538,21 @@ export function createInspectionNodes(customAdapters = {}) {
                 return { currentNode: "retrieve_sop", executionOrder };
             }
 
+            // Authoritative Gate: Check PostgreSQL for active approved SOP documents first
+            if (state.organizationId) {
+                const gate = await checkKnowledgeBaseSopGate(state.organizationId);
+                if (!gate.evidenceAvailable) {
+                    console.log(`[KB_GATE] retrieveSopNode skipped: organizationId=${state.organizationId} approvedSopCount=0`);
+                    return {
+                        sopEvidence: [],
+                        findings: (state.findings || []).map((f) => ({ ...f, sopEvidence: [], validated: false })),
+                        sopEvidenceStatus: "NO_EVIDENCE",
+                        currentNode: "retrieve_sop",
+                        executionOrder,
+                    };
+                }
+            }
+
             const sopOptions = {
                 organizationId: state.organizationId,
                 ...state.metadata?.riskOptions,
@@ -852,7 +868,10 @@ export function createInspectionNodes(customAdapters = {}) {
                 riskAssessments[0] || null;
 
             const primaryRecommendation =
-                recommendations.filter(Boolean).join(" ") || null;
+                recommendations.filter(Boolean).join(" ") ||
+                (primaryRisk?.level === null
+                    ? "Insufficient SOP evidence is available to provide a validated recommendation."
+                    : (primaryRisk?.reason ? `Adhere to documented SOP guidelines: ${primaryRisk.reason}` : "Adhere to documented operating procedures."));
 
             const orderedRiskAssessments = [
                 primaryRisk,

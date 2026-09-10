@@ -17,6 +17,7 @@ import { executionEvents } from "../services/execution-events.service.js";
 import { searchSop } from "../../../ai-service/knowledge/sop.service.js";
 import { validateSopEvidenceChunk } from "../orchestration/inspection/inspection.adapters.js";
 import { buildSopQuery } from "../../../ai-service/risk/risk.prompt.js";
+import { checkKnowledgeBaseSopGate } from "../services/sop-gate.service.js";
 
 import {
     validateFilename,
@@ -145,6 +146,22 @@ export async function analyzeInspection(req, res, next) {
         const rawCandidates = Array.isArray(result.findings) ? result.findings : [];
         const validatedFindings = [];
 
+        // Authoritative Gate: Check PostgreSQL for active approved SOP documents first
+        const gate = await checkKnowledgeBaseSopGate(organizationId);
+        if (!gate.evidenceAvailable) {
+            return res.status(200).json({
+                success: true,
+                status: "INSUFFICIENT_EVIDENCE",
+                documentId: documentId.trim(),
+                findings: [],
+                risk: null,
+                recommendation: null,
+                approvalNote: null,
+                sources: [],
+                message: "Analysis stopped because no approved Knowledge Base SOP documents exist for this organization.",
+            });
+        }
+
         // Deterministic Knowledge Base Evidence Gate
         for (const candidate of rawCandidates) {
             try {
@@ -158,6 +175,7 @@ export async function analyzeInspection(req, res, next) {
                 const sopChunks = await searchSop(sopQuery, {
                     organizationId,
                     scoreThreshold: 0.50,
+                    allowedDocumentIds: gate.allowedDocumentIds,
                 });
 
                 const validChunks = (Array.isArray(sopChunks) ? sopChunks : []).filter((chunk) =>
@@ -229,6 +247,20 @@ export async function assessRisk(req, res, next) {
             });
         }
 
+        // Authoritative Gate: Check PostgreSQL for active approved SOP documents first
+        const gate = await checkKnowledgeBaseSopGate(organizationId);
+        if (!gate.evidenceAvailable) {
+            return res.status(200).json({
+                success: true,
+                status: "INSUFFICIENT_EVIDENCE",
+                documentId: documentId || null,
+                riskAssessment: null,
+                recommendation: null,
+                citations: [],
+                message: "Risk assessment blocked because no approved Knowledge Base SOP documents exist for this organization",
+            });
+        }
+
         // Validate that candidate finding has supporting Knowledge Base SOP evidence
         let sopChunks = Array.isArray(finding.sopEvidence) ? finding.sopEvidence : [];
         if (sopChunks.length === 0) {
@@ -241,6 +273,7 @@ export async function assessRisk(req, res, next) {
             sopChunks = await searchSop(sopQuery, {
                 organizationId,
                 scoreThreshold: 0.50,
+                allowedDocumentIds: gate.allowedDocumentIds,
             });
         }
 
@@ -291,6 +324,16 @@ export async function generateApprovalNoteDocx(req, res, next) {
             return res.status(400).json({
                 success: false,
                 message: "Payload data is required",
+            });
+        }
+
+        // Authoritative Gate: Check PostgreSQL for active approved SOP documents first
+        const gate = await checkKnowledgeBaseSopGate(organizationId);
+        if (!gate.evidenceAvailable) {
+            return res.status(400).json({
+                success: false,
+                code: "INSUFFICIENT_EVIDENCE",
+                message: "Cannot generate approval note because no approved Knowledge Base SOP documents exist for this organization",
             });
         }
 

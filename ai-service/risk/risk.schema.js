@@ -73,6 +73,9 @@ export function extractJsonFromResponse(rawResponse) {
 
     let cleaned = rawResponse.trim();
 
+    // Strip markdown code fences if wrapped
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
     const startIdx = cleaned.indexOf("{");
     const endIdx = cleaned.lastIndexOf("}");
     if (startIdx !== -1 && endIdx !== -1 && endIdx >= startIdx) {
@@ -85,16 +88,66 @@ export function extractJsonFromResponse(rawResponse) {
         }
     }
 
+    // Attempt 1: Direct JSON.parse
     try {
         return JSON.parse(cleaned);
-    } catch (error) {
-        try {
-            const repaired = cleaned.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
-            return JSON.parse(repaired);
-        } catch {
-            throw new Error(`LLM returned invalid JSON: ${error.message}`);
-        }
+    } catch {
+        // Continue to repairs
     }
+
+    // Repair 1: Remove comments and trailing commas
+    let repaired = cleaned
+        .replace(/\/\/[^\n]*/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/,\s*([\}\]])/g, "$1");
+
+    try {
+        return JSON.parse(repaired);
+    } catch {
+        // Continue to next repair
+    }
+
+    // Repair 2: Fix unquoted property names: { foo: "bar" } or , foo: "bar"
+    repaired = repaired.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+    repaired = repaired.replace(/,\s*([\}\]])/g, "$1");
+
+    try {
+        return JSON.parse(repaired);
+    } catch {
+        // Continue
+    }
+
+    // Repair 3: Replace single-quoted strings
+    repaired = repaired.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+    repaired = repaired.replace(/,\s*([\}\]])/g, "$1");
+
+    try {
+        return JSON.parse(repaired);
+    } catch {
+        // Continue
+    }
+
+    // Fallback: Regex extraction for riskAssessment, recommendation, citations
+    const levelMatch = rawResponse.match(/"level"\s*:\s*(?:"([^"]+)"|([A-Za-z]+|null))/i);
+    const reasonMatch = rawResponse.match(/"reason(?:ing)?"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+    const recMatch = rawResponse.match(/"(?:recommendation|action|correctiveAction)"\s*:\s*"((?:[^"\\]|\\.)*)"/i);
+
+    if (levelMatch || reasonMatch || recMatch) {
+        const extractedLevel = levelMatch ? (levelMatch[1] || levelMatch[2] || null) : null;
+        const extractedReason = reasonMatch ? reasonMatch[1] : "Risk assessed from available SOP evidence.";
+        const extractedRec = recMatch ? recMatch[1] : "Follow standard operating procedure maintenance steps.";
+
+        return {
+            riskAssessment: {
+                level: extractedLevel === "null" ? null : extractedLevel,
+                reason: extractedReason,
+            },
+            recommendation: extractedRec,
+            citations: [],
+        };
+    }
+
+    throw new Error(`LLM returned invalid JSON and could not be repaired: ${cleaned.slice(0, 100)}`);
 }
 
 /**
@@ -143,16 +196,35 @@ export function validateRiskResponse(parsed) {
     const severity = normalizeNullableString(riskObj.severity || parsed.severity, "severity");
 
     // 2. recommendation
-    let rec = parsed.recommendation;
-    if ((typeof rec !== "string" || rec.trim().length === 0) && parsed.recommendations) {
-        if (Array.isArray(parsed.recommendations)) {
-            rec = parsed.recommendations.filter((r) => typeof r === "string" && r.trim().length > 0).join(" ");
-        } else if (typeof parsed.recommendations === "string") {
-            rec = parsed.recommendations;
+    let rec = parsed.recommendation || (parsed.riskAssessment && parsed.riskAssessment.recommendation);
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.recommendations || parsed.riskAssessment?.recommendations)) {
+        const recSource = parsed.recommendations || parsed.riskAssessment?.recommendations;
+        if (Array.isArray(recSource)) {
+            rec = recSource.filter((r) => typeof r === "string" && r.trim().length > 0).join(" ");
+        } else if (typeof recSource === "string") {
+            rec = recSource;
         }
     }
-    if ((typeof rec !== "string" || rec.trim().length === 0) && parsed.action) {
-        rec = String(parsed.action);
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.action || parsed.riskAssessment?.action)) {
+        rec = String(parsed.action || parsed.riskAssessment?.action);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.correctiveAction || parsed.riskAssessment?.correctiveAction)) {
+        rec = String(parsed.correctiveAction || parsed.riskAssessment?.correctiveAction);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.recommendedAction || parsed.riskAssessment?.recommendedAction)) {
+        rec = String(parsed.recommendedAction || parsed.riskAssessment?.recommendedAction);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.mitigation || parsed.riskAssessment?.mitigation)) {
+        rec = String(parsed.mitigation || parsed.riskAssessment?.mitigation);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && (parsed.suggestedAction || parsed.riskAssessment?.suggestedAction)) {
+        rec = String(parsed.suggestedAction || parsed.riskAssessment?.suggestedAction);
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && level === null) {
+        rec = "Insufficient SOP evidence is available to provide a validated recommendation.";
+    }
+    if ((typeof rec !== "string" || rec.trim().length === 0) && reason) {
+        rec = `Adhere to documented SOP guidelines: ${reason}`;
     }
 
     if (typeof rec !== "string" || rec.trim().length === 0) {

@@ -8,6 +8,7 @@
 
 import { generateEmbedding } from "../../../../ai-service/embeddings/embedding.service.js";
 import { searchSimilarChunks } from "../../../../ai-service/retrieval/retrieval.service.js";
+import { checkKnowledgeBaseSopGate } from "../sop-gate.service.js";
 
 export class DocumentSearchError extends Error {
     constructor(message) {
@@ -60,6 +61,20 @@ export async function executeDocumentSearch(args, context = {}) {
     };
     if (documentType && typeof documentType === "string" && documentType.trim()) {
         filters.documentType = documentType.trim().toLowerCase();
+    }
+
+    if (filters.documentType === "sop") {
+        const gate = await checkKnowledgeBaseSopGate(organizationId.trim());
+        if (!gate.evidenceAvailable) {
+            return {
+                query: query.trim(),
+                totalResults: 0,
+                results: [],
+                evidenceAvailable: false,
+                reason: "knowledge_base_empty",
+            };
+        }
+        filters.allowedDocumentIds = gate.allowedDocumentIds;
     }
 
     let chunks;

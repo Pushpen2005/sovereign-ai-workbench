@@ -7,6 +7,7 @@ import {
 } from "../services/documents.service.js";
 import { query } from "../config/db.js";
 import { generateAnswer } from "../../../ai-service/llm/llm.service.js";
+import { checkKnowledgeBaseSopGate } from "../services/sop-gate.service.js";
 
 const DEFAULT_TOP_K = 5;
 const MAX_TOP_K = 20;
@@ -160,14 +161,28 @@ export async function searchKnowledge(req, res, next) {
       scoreThreshold = parsedScore;
     }
 
-    // 5. Execute semantic search over canonical documentType="sop" in Qdrant
+    // 5. Authoritative Gate: Check PostgreSQL for approved SOP documents first
+    const gate = await checkKnowledgeBaseSopGate(organizationId);
+    if (!gate.evidenceAvailable) {
+      return res.status(200).json({
+        success: true,
+        evidenceAvailable: false,
+        results: [],
+        reason: "knowledge_base_empty",
+        query: trimmedQuery,
+        total: 0,
+      });
+    }
+
+    // 6. Execute semantic search over canonical documentType="sop" in Qdrant strictly limited to allowed IDs
     const rawResults = await searchSop(trimmedQuery, {
       organizationId,
       limit: topK,
       scoreThreshold,
+      allowedDocumentIds: gate.allowedDocumentIds,
     });
 
-    // 6. Format results according to canonical contract
+    // 7. Format results according to canonical contract
     const results = (rawResults || []).map((item) => ({
       text: item.text,
       score: typeof item.score === "number" ? Math.round(item.score * 10000) / 10000 : item.score,
@@ -182,6 +197,7 @@ export async function searchKnowledge(req, res, next) {
 
     return res.status(200).json({
       success: true,
+      evidenceAvailable: true,
       query: trimmedQuery,
       results,
       total: results.length,
@@ -268,14 +284,27 @@ export async function askKnowledgeBase(req, res, next) {
       });
     }
 
-    // 1. Search SOPs in Qdrant
+    // 1. Authoritative Gate: Check PostgreSQL for approved SOP documents first
+    const gate = await checkKnowledgeBaseSopGate(organizationId);
+    if (!gate.evidenceAvailable) {
+      return res.status(200).json({
+        success: true,
+        answer: "No approved Knowledge Base evidence is available for this organization. I couldn't find sufficient supporting information in the Knowledge Base.",
+        citations: [],
+        evidenceAvailable: false,
+        reason: "knowledge_base_empty",
+      });
+    }
+
+    // 2. Search SOPs in Qdrant strictly limited to approved document IDs
     const searchResults = await searchSop(trimmedQuestion, {
       organizationId,
       limit: Math.min(topK, MAX_TOP_K),
       scoreThreshold: DEFAULT_SOP_SCORE_THRESHOLD,
+      allowedDocumentIds: gate.allowedDocumentIds,
     });
 
-    // 2. Strict Evidence Rule
+    // 3. Strict Evidence Rule
     if (!searchResults || searchResults.length === 0) {
       return res.status(200).json({
         success: true,
