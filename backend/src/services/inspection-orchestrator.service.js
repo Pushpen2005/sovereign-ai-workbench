@@ -148,7 +148,8 @@ export async function runInspectionWorkflow(input, options = {}) {
         assess_risk: { stage: "ANALYSING_RISK", message: "Assessing risk level for validated findings" },
         validate_risk: { stage: "PREPARING_RECOMMENDATION", message: "Preparing actionable recommendations" },
         validate_citations: { stage: "PREPARING_RECOMMENDATION", message: "Validating citations" },
-        generate_report: { stage: "GENERATING_APPROVAL_NOTE", message: "Generating approval note document" }
+        generate_report: { stage: "GENERATING_APPROVAL_NOTE", message: "Generating approval note document" },
+        insufficient_evidence: { stage: "INSUFFICIENT_EVIDENCE", message: "Insufficient Knowledge Base evidence found" },
     };
 
     // 3. Stream compiled LangGraph StateGraph snapshots in real-time
@@ -357,50 +358,143 @@ export async function runInspectionWorkflow(input, options = {}) {
         throw error;
     }
 
-    // Map final InspectionAgentState to established legacy response contract
+    // Map final InspectionAgentState to established response contract
     const uniqueCitations = finalState.citations || [];
+    const finalFindings = finalState.validatedFindings || finalState.findings || [];
+    const finalSopEvidence = finalState.validatedSopEvidence || finalState.sopEvidence || [];
     const riskAssessments = finalState.riskAssessments?.length
         ? finalState.riskAssessments
-        : (finalState.riskAssessment ? [finalState.riskAssessment] : []);
+        : (finalState.riskAssessment || finalState.risk ? [finalState.riskAssessment || finalState.risk] : []);
     const recommendations = finalState.recommendations?.length
         ? finalState.recommendations
         : (finalState.recommendation ? [finalState.recommendation] : []);
+
+    const primaryRisk = finalState.risk || finalState.riskAssessment || riskAssessments[0] || null;
+    const primaryRec = finalState.recommendation || recommendations[0] || null;
 
     const approvalNote = finalState.report?.filename
         ? {
             filename: finalState.report.filename,
             filePath: finalState.report.filePath || "",
+            fileSize: finalState.report.fileSize || 0,
+            reportId: finalState.report.reportId || finalState.reportId || null,
+            downloadUrl: finalState.report.downloadUrl || `/api/v1/inspection/download/${encodeURIComponent(finalState.report.filename)}`,
         }
-        : {
-            filename: null,
-            filePath: null,
-        };
+        : (finalState.approvalNote?.filename
+            ? {
+                filename: finalState.approvalNote.filename,
+                filePath: finalState.approvalNote.filePath || "",
+                fileSize: finalState.approvalNote.fileSize || 0,
+                reportId: finalState.approvalNote.reportId || finalState.reportId || null,
+                downloadUrl: finalState.approvalNote.downloadUrl || `/api/v1/inspection/download/${encodeURIComponent(finalState.approvalNote.filename)}`,
+            }
+            : {
+                filename: null,
+                filePath: null,
+                fileSize: 0,
+                downloadUrl: null,
+            });
 
-    // 5. Publish terminal run_completed SSE event
-    try {
-        console.log(`[INSPECTION_COMPLETED]`);
-        executionEvents.publish(runId, "inspection_stage", {
-            runId,
-            stage: "COMPLETED",
-            status: "completed",
-            message: "Inspection workflow completed successfully"
-        });
-        executionEvents.publish(runId, "run_completed", {
-            runId,
-            status: "completed",
+    console.log(`[FINAL_INSPECTION_STATE] validatedFindings=${finalFindings.length} sopEvidence=${finalSopEvidence.length} riskPresent=${!!primaryRisk} recommendationPresent=${!!primaryRec}`);
+
+    // Section 13: SSE COMPLETED RULE
+    // NEVER emit COMPLETED if outcome is INSUFFICIENT_EVIDENCE or if DOCX does not physically exist
+    const isInsufficientEvidence = finalState.workflowOutcome === "INSUFFICIENT_EVIDENCE" || finalFindings.length === 0;
+
+    if (isInsufficientEvidence) {
+        if (organizationId) {
+            try {
+                await updateAgentRun(runId, organizationId, {
+                    status: "stopped",
+                    stoppedReason: "INSUFFICIENT_EVIDENCE",
+                    completedAt: new Date(),
+                });
+            } catch (dbErr) {
+                console.warn("[InspectionOrchestrator] Warning: Failed to persist inspection run stop:", dbErr.message);
+            }
+        }
+
+        return {
             documentId: finalState.documentId,
-            workflowOutcome: finalState.workflowOutcome || "SUCCESS",
-            reportFilename: approvalNote.filename,
-        });
-    } catch {
-        // Non-blocking
+            filename: finalState.ingestionResult?.filename || filename || `${finalState.documentId}.pdf`,
+            chunksStored: finalState.ingestionResult?.chunksStored ?? 0,
+            findings: [],
+            validatedFindings: [],
+            risk: null,
+            riskAssessment: null,
+            riskAssessments: [],
+            recommendation: null,
+            recommendations: [],
+            citations: [],
+            sopEvidence: [],
+            validatedSopEvidence: [],
+            approvalNote: null,
+            downloadUrl: null,
+            workflowOutcome: "INSUFFICIENT_EVIDENCE",
+            orchestration: {
+                engine: "langgraph",
+                runId: finalState.runId,
+                executionOrder: finalState.executionOrder,
+                status: "completed",
+                workflowOutcome: "INSUFFICIENT_EVIDENCE",
+                failureReason: finalState.failureReason || "Analysis stopped because no sufficiently relevant Knowledge Base evidence was found.",
+            },
+        };
+    }
+
+    // Verify physical DOCX file existence and non-zero size before emitting COMPLETED
+    let docxPhysicallyVerified = false;
+    if (approvalNote.filePath) {
+        try {
+            const fsModule = await import("fs");
+            if (fsModule.existsSync(approvalNote.filePath) && fsModule.statSync(approvalNote.filePath).size > 0) {
+                docxPhysicallyVerified = true;
+            }
+        } catch {
+            docxPhysicallyVerified = false;
+        }
+    }
+
+    const isDeliverableReady =
+        finalFindings.length > 0 &&
+        finalSopEvidence.length > 0 &&
+        primaryRisk !== null &&
+        primaryRec !== null &&
+        (approvalNote.reportId || finalState.reportId) &&
+        approvalNote.downloadUrl &&
+        docxPhysicallyVerified;
+
+    if (isDeliverableReady) {
+        try {
+            console.log(`[INSPECTION_COMPLETED]`);
+            executionEvents.publish(runId, "inspection_stage", {
+                runId,
+                stage: "COMPLETED",
+                status: "completed",
+                message: "Inspection workflow completed successfully"
+            });
+            executionEvents.publish(runId, "run_completed", {
+                runId,
+                status: "completed",
+                documentId: finalState.documentId,
+                workflowOutcome: "SUCCESS",
+                reportId: approvalNote.reportId || finalState.reportId,
+                reportFilename: approvalNote.filename,
+                downloadUrl: approvalNote.downloadUrl,
+            });
+        } catch {
+            // Non-blocking
+        }
+    } else {
+        console.warn(`[INSPECTION_INCOMPLETE] Physical verification failed or deliverables missing: docxPhysicallyVerified=${docxPhysicallyVerified}`);
+        finalState.workflowOutcome = "FAILURE";
     }
 
     if (organizationId) {
         try {
             await updateAgentRun(runId, organizationId, {
-                status: "completed",
-                stoppedReason: finalState.workflowOutcome || "completed",
+                status: isDeliverableReady ? "completed" : "failed",
+                stoppedReason: isDeliverableReady ? (finalState.workflowOutcome || "completed") : "FAILURE",
                 completedAt: new Date(),
             });
         } catch (dbErr) {
@@ -412,20 +506,27 @@ export async function runInspectionWorkflow(input, options = {}) {
         documentId: finalState.documentId,
         filename: finalState.ingestionResult?.filename || filename || `${finalState.documentId}.pdf`,
         chunksStored: finalState.ingestionResult?.chunksStored ?? 0,
-        findings: finalState.findings || [],
-        riskAssessment: finalState.riskAssessment || riskAssessments[0] || null,
+        findings: finalFindings,
+        validatedFindings: finalFindings,
+        sopEvidence: finalSopEvidence,
+        validatedSopEvidence: finalSopEvidence,
+        risk: primaryRisk,
+        riskAssessment: primaryRisk,
         riskAssessments,
-        recommendation: finalState.recommendation || recommendations[0] || null,
+        recommendation: primaryRec,
         recommendations,
         citations: uniqueCitations,
-        approvalNote,
+        approvalNote: isDeliverableReady && approvalNote.filename ? approvalNote : null,
+        reportId: isDeliverableReady ? (approvalNote.reportId || finalState.reportId) : null,
+        downloadUrl: isDeliverableReady ? (approvalNote.downloadUrl || null) : null,
+        workflowOutcome: isDeliverableReady ? (finalState.workflowOutcome || "SUCCESS") : "FAILURE",
         orchestration: {
             engine: "langgraph",
             runId: finalState.runId,
             executionOrder: finalState.executionOrder,
-            status: finalState.status,
-            workflowOutcome: finalState.workflowOutcome || "SUCCESS",
-            failureReason: finalState.failureReason || null,
+            status: isDeliverableReady ? "completed" : "failed",
+            workflowOutcome: isDeliverableReady ? (finalState.workflowOutcome || "SUCCESS") : "FAILURE",
+            failureReason: isDeliverableReady ? null : (finalState.failureReason || "Approval Note DOCX was not verified on disk"),
         },
     };
 }

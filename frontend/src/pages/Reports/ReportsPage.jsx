@@ -51,10 +51,11 @@ export function ReportsPage() {
   }, [loadReports]);
 
   const handleDownload = async (report) => {
-    if (!report.filename) return;
+    const target = report.downloadUrl || report.filename;
+    if (!target) return;
     setDownloadingId(report.id);
     try {
-      await downloadApprovalNote(report.filename);
+      await downloadApprovalNote(target, report.filename);
     } catch (err) {
       console.error('Download error:', err);
     } finally {

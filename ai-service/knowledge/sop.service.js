@@ -11,7 +11,7 @@ import { searchSimilarChunks } from "../retrieval/retrieval.service.js";
 const SOP_DOCUMENT_TYPE = "sop";
 
 const DEFAULT_LIMIT = 5;
-const DEFAULT_SCORE_THRESHOLD = 0.5;
+const DEFAULT_SCORE_THRESHOLD = process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.25;
 
 /**
  * Ingest a SOP PDF into the Qdrant knowledge base.

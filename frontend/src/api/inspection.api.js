@@ -69,15 +69,28 @@ export function getDownloadUrl(filename) {
  * @param {string} filename
  * @returns {Promise<string>} downloaded filename
  */
-export async function downloadApprovalNote(filename) {
-  if (!filename || typeof filename !== 'string') {
-    throw new Error('Filename is required for download');
+export async function downloadApprovalNote(targetUrlOrFilename, optionalFilename) {
+  if (!targetUrlOrFilename || typeof targetUrlOrFilename !== 'string') {
+    throw new Error('Filename or download URL is required for download');
   }
 
-  const res = await axiosInstance.get(
-    `/api/v1/inspection/download/${encodeURIComponent(filename)}`,
-    { responseType: 'blob' }
-  );
+  let requestUrl = targetUrlOrFilename;
+  let filename = optionalFilename || '';
+
+  if (requestUrl.startsWith('http://') || requestUrl.startsWith('https://')) {
+    const parsedUrl = new URL(requestUrl, window.location.origin);
+    requestUrl = `${parsedUrl.pathname}${parsedUrl.search}`;
+    filename = filename || decodeURIComponent(parsedUrl.pathname.split('/').pop() || '');
+  } else if (requestUrl.startsWith('/api/v1/inspection/download/')) {
+    if (!filename) {
+      filename = decodeURIComponent(requestUrl.replace('/api/v1/inspection/download/', ''));
+    }
+  } else {
+    filename = filename || targetUrlOrFilename;
+    requestUrl = `/api/v1/inspection/download/${encodeURIComponent(targetUrlOrFilename)}`;
+  }
+
+  const res = await axiosInstance.get(requestUrl, { responseType: 'blob' });
 
   const blob = new Blob([res.data], {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -85,11 +98,11 @@ export async function downloadApprovalNote(filename) {
   const url = window.URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = filename;
+  a.download = filename || 'Approval_Note.docx';
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  window.URL.revokeObjectURL(url);
+  window.setTimeout(() => window.URL.revokeObjectURL(url), 0);
   return filename;
 }
 
@@ -130,4 +143,3 @@ export function runWorkflow(input, task = '') {
 export function getInspectionRun(runId) {
   return axiosInstance.get(`/api/v1/inspection/runs/${encodeURIComponent(runId)}`).then((r) => r.data);
 }
-

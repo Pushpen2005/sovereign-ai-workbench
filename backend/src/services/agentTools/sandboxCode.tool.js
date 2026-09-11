@@ -12,9 +12,11 @@
 import { executeInSandbox, SandboxValidationError } from "../sandbox.service.js";
 
 export class SandboxCodeError extends Error {
-    constructor(message) {
+    constructor(message, details = {}) {
         super(message);
         this.name = "SandboxCodeError";
+        this.code = details.code || "SANDBOX_EXECUTION_FAILED";
+        this.details = details;
     }
 }
 
@@ -32,15 +34,15 @@ export async function executeSandboxCode(args) {
         throw new SandboxCodeError("Arguments must be an object with 'code' and 'language' fields");
     }
 
-    const { code, language = "python", timeoutMs } = args;
+    const { code, language = "python", timeoutMs, csvContent } = args;
 
     if (typeof code !== "string" || !code.trim()) {
         throw new SandboxCodeError("code must be a non-empty string");
     }
 
-    const lang = String(language || "").trim().toLowerCase();
-    if (lang !== "python") {
-        throw new SandboxCodeError(`Unsupported language '${language}'. Only 'python' is supported in the sandbox.`);
+    const lang = String(language || "python").trim().toLowerCase();
+    if (lang !== "python" && lang !== "py") {
+        throw new SandboxCodeError("Only Python execution is supported.");
     }
 
     try {
@@ -48,6 +50,7 @@ export async function executeSandboxCode(args) {
             code: code.trim(),
             language: "python",
             timeoutMs: Number.isInteger(timeoutMs) ? timeoutMs : 5000,
+            csvContent: typeof csvContent === "string" ? csvContent : null,
         });
 
         return {
@@ -62,8 +65,15 @@ export async function executeSandboxCode(args) {
         };
     } catch (err) {
         if (err instanceof SandboxValidationError) {
-            throw new SandboxCodeError(`Sandbox validation failed: ${err.message}`);
+            throw new SandboxCodeError(`Sandbox validation failed: ${err.message}`, {
+                code: err.code,
+                stage: err.stage,
+                ...err.details,
+            });
         }
-        throw new SandboxCodeError(`Sandbox execution failed: ${err.message}`);
+        throw new SandboxCodeError(`Sandbox execution failed: ${err.message}`, {
+            code: "SANDBOX_EXECUTION_FAILED",
+            stage: "execution",
+        });
     }
 }

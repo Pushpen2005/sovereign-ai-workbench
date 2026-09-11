@@ -329,7 +329,8 @@ export async function checkModelAvailability(modelName) {
     if (lower.includes("vl") || lower.includes("qwen2.5-vl") || lower.includes("vision-mlx")) {
         const qwenVlUrl =
             process.env.QWEN_VL_MLX_URL ||
-            process.env.MLX_VISION_URL;
+            process.env.MLX_VISION_URL ||
+            "http://127.0.0.1:8082";
         if (!qwenVlUrl) return false;
         try {
             const res = await fetch(`${qwenVlUrl}/health`, { signal: AbortSignal.timeout(2000) });
@@ -352,7 +353,8 @@ export async function checkModelAvailability(modelName) {
     if (lower.startsWith("qwen") || lower.includes("qwen2.5-coder") || lower.includes("coder-mlx")) {
         const qwenUrl =
             process.env.QWEN_CODER_MLX_URL ||
-            process.env.MLX_CODER_URL;
+            process.env.MLX_CODER_URL ||
+            "http://127.0.0.1:8081";
         if (!qwenUrl) return false;
         try {
             const res = await fetch(`${qwenUrl}/health`, { signal: AbortSignal.timeout(2000) });

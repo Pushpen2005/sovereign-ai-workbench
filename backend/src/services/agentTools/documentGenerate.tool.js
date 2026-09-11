@@ -1,8 +1,7 @@
 /**
- * SOVEREIGNAI — PHASE 7: DOCUMENT GENERATE TOOL
+ * SOVEREIGNAI — DOCUMENT GENERATE TOOL
  *
- * For Phase 7, this tool does NOT create a binary DOCX file (Phase 9 feature).
- * It validates, structures, and prepares the official Approval Note deliverable data:
+ * Validates, structures, and compiles the official Approval Note deliverable DOCX:
  *   1. Subject
  *   2. Background
  *   3. Inspection Findings
@@ -10,8 +9,10 @@
  *   5. Risk Assessment
  *   6. Recommendation
  *   7. References
- *   8. Approval ({ status: "Pending Approval" })
+ *   8. Approval
  */
+
+import { runApprovalNoteGeneration } from "../inspection.service.js";
 
 export class DocumentGenerateError extends Error {
     constructor(message) {
@@ -153,6 +154,31 @@ export async function executeDocumentGenerate(args, context = {}) {
         };
     });
 
+    let docxResult = null;
+    if (inspectionFindings.length > 0 && references.length > 0) {
+        try {
+            docxResult = await runApprovalNoteGeneration(
+                {
+                    subject,
+                    background,
+                    findings: inspectionFindings,
+                    technicalAnalysis: Array.isArray(technicalAnalysis)
+                        ? technicalAnalysis.map((t) => t.analysis || String(t)).join("\n")
+                        : (typeof technicalAnalysis === "string" ? technicalAnalysis : null),
+                    riskAssessment,
+                    recommendation: recommendation.action || (typeof recommendation === "string" ? recommendation : ""),
+                    citations: references,
+                },
+                {
+                    organizationId,
+                    filename: args.filename || "Approval_Note.docx",
+                }
+            );
+        } catch (docxErr) {
+            console.warn(`[documentGenerate] DOCX generation notice: ${docxErr.message}`);
+        }
+    }
+
     const approvalNoteData = {
         subject,
         background,
@@ -162,9 +188,12 @@ export async function executeDocumentGenerate(args, context = {}) {
         recommendation,
         references,
         approval: {
-            status: "Pending Approval",
+            status: docxResult ? "APPROVAL_NOTE_READY" : "Ready for Plant Sign-Off",
         },
-        status: "validated",
+        filename: docxResult?.filename || null,
+        filePath: docxResult?.filePath || null,
+        downloadUrl: docxResult?.filename ? `/api/v1/inspection/download/${encodeURIComponent(docxResult.filename)}` : null,
+        status: docxResult ? "APPROVAL_NOTE_READY" : "validated",
         timestamp: new Date().toISOString(),
     };
 

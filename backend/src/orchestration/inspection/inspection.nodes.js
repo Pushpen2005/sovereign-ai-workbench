@@ -648,14 +648,15 @@ export function createInspectionNodes(customAdapters = {}) {
      * - If 0 candidates have valid KB evidence, terminates with NO_EVIDENCE.
      */
     async function checkSopEvidenceNode(state) {
-        console.log();
         const executionOrder = ["check_sop_evidence"];
         try {
             if (state.status === "failed") {
                 return {
                     sopEvidenceStatus: "NO_EVIDENCE",
                     findings: [],
+                    validatedFindings: [],
                     sopEvidence: [],
+                    validatedSopEvidence: [],
                     currentNode: "check_sop_evidence",
                     executionOrder,
                 };
@@ -665,7 +666,9 @@ export function createInspectionNodes(customAdapters = {}) {
                 return {
                     sopEvidenceStatus: "NO_EVIDENCE",
                     findings: [],
+                    validatedFindings: [],
                     sopEvidence: [],
+                    validatedSopEvidence: [],
                     currentNode: "check_sop_evidence",
                     executionOrder,
                 };
@@ -674,6 +677,8 @@ export function createInspectionNodes(customAdapters = {}) {
             const validatedFindings = [];
             const allValidatedSopEvidence = [];
             const seenKeys = new Set();
+            const scoreThreshold = state.metadata?.sopOptions?.scoreThreshold ||
+                (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.25);
 
             for (const rawFinding of state.findings) {
                 const finding = { ...rawFinding };
@@ -682,8 +687,8 @@ export function createInspectionNodes(customAdapters = {}) {
                 // Filter chunks using deterministic evidence validator
                 const validChunks = rawChunks.filter((chunk) =>
                     adapters.validateSopEvidenceChunk
-                        ? adapters.validateSopEvidenceChunk(chunk, finding, state.organizationId, state.documentId)
-                        : (chunk && chunk.score >= 0.50 && chunk.documentType === "sop")
+                        ? adapters.validateSopEvidenceChunk(chunk, finding, state.organizationId, state.documentId, scoreThreshold)
+                        : (chunk && chunk.score >= scoreThreshold && chunk.documentType === "sop")
                 );
 
                 if (validChunks.length > 0) {
@@ -709,7 +714,9 @@ export function createInspectionNodes(customAdapters = {}) {
                 return {
                     sopEvidenceStatus: "NO_EVIDENCE",
                     findings: [],
+                    validatedFindings: [],
                     sopEvidence: [],
+                    validatedSopEvidence: [],
                     currentNode: "check_sop_evidence",
                     executionOrder,
                 };
@@ -718,7 +725,9 @@ export function createInspectionNodes(customAdapters = {}) {
             return {
                 sopEvidenceStatus: "EVIDENCE_FOUND",
                 findings: validatedFindings,
+                validatedFindings,
                 sopEvidence: allValidatedSopEvidence,
+                validatedSopEvidence: allValidatedSopEvidence,
                 currentNode: "check_sop_evidence",
                 executionOrder,
             };
@@ -726,7 +735,9 @@ export function createInspectionNodes(customAdapters = {}) {
             return {
                 sopEvidenceStatus: "NO_EVIDENCE",
                 findings: [],
+                validatedFindings: [],
                 sopEvidence: [],
+                validatedSopEvidence: [],
                 currentNode: "check_sop_evidence",
                 executionOrder,
             };
@@ -738,17 +749,22 @@ export function createInspectionNodes(customAdapters = {}) {
      * Returns a structured safe result without hallucinating findings, risks, or recommendations.
      */
     async function insufficientEvidenceNode(state) {
-        console.log();
         const executionOrder = ["insufficient_evidence"];
 
         return {
             findings: [],
+            validatedFindings: [],
+            risk: null,
             riskAssessment: null,
             riskAssessments: [],
             recommendation: null,
             recommendations: [],
             citations: [],
             sopEvidence: [],
+            validatedSopEvidence: [],
+            report: null,
+            approvalNote: null,
+            downloadUrl: null,
             sopEvidenceStatus: "NO_EVIDENCE",
             workflowOutcome: "INSUFFICIENT_EVIDENCE",
             status: "completed",
@@ -765,17 +781,20 @@ export function createInspectionNodes(customAdapters = {}) {
      * Does NOT call the risk model if findings are empty.
      */
     async function assessRiskNode(state) {
-        console.log();
         const executionOrder = ["assess_risk"];
         try {
             if (state.status === "failed") {
                 return { currentNode: "assess_risk", executionOrder };
             }
 
+            console.log("[RISK_ANALYSIS_STARTED]");
+
             // GATED STRICTLY: Risk assessment allowed ONLY if validated findings exist
             if (!Array.isArray(state.findings) || state.findings.length === 0) {
                 return {
                     findings: [],
+                    validatedFindings: [],
+                    risk: null,
                     riskAssessment: null,
                     riskAssessments: [],
                     recommendation: null,
@@ -796,8 +815,8 @@ export function createInspectionNodes(customAdapters = {}) {
                 ...state.metadata?.riskOptions,
             };
 
-            // Bounded concurrency (limit 2) for independent finding risk evaluations
-            const maxConcurrency = Math.min(2, state.findings.length);
+            // Serial execution (concurrency 1) for local Apple Silicon Gemma MLX runtime
+            const maxConcurrency = 1;
             const assessedFindings = new Array(state.findings.length);
 
             let nextIndex = 0;
@@ -866,6 +885,8 @@ export function createInspectionNodes(customAdapters = {}) {
             if (updatedFindings.length === 0) {
                 return {
                     findings: [],
+                    validatedFindings: [],
+                    risk: null,
                     riskAssessment: null,
                     riskAssessments: [],
                     recommendation: null,
@@ -884,11 +905,16 @@ export function createInspectionNodes(customAdapters = {}) {
                 riskAssessments.find((r) => r.level === "LOW") ||
                 riskAssessments[0] || null;
 
+            console.log(`[RISK_ANALYSIS_COMPLETED] findingCount=${updatedFindings.length} riskPresent=${!!primaryRisk}`);
+            console.log("[RECOMMENDATION_STARTED]");
+
             const primaryRecommendation =
                 recommendations.filter(Boolean).join(" ") ||
                 (primaryRisk?.level === null
                     ? "Insufficient SOP evidence is available to provide a validated recommendation."
                     : (primaryRisk?.reason ? `Adhere to documented SOP guidelines: ${primaryRisk.reason}` : "Adhere to documented operating procedures."));
+
+            console.log(`[RECOMMENDATION_COMPLETED] recommendationPresent=${!!primaryRecommendation}`);
 
             const orderedRiskAssessments = [
                 primaryRisk,
@@ -897,6 +923,8 @@ export function createInspectionNodes(customAdapters = {}) {
 
             return {
                 findings: updatedFindings,
+                validatedFindings: updatedFindings,
+                risk: primaryRisk,
                 riskAssessment: primaryRisk,
                 riskAssessments: orderedRiskAssessments,
                 recommendation: primaryRecommendation,
@@ -936,7 +964,9 @@ export function createInspectionNodes(customAdapters = {}) {
                 };
             }
 
-            const validation = validateRiskStructure(state.riskAssessment, state.recommendation);
+            console.log("[RISK_VALIDATION_STARTED]");
+            const validation = validateRiskStructure(state.riskAssessment || state.risk, state.recommendation);
+            console.log(`[RISK_VALIDATION_COMPLETED] riskValidation=${validation.isValid ? "VALID" : "INVALID"}`);
 
             if (validation.isValid) {
                 return {
@@ -950,16 +980,19 @@ export function createInspectionNodes(customAdapters = {}) {
                 riskValidation: { isValid: false, status: "INVALID", error: validation.error },
                 failureReason: validation.error,
                 workflowOutcome: "RISK_VALIDATION_FAILED",
+                risk: null,
                 riskAssessment: null,
                 recommendation: null,
                 currentNode: "validate_risk",
                 executionOrder,
             };
         } catch (err) {
+            console.log(`[RISK_VALIDATION_COMPLETED] riskValidation=INVALID`);
             return {
                 riskValidation: { isValid: false, status: "INVALID", error: err.message },
                 failureReason: err.message,
                 workflowOutcome: "RISK_VALIDATION_FAILED",
+                risk: null,
                 riskAssessment: null,
                 recommendation: null,
                 currentNode: "validate_risk",
@@ -973,7 +1006,6 @@ export function createInspectionNodes(customAdapters = {}) {
      * Handles unrecoverable validation failures without process crashes.
      */
     async function safeFailureNode(state) {
-        console.log();
         const executionOrder = ["safe_failure"];
 
         const failureReason =
@@ -986,11 +1018,14 @@ export function createInspectionNodes(customAdapters = {}) {
         return {
             status: "failed",
             workflowOutcome: state.workflowOutcome || "SAFE_FAILURE",
+            risk: null,
             riskAssessment: null,
             riskAssessments: [],
             recommendation: null,
             recommendations: [],
             report: null,
+            approvalNote: null,
+            downloadUrl: null,
             failureReason,
             errors: [
                 {
@@ -1092,25 +1127,31 @@ export function createInspectionNodes(customAdapters = {}) {
      * Validates input sections and persists Approval Note DOCX strictly within tenant directory.
      */
     async function generateReportNode(state) {
-        console.log();
         const executionOrder = ["generate_report"];
         try {
             if (state.status === "failed") {
                 return { currentNode: "generate_report", executionOrder };
             }
 
+            console.log("[APPROVAL_NOTE_GENERATION_STARTED]");
+
+            const targetFindings = Array.isArray(state.validatedFindings) && state.validatedFindings.length > 0
+                ? state.validatedFindings
+                : state.findings;
+
             // Phase 8: Strict Approval Note Preconditions
-            if (!Array.isArray(state.findings) || state.findings.length === 0) {
+            if (!Array.isArray(targetFindings) || targetFindings.length === 0) {
                 throw new Error("Cannot generate Approval Note DOCX without validated findings");
             }
 
-            for (const f of state.findings) {
+            for (const f of targetFindings) {
                 if (!f || (!f.validated && (!Array.isArray(f.sopEvidence) || f.sopEvidence.length === 0))) {
                     throw new Error("Cannot generate Approval Note DOCX: finding lacks supporting Knowledge Base evidence");
                 }
             }
 
-            if (!state.riskAssessment || typeof state.riskAssessment !== "object" || !state.riskAssessment.reason) {
+            const targetRisk = state.risk || state.riskAssessment;
+            if (!targetRisk || typeof targetRisk !== "object" || !targetRisk.reason) {
                 throw new Error("Cannot generate Approval Note DOCX without a validated risk assessment");
             }
 
@@ -1129,20 +1170,25 @@ export function createInspectionNodes(customAdapters = {}) {
 
             const docxData = {
                 subject: `Inspection Report Analysis and Approval Recommendation — ${state.documentId || "Report"}`,
-                findings: state.findings,
-                riskAssessment: state.riskAssessment,
+                findings: targetFindings,
+                riskAssessment: targetRisk,
                 recommendation: state.recommendation,
                 citations: state.citations,
             };
+
+            const baseDocName = (state.metadata?.filename || state.ingestionResult?.filename || state.documentId || "Report")
+                .replace(/\.[^/.]+$/, "");
+            const defaultReportFilename = `Approval_Note_${baseDocName}.docx`;
 
             const reportOptions = {
                 documentId: state.documentId,
                 organizationId: state.organizationId,
                 task: state.task,
                 filename:
-                    state.metadata?.filename ||
                     state.metadata?.approvalNoteOptions?.filename ||
-                    `Approval_Note_${state.documentId || "generated"}.docx`,
+                    state.metadata?.reportOptions?.filename ||
+                    defaultReportFilename,
+                persistReportRecord: true,
                 ...state.metadata?.approvalNoteOptions,
                 ...state.metadata?.reportOptions,
             };
@@ -1154,8 +1200,30 @@ export function createInspectionNodes(customAdapters = {}) {
                 throw new Error("Approval Note DOCX was not successfully generated");
             }
 
+            // Physical DOCX verification: verify file exists on disk and size > 0
+            const fsModule = await import("fs");
+            if (!reportResult.filePath || !fsModule.existsSync(reportResult.filePath)) {
+                throw new Error(`Approval Note DOCX file not found on disk at: ${reportResult.filePath}`);
+            }
+            const fileStats = fsModule.statSync(reportResult.filePath);
+            if (fileStats.size <= 0) {
+                throw new Error(`Approval Note DOCX file is 0 bytes at: ${reportResult.filePath}`);
+            }
+
+            console.log(`[APPROVAL_NOTE_GENERATION_COMPLETED] filename=${reportResult.filename} fileSize=${fileStats.size}`);
+
+            const downloadUrl = reportResult.downloadUrl || `/api/v1/inspection/download/${encodeURIComponent(reportResult.filename)}`;
+            const reportPayload = {
+                ...reportResult,
+                fileSize: fileStats.size,
+                downloadUrl,
+            };
+
             return {
-                report: reportResult,
+                report: reportPayload,
+                approvalNote: reportPayload,
+                reportId: reportResult.reportId,
+                downloadUrl,
                 workflowOutcome: "SUCCESS",
                 currentNode: "generate_report",
                 executionOrder,

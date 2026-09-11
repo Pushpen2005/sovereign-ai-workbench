@@ -11,6 +11,7 @@
  */
 
 import path from "path";
+import fs from "fs";
 import {
     ingestInspectionFile,
     runApprovalNoteGeneration,
@@ -174,10 +175,10 @@ function extractKeywords(text) {
  * 5. Cannot be the inspection report itself (chunk.documentId !== inspectionDocId)
  * 6. Semantic / keyword relevance between candidate observation and SOP chunk
  */
-export function validateSopEvidenceChunk(chunk, finding = {}, organizationId = null, inspectionDocId = null, minScore = 0.50) {
+export function validateSopEvidenceChunk(chunk, finding = {}, organizationId = null, inspectionDocId = null, minScore = (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.25)) {
     if (!chunk || typeof chunk !== "object") return false;
 
-    // 1. Minimum similarity threshold (canonical 0.50)
+    // 1. Minimum similarity threshold (calibrated for bge-small-en-v1.5)
     const score = typeof chunk.score === "number" ? chunk.score : 0;
     if (score < minScore) return false;
 
@@ -264,7 +265,7 @@ export async function runSopRetrieval(finding, options = {}) {
 
     const searchSopFn = options.searchSop ?? searchSop;
     const sopOptions = {
-        scoreThreshold: options.scoreThreshold ?? (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.50),
+        scoreThreshold: options.scoreThreshold ?? (process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.25),
         ...options,
         allowedDocumentIds,
     };
@@ -319,28 +320,44 @@ export function runCitationValidation(rawCitations, retrievedSopChunks, organiza
  * @returns {Promise<object>} Report metadata ({ filename, filePath, downloadUrl, reportId })
  */
 export async function runReportGeneration(data, options = {}) {
+    console.log("[INSPECTION] Starting approval DOCX generation");
     const docxResult = await runApprovalNoteGeneration(data, options);
+    const fileStats = fs.statSync(docxResult.filePath);
+    if (!docxResult.filename.endsWith(".docx") || fileStats.size <= 0) {
+        throw new Error("Approval Note DOCX verification failed");
+    }
+    const magic = Buffer.alloc(2);
+    const fd = fs.openSync(docxResult.filePath, "r");
+    try {
+        fs.readSync(fd, magic, 0, 2, 0);
+    } finally {
+        fs.closeSync(fd);
+    }
+    if (magic[0] !== 0x50 || magic[1] !== 0x4b) {
+        throw new Error("Approval Note DOCX is not a valid OpenXML package");
+    }
+    console.log(`[INSPECTION] DOCX generated filename=${docxResult.filename}`);
+    console.log(`[INSPECTION] DOCX verified fileSize=${fileStats.size}`);
 
     let reportRecord = null;
     if (options.persistReportRecord && options.organizationId && typeof options.organizationId === "string") {
-        try {
-            reportRecord = await createReportRecord({
-                documentId: options.documentId || null,
-                organizationId: options.organizationId,
-                title: options.title || `Approval Note — ${options.documentId || "Inspection"}`,
-                filename: docxResult.filename,
-                riskLevel: data.riskAssessment?.level || null,
-                status: "GENERATED",
-                task: options.task || "Inspection Report Analysis and Approval Recommendation",
-            });
-        } catch (dbErr) {
-            console.warn(`[Report Adapter] Non-fatal DB report creation warning: ${dbErr.message}`);
-        }
+        console.log("[INSPECTION] Persisting report history");
+        reportRecord = await createReportRecord({
+            documentId: options.documentId || null,
+            organizationId: options.organizationId,
+            title: options.title || `Approval Note — ${options.documentId || "Inspection"}`,
+            filename: docxResult.filename,
+            riskLevel: data.riskAssessment?.level || null,
+            status: "GENERATED",
+            task: options.task || "Inspection Report Analysis and Approval Recommendation",
+        });
+        console.log(`[INSPECTION] Report history persisted reportId=${reportRecord.id}`);
     }
 
     return {
         filename: docxResult.filename,
         filePath: docxResult.filePath,
+        fileSize: fileStats.size,
         downloadUrl: `/api/v1/inspection/download/${docxResult.filename}`,
         reportId: reportRecord?.id || null,
     };
