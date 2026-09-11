@@ -1,68 +1,172 @@
 /**
- * PR #24 — Secure Coding Execution Sandbox Service
+ * PR #24 / PR #25 — Secure Coding Execution Sandbox Service
  *
  * Provides isolated Python code execution inside an ephemeral Docker container.
  * Enforces strict network isolation (--network none), resource constraints
- * (CPU, memory, PIDs), read-only root filesystems, and hard execution timeouts.
+ * (CPU: 1 core, memory: 256MB, PIDs: 64), read-only root filesystems, and hard execution timeouts (5s default).
  *
  * Generated code NEVER executes on the host or inside the Node.js backend.
+ * Only Python code execution is supported. Non-Python requests are strictly rejected.
  */
 
-import { spawn, execSync } from "child_process";
+import { spawn, spawnSync, execSync } from "child_process";
 import { randomUUID } from "crypto";
+
+export const SUPPORTED_LANGUAGE = "python";
 
 const MAX_CODE_SIZE_BYTES = 64 * 1024;     // 64 KB
 const MAX_OUTPUT_BYTES    = 64 * 1024;     // 64 KB
-const DEFAULT_TIMEOUT_MS  = 8000;          // 8 seconds
+const DEFAULT_TIMEOUT_MS  = 5000;          // 5 seconds default
 const MAX_TIMEOUT_MS      = 10000;         // 10 seconds max
 
 export class SandboxValidationError extends Error {
-    constructor(message) {
+    constructor(message, details = {}) {
         super(message);
         this.name = "SandboxValidationError";
+        this.stage = "validation";
+        this.code = details.code || "SANDBOX_VALIDATION_FAILED";
+        this.details = details;
     }
 }
 
-const SUPPORTED_LANGUAGES = Object.freeze({
-    python: {
-        canonical: "python",
-        image: "python:3.11-alpine",
-        command: ["python", "-I", "-"],
-        env: ["-e", "PYTHONUNBUFFERED=1"],
-    },
-    javascript: {
-        canonical: "javascript",
-        image: "node:20-alpine",
-        command: ["node", "-"],
-        env: ["-e", "NODE_ENV=production"],
-    },
+/**
+ * Compile Python source without executing it. This runs before any Docker
+ * staging or container creation so invalid generated code never reaches the
+ * sandbox runtime.
+ *
+ * @param {string} code
+ * @returns {{valid: true}|never}
+ */
+export function validatePythonSyntax(code) {
+    const result = spawnSync(
+        "python3",
+        ["-c", "import sys; compile(sys.stdin.read(), '<generated>', 'exec')"],
+        {
+            input: code,
+            encoding: "utf8",
+            maxBuffer: 64 * 1024,
+        }
+    );
+
+    if (result.error) {
+        throw new SandboxValidationError(
+            `Unable to validate generated Python syntax: ${result.error.message}`,
+            { code: "PYTHON_VALIDATOR_UNAVAILABLE" }
+        );
+    }
+
+    if (result.status !== 0) {
+        const diagnostic = String(result.stderr || result.stdout || "invalid Python syntax").trim();
+        throw new SandboxValidationError(
+            `Generated Python syntax is invalid: ${diagnostic}`,
+            {
+                code: "PYTHON_SYNTAX_ERROR",
+                syntaxError: diagnostic,
+            }
+        );
+    }
+
+    return { valid: true };
+}
+
+/**
+ * Validates and normalizes the execution language.
+ * Centralized rule: ONLY 'python' is supported.
+ *
+ * @param {string} language
+ * @returns {"python"}
+ * @throws {SandboxValidationError}
+ */
+export function validateLanguage(language) {
+    const rawLang = String(language || SUPPORTED_LANGUAGE).trim().toLowerCase();
+    const resolved = (rawLang === "py" || rawLang === "python") ? SUPPORTED_LANGUAGE : rawLang;
+
+    if (resolved !== SUPPORTED_LANGUAGE) {
+        throw new SandboxValidationError("Only Python execution is supported.");
+    }
+
+    return SUPPORTED_LANGUAGE;
+}
+
+const PYTHON_RUNTIME_CONFIG = Object.freeze({
+    canonical: SUPPORTED_LANGUAGE,
+    image: "python:3.11-alpine",
+    command: ["python", "-I", "-"],
+    env: ["-e", "PYTHONUNBUFFERED=1"],
 });
 
 /**
+ * Stages CSV data into an ephemeral Docker volume for secure isolated access.
+ * Does NOT touch or expose any host filesystem path.
+ *
+ * @param {string} volumeName
+ * @param {string} csvContent
+ * @returns {Promise<void>}
+ */
+async function stageCsvVolume(volumeName, csvContent) {
+    execSync(`docker volume create ${volumeName}`, { stdio: "ignore" });
+
+    return new Promise((resolve, reject) => {
+        let child;
+        try {
+            child = spawn("docker", [
+                "run",
+                "--rm",
+                "-i",
+                "--network", "none",
+                "-v", `${volumeName}:/workspace/input`,
+                PYTHON_RUNTIME_CONFIG.image,
+                "sh", "-c", "cat > /workspace/input/data.csv && chmod 644 /workspace/input/data.csv",
+            ], {
+                stdio: ["pipe", "ignore", "pipe"],
+            });
+        } catch (err) {
+            return reject(new Error(`Failed to spawn CSV volume staging container: ${err.message}`));
+        }
+
+        let stderr = "";
+        child.stderr?.on("data", (chunk) => {
+            stderr += chunk.toString();
+        });
+
+        child.on("error", reject);
+
+        child.on("close", (code) => {
+            if (code === 0) {
+                resolve();
+            } else {
+                reject(new Error(`CSV staging failed with exit code ${code}: ${stderr}`));
+            }
+        });
+
+        try {
+            child.stdin.write(csvContent);
+            child.stdin.end();
+        } catch (writeErr) {
+            reject(writeErr);
+        }
+    });
+}
+
+/**
  * Execute code inside an isolated Docker sandbox container.
- * Supported languages: python, javascript.
+ * Supported language: strictly "python".
  *
  * @param {object} params
  * @param {string} params.code - Source code to execute
- * @param {string} [params.language="python"] - Language runtime ("python" or "javascript")
- * @param {number} [params.timeoutMs=8000] - Hard execution timeout in milliseconds
+ * @param {string} [params.language="python"] - Language runtime (must be "python")
+ * @param {number} [params.timeoutMs=5000] - Hard execution timeout in milliseconds
+ * @param {string} [params.csvContent] - Optional CSV data to mount at /workspace/input/data.csv
  * @returns {Promise<object>}
  */
 export async function executeInSandbox({
     code,
-    language = "python",
+    language = SUPPORTED_LANGUAGE,
     timeoutMs = DEFAULT_TIMEOUT_MS,
+    csvContent = null,
 }) {
-    // 1. Language validation & resolution
-    const rawLang = String(language || "python").trim().toLowerCase();
-    const resolvedKey = rawLang === "js" || rawLang === "node" ? "javascript" : (rawLang === "py" ? "python" : rawLang);
-    const langConfig = SUPPORTED_LANGUAGES[resolvedKey];
-
-    if (!langConfig) {
-        throw new SandboxValidationError(
-            `Unsupported language '${language}'. Supported: python, javascript.`
-        );
-    }
+    // 1. Centralized language validation
+    validateLanguage(language);
 
     // 2. Code validation
     if (typeof code !== "string") {
@@ -81,14 +185,30 @@ export async function executeInSandbox({
         );
     }
 
-    // 3. Timeout bounds
+    // Compile before staging CSV data or creating a Docker container.
+    validatePythonSyntax(trimmedCode);
+
+    // 3. Timeout bounds (enforce 1s <= timeout <= 10s, default 5s)
     const effectiveTimeout = Math.min(
         Math.max(1000, Number(timeoutMs) || DEFAULT_TIMEOUT_MS),
         MAX_TIMEOUT_MS
     );
 
-    // 4. Generate unique ephemeral container name
+    // 4. Generate unique ephemeral container and volume names
     const containerName = `sovereign-coding-sandbox-${randomUUID().slice(0, 12)}`;
+    let volumeName = null;
+
+    if (csvContent && typeof csvContent === "string" && csvContent.trim()) {
+        volumeName = `sovereign-sandbox-csv-${randomUUID().slice(0, 12)}`;
+        try {
+            await stageCsvVolume(volumeName, csvContent.trim());
+        } catch (stageErr) {
+            if (volumeName) {
+                try { execSync(`docker volume rm -f ${volumeName}`, { stdio: "ignore" }); } catch {}
+            }
+            throw new SandboxValidationError(`Failed to prepare CSV input: ${stageErr.message}`);
+        }
+    }
 
     const dockerArgs = [
         "run",
@@ -105,9 +225,10 @@ export async function executeInSandbox({
         "--cap-drop", "ALL",
         "--ipc", "none",
         "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m",
-        ...langConfig.env,
-        langConfig.image,
-        ...langConfig.command,
+        ...(volumeName ? ["-v", `${volumeName}:/workspace/input:ro`] : []),
+        ...PYTHON_RUNTIME_CONFIG.env,
+        PYTHON_RUNTIME_CONFIG.image,
+        ...PYTHON_RUNTIME_CONFIG.command,
     ];
 
     const startTime = Date.now();
@@ -121,20 +242,27 @@ export async function executeInSandbox({
         let stderrTruncated = false;
         let cleanedUp = false;
 
-        const cleanupContainer = () => {
+        const cleanupResources = () => {
             if (cleanedUp) return;
             cleanedUp = true;
             try {
                 execSync(`docker rm -f ${containerName}`, { stdio: "ignore" });
             } catch {
-                // Ignore errors if container already exited and was removed by --rm
+                // Container might have already self-removed via --rm
+            }
+            if (volumeName) {
+                try {
+                    execSync(`docker volume rm -f ${volumeName}`, { stdio: "ignore" });
+                } catch {
+                    // Ignore volume removal failures
+                }
             }
         };
 
         const timer = setTimeout(() => {
             timedOut = true;
             try {
-                // Immediately kill the docker container so process stops execution
+                // Force kill the docker container so process terminates immediately
                 execSync(`docker kill ${containerName}`, { stdio: "ignore" });
             } catch {
                 // Ignore if already dead
@@ -142,9 +270,7 @@ export async function executeInSandbox({
             if (child && !child.killed) {
                 try {
                     child.kill("SIGKILL");
-                } catch {
-                    // Ignore
-                }
+                } catch {}
             }
         }, effectiveTimeout);
 
@@ -154,9 +280,10 @@ export async function executeInSandbox({
             });
         } catch (spawnErr) {
             clearTimeout(timer);
-            cleanupContainer();
+            cleanupResources();
             return resolve({
                 success: false,
+                stage: "execution",
                 stdout: "",
                 stderr: `Failed to spawn sandbox container: ${spawnErr.message}`,
                 exitCode: 1,
@@ -164,7 +291,8 @@ export async function executeInSandbox({
                 stdoutTruncated: false,
                 stderrTruncated: false,
                 durationMs: Date.now() - startTime,
-                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
+                error: `Failed to spawn sandbox container: ${spawnErr.message}`,
+                sandbox: getSandboxMetadata(effectiveTimeout, volumeName ? "/workspace/input/data.csv" : null),
             });
         }
 
@@ -214,9 +342,10 @@ export async function executeInSandbox({
 
         child.on("error", (err) => {
             clearTimeout(timer);
-            cleanupContainer();
+            cleanupResources();
             resolve({
                 success: false,
+                stage: "execution",
                 stdout: stdout.trim(),
                 stderr: `Sandbox process error: ${err.message}`,
                 exitCode: 1,
@@ -224,13 +353,14 @@ export async function executeInSandbox({
                 stdoutTruncated,
                 stderrTruncated,
                 durationMs: Date.now() - startTime,
-                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
+                error: `Sandbox process error: ${err.message}`,
+                sandbox: getSandboxMetadata(effectiveTimeout, volumeName ? "/workspace/input/data.csv" : null),
             });
         });
 
         child.on("close", (code) => {
             clearTimeout(timer);
-            cleanupContainer();
+            cleanupResources();
 
             const durationMs = Date.now() - startTime;
             const finalStderr = timedOut
@@ -241,6 +371,7 @@ export async function executeInSandbox({
 
             resolve({
                 success: isSuccess,
+                stage: "execution",
                 stdout: stdout,
                 stderr: finalStderr.trim(),
                 exitCode: timedOut ? null : code,
@@ -248,7 +379,10 @@ export async function executeInSandbox({
                 stdoutTruncated,
                 stderrTruncated,
                 durationMs,
-                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
+                error: timedOut
+                    ? "Execution timed out."
+                    : (!isSuccess ? (finalStderr.trim() || `Execution failed with exit code ${code}`) : undefined),
+                sandbox: getSandboxMetadata(effectiveTimeout, volumeName ? "/workspace/input/data.csv" : null),
             });
         });
 
@@ -258,9 +392,10 @@ export async function executeInSandbox({
             child.stdin.end();
         } catch (writeErr) {
             clearTimeout(timer);
-            cleanupContainer();
+            cleanupResources();
             resolve({
                 success: false,
+                stage: "execution",
                 stdout: "",
                 stderr: `Failed to write code to sandbox: ${writeErr.message}`,
                 exitCode: 1,
@@ -268,17 +403,18 @@ export async function executeInSandbox({
                 stdoutTruncated: false,
                 stderrTruncated: false,
                 durationMs: Date.now() - startTime,
-                sandbox: getSandboxMetadata(effectiveTimeout, langConfig.canonical, langConfig.image),
+                error: `Failed to write code to sandbox: ${writeErr.message}`,
+                sandbox: getSandboxMetadata(effectiveTimeout, volumeName ? "/workspace/input/data.csv" : null),
             });
         }
     });
 }
 
-function getSandboxMetadata(timeoutMs, canonicalLang = "python", image = "python:3.11-alpine") {
+function getSandboxMetadata(timeoutMs, csvPath = null) {
     return {
         isolated: true,
         network: "none",
-        language: canonicalLang,
+        language: SUPPORTED_LANGUAGE,
         timeoutSeconds: timeoutMs / 1000,
         memoryLimitMb: 256,
         cpuLimit: 1,
@@ -286,6 +422,7 @@ function getSandboxMetadata(timeoutMs, canonicalLang = "python", image = "python
         readOnlyRoot: true,
         capabilitiesDropped: "ALL",
         ipc: "none",
-        image,
+        image: PYTHON_RUNTIME_CONFIG.image,
+        ...(csvPath ? { csvInput: csvPath } : {}),
     };
 }

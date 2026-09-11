@@ -62,7 +62,14 @@ app.use(cors({
     },
     credentials: true,
     methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-organization-id"],
+    allowedHeaders: [
+        "Accept",
+        "Cache-Control",
+        "Content-Type",
+        "Authorization",
+        "Last-Event-ID",
+        "x-organization-id",
+    ],
     optionsSuccessStatus: 204,
 }));
 

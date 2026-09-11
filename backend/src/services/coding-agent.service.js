@@ -27,7 +27,10 @@ import {
 } from "../../../ai-service/router/modelRouter.js";
 import {
     executeInSandbox,
+    validateLanguage,
+    SUPPORTED_LANGUAGE,
     SandboxValidationError,
+    validatePythonSyntax,
 } from "./sandbox.service.js";
 import { executionEvents } from "./execution-events.service.js";
 import { createAgentRun, updateAgentRun } from "../repositories/agent.repository.js";
@@ -42,6 +45,7 @@ export const CODING_ERROR_CODES = Object.freeze({
     EXECUTION_FAILED: "EXECUTION_FAILED",
     RESOURCE_LIMIT_EXCEEDED: "RESOURCE_LIMIT_EXCEEDED",
     VERIFICATION_FAILED: "VERIFICATION_FAILED",
+    PYTHON_SYNTAX_ERROR: "PYTHON_SYNTAX_ERROR",
 });
 
 export class CodingAgentError extends Error {
@@ -66,28 +70,20 @@ export function extractCode(raw, language = "python") {
     if (typeof raw !== "string") return "";
 
     const trimmed = raw.trim();
-    const normLang = String(language || "python").trim().toLowerCase();
 
-    // 1. Try matching language-specific block
-    if (normLang === "javascript" || normLang === "js" || normLang === "node") {
-        const jsMatch = trimmed.match(/```(?:javascript|js|node)\s*\n?([\s\S]*?)```/i);
-        if (jsMatch && jsMatch[1]) {
-            return jsMatch[1].trim();
-        }
-    } else {
-        const pyMatch = trimmed.match(/```(?:python|py)\s*\n?([\s\S]*?)```/i);
-        if (pyMatch && pyMatch[1]) {
-            return pyMatch[1].trim();
-        }
+    // 1. Python fenced block
+    const pyMatch = trimmed.match(/```(?:python|py)\s*\n?([\s\S]*?)```/i);
+    if (pyMatch && pyMatch[1]) {
+        return pyMatch[1].trim();
     }
 
-    // 2. Try matching any generic or language-tagged fenced block: ```<lang>? ... ```
-    const genericMatch = trimmed.match(/```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)```/);
+    // 2. Generic or language-tagged fenced block
+    const genericMatch = trimmed.match(/```(?:[a-zA-Z0-9_-]+)?\s*\n?([\s\S]*?)```/);
     if (genericMatch && genericMatch[1]) {
         return genericMatch[1].trim();
     }
 
-    // 3. Fallback: if no markdown fences, use trimmed raw string
+    // 3. Fallback: trimmed raw string
     return trimmed;
 }
 
@@ -128,14 +124,28 @@ export function validateCode(code, language = "python") {
         (lower.startsWith("i cannot") || lower.startsWith("i am sorry") || lower.startsWith("as an ai")) &&
         !trimmed.includes("def ") &&
         !trimmed.includes("print(") &&
-        !trimmed.includes("console.log") &&
-        !trimmed.includes("function") &&
+        !trimmed.includes("import ") &&
         !trimmed.includes("=")
     ) {
         throw new CodingAgentError(
             "Code validation failed: Model output did not contain executable code",
             CODING_ERROR_CODES.CODE_VALIDATION_FAILED
         );
+    }
+
+    if (language === "python") {
+        try {
+            validatePythonSyntax(trimmed);
+        } catch (syntaxErr) {
+            throw new CodingAgentError(
+                syntaxErr.message,
+                CODING_ERROR_CODES.PYTHON_SYNTAX_ERROR,
+                {
+                    stage: "validation",
+                    syntaxError: syntaxErr.details?.syntaxError || syntaxErr.message,
+                }
+            );
+        }
     }
 
     return trimmed;
@@ -261,6 +271,7 @@ export async function runCodingWorkflow({
     timeoutMs = 5000,
     customRunId = null,
     model = null,
+    csvContent = null,
     options = {},
 }) {
     if (!organizationId || typeof organizationId !== "string" || !organizationId.trim()) {
@@ -277,17 +288,15 @@ export async function runCodingWorkflow({
         );
     }
 
-    const rawLang = String(language || "python").trim().toLowerCase();
-    const normLang = (rawLang === "javascript" || rawLang === "js" || rawLang === "node")
-        ? "javascript"
-        : (rawLang === "python" || rawLang === "py" ? "python" : rawLang);
-
-    if (normLang !== "python" && normLang !== "javascript") {
+    try {
+        validateLanguage(language);
+    } catch (langErr) {
         throw new CodingAgentError(
-            `Unsupported language '${language}'. Supported: python, javascript.`,
+            "Only Python execution is supported.",
             CODING_ERROR_CODES.CODE_VALIDATION_FAILED
         );
     }
+    const normLang = SUPPORTED_LANGUAGE;
 
     const runId = customRunId || `coding-run-${randomUUID()}`;
     const cleanRequest = request.trim();
@@ -364,7 +373,7 @@ export async function runCodingWorkflow({
         emitProgress("model_selected", { taskType: classified });
         let routing;
         try {
-            routing = await routeTask(cleanRequest, { model: model || options?.model || options?.requestedModel });
+            routing = await routeTask(cleanRequest, { taskType: "CODING", model: model || options?.model || options?.requestedModel });
             state.selectedModel = routing.selectedModel;
             state.local = routing.local !== false;
         } catch (routerErr) {
@@ -386,22 +395,33 @@ export async function runCodingWorkflow({
         // ─────────────────────────────────────────────────────────────
         emitProgress("generating_code", { model: state.selectedModel, language: normLang });
 
-        const isJs = normLang === "javascript";
-        const codingSystemPrompt = isJs
-            ? `You are a professional JavaScript engineer.
-Write clean, executable, self-contained JavaScript (Node.js) code that directly fulfills the following user request.
-Include necessary variables, calculations, and console.log() calls to output the final result clearly.
-Do not require external internet access or non-standard packages. Only use the Node.js standard library.
+        const csvPromptPart = csvContent
+            ? `\nAn input CSV dataset is staged inside the sandbox at "/workspace/input/data.csv".
+CRITICAL CSV PROCESSING INSTRUCTIONS:
+1. Process every CSV record/row INDEPENDENTLY in a single unified loop.
+2. All numeric conversions (using float() or int()), calculations, classifications, and per-row printing MUST occur INSIDE the row-processing loop while processing that specific record.
+3. NEVER separate calculation and output into disconnected loops where earlier records might accidentally reference variables from the final iteration.
+4. Never reuse or leak variables from the final iteration into earlier records.
+5. Preserve the original timestamp and row values for each record.
+6. Print each row's timestamp, sensor values, calculated efficiency, and classification while processing that record inside the loop. Verify that printed output values strictly correspond to the input row.
+7. Accumulate running metrics (e.g. total efficiency, count, max temperature) inside the loop, and print the overall summary, averages, and maintenance recommendation AFTER the loop.
+8. If appending rows to a list for later summary/recommendation output, store computed values explicitly (e.g. row['efficiency'] = efficiency or store a custom dict) to ensure keys exist.
+9. Do not hardcode CSV values. Read the actual file from '/workspace/input/data.csv' using Python's standard library "csv" module (e.g. csv.DictReader).
+10. Use ONLY Python standard library modules (e.g. csv, math, statistics). Do NOT require pandas, numpy, or external libraries.
+11. Rule: Process every record independently. All calculations, classifications, and per-row output must occur while processing that specific record. Never use variables from the final iteration to represent earlier records.
+12. Keep the CSV reader iteration inside the same open-file context. Never iterate over csv.DictReader after its underlying file has been closed.
+13. INPUT FIELDS are only the columns present in the CSV. DERIVED FIELDS (such as health_score and classification) must be calculated after reading input fields; never look up a derived field in the CSV header.
+14. Initialize summary collections before the loop and append values, including the timestamp with any maximum/minimum row. Guard empty collections for max(), min(), averages, sums, and counts, and guard every division against zero denominators.
+15. Treat invalid or missing numeric values explicitly (skip with a clear message or fail clearly); never turn invalid data into misleading statistics. Reject NaN and infinite values where applicable.
+`
+            : "";
 
-User Request:
-${cleanRequest}
-
-Return ONLY the executable JavaScript code inside a \`\`\`javascript code block. Do not include conversational filler.`
-            : `You are a professional Python engineer.
+        const codingSystemPrompt = `You are a professional Python engineer.
 Write clean, executable, self-contained Python code that directly fulfills the following user request.
 Include necessary variables, calculations, and print() calls to output the final result clearly.
 Do not require external internet access or non-standard packages. Only use the Python standard library.
-
+Hard requirements: process every row independently; keep CSV iteration inside the open-file context; calculate derived fields rather than treating them as input columns; maintain summary state during row processing; guard empty datasets and collections, zero denominators, invalid numeric values, and non-finite values; validate the Python source before execution; use standard-library Python only; never hardcode analytical results; and never intentionally create errors unless explicitly testing sandbox behavior.
+${csvPromptPart}
 User Request:
 ${cleanRequest}
 
@@ -435,6 +455,7 @@ Return ONLY the executable Python code inside a \`\`\`python code block. Do not 
             code: validatedCode,
             language: normLang,
             timeoutMs,
+            csvContent,
         });
 
         state.stdout = executionResult.stdout || "";

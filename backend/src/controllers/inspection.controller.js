@@ -180,14 +180,15 @@ export async function analyzeInspection(req, res, next) {
                     sopQuery = candidate.finding || candidate.equipment || taskText;
                 }
 
+                const sopThreshold = process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.25;
                 const sopChunks = await searchSop(sopQuery, {
                     organizationId,
-                    scoreThreshold: 0.50,
+                    scoreThreshold: sopThreshold,
                     allowedDocumentIds: gate.allowedDocumentIds,
                 });
 
                 const validChunks = (Array.isArray(sopChunks) ? sopChunks : []).filter((chunk) =>
-                    validateSopEvidenceChunk(chunk, candidate, organizationId, documentId.trim())
+                    validateSopEvidenceChunk(chunk, candidate, organizationId, documentId.trim(), sopThreshold)
                 );
 
                 if (validChunks.length > 0) {
@@ -278,15 +279,17 @@ export async function assessRisk(req, res, next) {
             } catch {
                 sopQuery = finding.finding;
             }
+            const sopThreshold = process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.25;
             sopChunks = await searchSop(sopQuery, {
                 organizationId,
-                scoreThreshold: 0.50,
+                scoreThreshold: sopThreshold,
                 allowedDocumentIds: gate.allowedDocumentIds,
             });
         }
 
+        const sopThreshold = process.env.SOP_SCORE_THRESHOLD ? parseFloat(process.env.SOP_SCORE_THRESHOLD) : 0.25;
         const validChunks = (Array.isArray(sopChunks) ? sopChunks : []).filter((chunk) =>
-            validateSopEvidenceChunk(chunk, finding, organizationId, documentId)
+            validateSopEvidenceChunk(chunk, finding, organizationId, documentId, sopThreshold)
         );
 
         if (validChunks.length === 0) {
@@ -477,29 +480,51 @@ export async function generateApprovalNoteDocx(req, res, next) {
             },
         });
 
-        // Bind generated report to authenticated organization in reports repository
-        let artifactId = "unknown";
-        try {
-            const report = await createReportRecord({
-                organizationId,
-                title: data.subject || "Approval Note",
-                filename: result.filename,
-                status: "GENERATED",
-            });
-            if (report && report.id) {
-                artifactId = report.id;
-            }
-        } catch (repErr) {
-            console.warn("[InspectionController] Warning: Could not persist report record:", repErr.message);
+        if (!result.filePath || !fs.existsSync(result.filePath) || fs.statSync(result.filePath).size <= 0) {
+            throw new Error("Approval Note DOCX was not created or is empty");
         }
+        const docxHeader = Buffer.alloc(2);
+        const docxFd = fs.openSync(result.filePath, "r");
+        try {
+            fs.readSync(docxFd, docxHeader, 0, 2, 0);
+        } finally {
+            fs.closeSync(docxFd);
+        }
+        if (docxHeader[0] !== 0x50 || docxHeader[1] !== 0x4b) {
+            throw new Error("Approval Note DOCX is not a valid OpenXML package");
+        }
+
+        console.log("[INSPECTION] DOCX generated");
+        console.log("[INSPECTION] DOCX verified");
+        console.log("[INSPECTION] Persisting report history");
+        const savedReport = await createReportRecord({
+            organizationId,
+            documentId: data.documentId || null,
+            title: data.subject || "Approval Note",
+            filename: result.filename,
+            status: "GENERATED",
+        });
+        console.log(`[INSPECTION] Report history persisted reportId=${savedReport.id}`);
+        const downloadUrl = `/api/v1/inspection/download/${encodeURIComponent(result.filename)}`;
+        console.log(`[INSPECTION] downloadUrl returned ${downloadUrl}`);
 
         return res.status(200).json({
             success: true,
-            artifact: {
-                id: artifactId,
+            reportId: savedReport.id,
+            filename: result.filename,
+            downloadUrl,
+            approvalNote: {
+                reportId: savedReport.id,
                 filename: result.filename,
-                downloadUrl: `/api/v1/inspection/download/${result.filename}`
-            }
+                filePath: result.filePath,
+                fileSize: result.fileSize || fs.statSync(result.filePath).size,
+                downloadUrl,
+            },
+            artifact: {
+                id: savedReport.id,
+                filename: result.filename,
+                downloadUrl,
+            },
         });
     } catch (error) {
         next(error);
@@ -675,30 +700,11 @@ export async function runWorkflow(req, res, next) {
             }
         }
 
-        const primaryRisk =
-            workflowResult.riskAssessment?.level ||
-            (Array.isArray(workflowResult.riskAssessments) && workflowResult.riskAssessments.length > 0
-                ? workflowResult.riskAssessments[0]?.level || null
-                : null);
-
-        const reportTitle = `Approval Note — ${workflowResult.filename || workflowResult.documentId}`;
-
-        let savedReport = null;
-        if (workflowResult.approvalNote?.filename) {
-            savedReport = await createReportRecord({
-                documentId: workflowResult.documentId || null,
-                organizationId,
-                title: reportTitle,
-                filename: workflowResult.approvalNote.filename,
-                riskLevel: primaryRisk,
-                status: "GENERATED",
-                task: options.task || "Analyze this inspection report and extract all significant findings.",
-            });
-        }
-
         const approvalNoteData = workflowResult.approvalNote?.filename
             ? {
+                reportId: workflowResult.approvalNote.reportId || workflowResult.reportId || null,
                 filename: workflowResult.approvalNote.filename,
+                fileSize: workflowResult.approvalNote.fileSize || 0,
                 downloadUrl: `/api/v1/inspection/download/${workflowResult.approvalNote.filename}`,
             }
             : null;
@@ -714,6 +720,8 @@ export async function runWorkflow(req, res, next) {
                     filename: workflowResult.filename,
                     chunksStored: workflowResult.chunksStored,
                     findings: [],
+                    validatedFindings: [],
+                    risk: null,
                     riskAssessment: null,
                     riskAssessments: [],
                     recommendation: null,
@@ -721,6 +729,30 @@ export async function runWorkflow(req, res, next) {
                     citations: [],
                     sources: [],
                     approvalNote: null,
+                    downloadUrl: null,
+                    report: null,
+                    orchestration: workflowResult.orchestration,
+                },
+            });
+        }
+
+        if (workflowResult.orchestration?.workflowOutcome === "FAILURE" || !workflowResult.approvalNote?.filename) {
+            return res.status(200).json({
+                success: false,
+                status: "FAILURE",
+                message: workflowResult.orchestration?.failureReason || "Inspection workflow failed to generate or verify Approval Note deliverable.",
+                data: {
+                    reportId: null,
+                    documentId: workflowResult.documentId,
+                    filename: workflowResult.filename,
+                    chunksStored: workflowResult.chunksStored,
+                    findings: workflowResult.findings || [],
+                    validatedFindings: workflowResult.validatedFindings || workflowResult.findings || [],
+                    risk: workflowResult.risk || workflowResult.riskAssessment || null,
+                    recommendation: workflowResult.recommendation || null,
+                    citations: workflowResult.citations || [],
+                    approvalNote: null,
+                    downloadUrl: null,
                     report: null,
                     orchestration: workflowResult.orchestration,
                 },
@@ -731,18 +763,22 @@ export async function runWorkflow(req, res, next) {
             success: true,
             status: "SUCCESS",
             data: {
-                reportId: savedReport?.id || null,
+                reportId: workflowResult.approvalNote?.reportId || workflowResult.reportId || null,
                 documentId: workflowResult.documentId,
                 filename: workflowResult.filename,
                 chunksStored: workflowResult.chunksStored,
                 findings: workflowResult.findings,
-                riskAssessment: workflowResult.riskAssessment || workflowResult.riskAssessments?.[0] || null,
+                validatedFindings: workflowResult.validatedFindings || workflowResult.findings,
+                risk: workflowResult.risk || workflowResult.riskAssessment || workflowResult.riskAssessments?.[0] || null,
+                riskAssessment: workflowResult.riskAssessment || workflowResult.risk || workflowResult.riskAssessments?.[0] || null,
                 riskAssessments: workflowResult.riskAssessments,
                 recommendation: workflowResult.recommendation || workflowResult.recommendations?.[0] || null,
                 recommendations: workflowResult.recommendations,
                 citations: workflowResult.citations,
                 approvalNote: approvalNoteData,
-                report: savedReport,
+                downloadUrl: approvalNoteData?.downloadUrl || workflowResult.downloadUrl || null,
+                report: approvalNoteData,
+                workflowOutcome: workflowResult.orchestration?.workflowOutcome || "SUCCESS",
                 orchestration: workflowResult.orchestration,
             },
         });

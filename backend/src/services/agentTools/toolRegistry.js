@@ -143,6 +143,9 @@ export const TOOL_REGISTRY = {
     },
 };
 
+// Backwards-compatibility and test alias
+TOOL_REGISTRY.coding_sandbox = TOOL_REGISTRY.execute_sandbox_code;
+
 /**
  * Returns formatted tool definitions prompt for LLM system instructions.
  *

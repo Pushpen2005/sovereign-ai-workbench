@@ -2,10 +2,11 @@
  * PAGE — CodingPage.jsx
  *
  * Route: /coding
- * Secure Coding Sandbox with local Model Router code generation & Docker sandbox execution.
+ * Secure Coding Sandbox with local Model Router Python code generation
+ * and isolated, network-disabled Docker sandbox execution.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { PageHeader } from '../../components/layout/PageHeader.jsx';
 import { Button } from '../../components/ui/Button.jsx';
 import { generateCode, executeCode } from '../../api/coding.api.js';
@@ -14,48 +15,106 @@ const DEMO_PRESETS = [
   {
     label: 'Python: List Average',
     prompt: 'Write Python code to calculate the average of [10, 20, 30, 40, 50].',
-    language: 'python',
   },
   {
     label: 'Python: Bearing Temp Trend',
     prompt: 'Write Python code to calculate bearing temperature statistics and detect if maximum exceeds 80C from readings = [72.5, 76.1, 79.8, 83.2, 81.0].',
-    language: 'python',
   },
   {
-    label: 'JS: Pump Efficiency',
-    prompt: 'Write JavaScript code to calculate pump efficiency given output power 85kW and input power 100kW.',
-    language: 'javascript',
+    label: 'Python: Pump Efficiency',
+    prompt: 'Write Python code to calculate pump efficiency given output power 85kW and input power 100kW using the formula: Efficiency (%) = (Output / Input) * 100. Print the result.',
   },
   {
     label: 'Security: Python Egress Probe',
     prompt: 'import urllib.request\ntry:\n    urllib.request.urlopen("https://example.com", timeout=2)\n    print("NET_SUCCESS")\nexcept Exception as e:\n    print(f"NET_BLOCKED: {type(e).__name__}")',
     isDirectCode: true,
-    language: 'python',
-  },
-  {
-    label: 'Security: JS Egress Probe',
-    prompt: 'const https = require("https");\nhttps.get("https://example.com", (res) => {\n  console.log("NET_SUCCESS");\n}).on("error", (e) => {\n  console.log(`NET_BLOCKED: ${e.code || e.message}`);\n});',
-    isDirectCode: true,
-    language: 'javascript',
   },
   {
     label: 'Security: Loop Timeout',
-    prompt: 'while (true) {}',
+    prompt: 'while True:\n    pass',
     isDirectCode: true,
-    language: 'javascript',
+  },
+  {
+    label: 'Python: CSV Analysis',
+    prompt: 'Analyze this industrial pump sensor CSV. Calculate pump efficiency for each reading using:\nEfficiency (%) = (Pressure * Flow Rate) / (Power Consumption * 600) * 100\nIdentify readings where efficiency is below 70% and temperature is above 85C. Print a summary and provide a maintenance recommendation.',
+    sampleCsv: {
+      filename: 'pump_readings.csv',
+      content: 'timestamp,temperature,pressure,flow_rate,power_consumption\n2026-09-11T10:00:00Z,72.5,450,120,95\n2026-09-11T10:15:00Z,78.0,440,115,98\n2026-09-11T10:30:00Z,88.5,380,85,110\n2026-09-11T10:45:00Z,92.0,360,75,115\n2026-09-11T11:00:00Z,76.2,445,118,96',
+      columns: ['timestamp', 'temperature', 'pressure', 'flow_rate', 'power_consumption'],
+      rowCount: 5,
+    },
   },
 ];
 
 export function CodingPage() {
   const [prompt, setPrompt] = useState('Write Python code to calculate the average of [10, 20, 30, 40, 50].');
-  const [language, setLanguage] = useState('python');
   const [code, setCode] = useState('');
   const [generationMeta, setGenerationMeta] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // CSV dataset state
+  const [csvFile, setCsvFile] = useState(null);
+  const fileInputRef = useRef(null);
+
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionResult, setExecutionResult] = useState(null);
   const [error, setError] = useState(null);
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      setError({
+        title: 'CSV UPLOAD FAILED',
+        stage: 'CSV Validation',
+        message: 'Only .csv files are supported.',
+      });
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError({
+        title: 'CSV UPLOAD FAILED',
+        stage: 'CSV Validation',
+        message: 'CSV file size exceeds the 5 MB limit.',
+      });
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target?.result || '';
+      const lines = text.trim().split(/\r?\n/).filter((l) => l.trim().length > 0);
+      const columns = lines[0] ? lines[0].split(',').map((c) => c.trim().replace(/^"|"$/g, '')) : [];
+      const rowCount = Math.max(0, lines.length - 1);
+
+      setCsvFile({
+        rawFile: file,
+        filename: file.name,
+        sizeBytes: file.size,
+        content: text,
+        columns,
+        rowCount,
+      });
+      setError(null);
+    };
+    reader.onerror = () => {
+      setError({
+        title: 'CSV UPLOAD FAILED',
+        stage: 'CSV Read',
+        message: 'Failed to read uploaded CSV file.',
+      });
+    };
+    reader.readAsText(file);
+  };
+
+  const handleRemoveCsv = () => {
+    setCsvFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
 
   const handleGenerate = async () => {
     if (!prompt.trim() || isGenerating) return;
@@ -64,21 +123,30 @@ export function CodingPage() {
     setExecutionResult(null);
 
     try {
-      const res = await generateCode(prompt.trim(), language);
+      const res = await generateCode(prompt.trim(), 'python', csvFile?.rawFile || csvFile);
       if (res && res.success) {
         setCode(res.code || '');
         setGenerationMeta({
           taskType: res.taskType,
           model: res.model,
-          language: res.language || language,
+          language: 'python',
           routingReason: res.routingReason,
           isFallback: res.isFallback,
+          csv: res.csv || null,
         });
       } else {
-        setError(res?.message || 'Failed to generate code.');
+        setError({
+          title: 'CODE GENERATION FAILED',
+          stage: res?.stage || 'Model Router',
+          message: res?.error || res?.message || 'Failed to generate code.',
+        });
       }
     } catch (err) {
-      setError(err?.message || 'Code generation failed.');
+      setError({
+        title: 'CODE GENERATION FAILED',
+        stage: err?.data?.stage || 'Model Runtime',
+        message: err?.data?.error || err?.message || 'Code generation failed.',
+      });
     } finally {
       setIsGenerating(false);
     }
@@ -90,29 +158,52 @@ export function CodingPage() {
     setError(null);
 
     try {
-      const res = await executeCode(code.trim(), language, 5000);
+      const res = await executeCode(code.trim(), 'python', 5000, csvFile?.rawFile || csvFile);
       setExecutionResult(res);
+      if (!res.success) {
+        setError({
+          title: res.timedOut ? 'EXECUTION TIMED OUT' : 'EXECUTION FAILED',
+          stage: 'Python Sandbox',
+          exitCode: res.exitCode,
+          stderr: res.stderr,
+          message: res.error || (res.timedOut ? 'Execution timed out after 5 seconds.' : 'Execution failed.'),
+        });
+      }
     } catch (err) {
-      setError(err?.message || 'Sandbox execution request failed.');
+      setError({
+        title: 'SANDBOX EXECUTION ERROR',
+        stage: err?.data?.stage || 'Docker Sandbox',
+        message: err?.data?.error || err?.message || 'Sandbox execution request failed.',
+      });
     } finally {
       setIsExecuting(false);
     }
   };
 
   const handleApplyPreset = (preset) => {
-    if (preset.language) {
-      setLanguage(preset.language);
+    if (preset.sampleCsv) {
+      setCsvFile({
+        filename: preset.sampleCsv.filename,
+        sizeBytes: preset.sampleCsv.content.length,
+        content: preset.sampleCsv.content,
+        columns: preset.sampleCsv.columns,
+        rowCount: preset.sampleCsv.rowCount,
+      });
+    } else {
+      setCsvFile(null);
     }
+
     if (preset.isDirectCode) {
       setCode(preset.prompt);
       setGenerationMeta({
         taskType: 'CODING',
         model: 'manual-test',
-        language: preset.language || 'python',
+        language: 'python',
         routingReason: 'Direct security benchmark test',
         isFallback: false,
       });
       setExecutionResult(null);
+      setError(null);
     } else {
       setPrompt(preset.prompt);
     }
@@ -125,7 +216,7 @@ export function CodingPage() {
         subtitle="Local model code generation and isolated, network-disabled Docker sandbox execution"
       />
 
-      {/* Security Banner */}
+      {/* Docker Isolation Boundary Banner */}
       <div className="bg-slate-900 text-white rounded-xl p-4 shadow-sm border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400 font-bold text-lg">
@@ -160,7 +251,7 @@ export function CodingPage() {
         </div>
       </div>
 
-      {/* Presets */}
+      {/* Benchmarks Section */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs text-slate-500 font-medium mr-1">Benchmarks:</span>
         {DEMO_PRESETS.map((p, idx) => (
@@ -175,59 +266,113 @@ export function CodingPage() {
         ))}
       </div>
 
+      {/* Structured Error Alert Card */}
       {error && (
-        <div role="alert" className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-          {error}
+        <div role="alert" className="p-4 bg-red-50 border border-red-300 rounded-xl text-red-900 shadow-xs flex flex-col gap-1.5">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-xs uppercase tracking-wide text-red-700">
+              {error.title || 'ERROR'}
+            </span>
+            {error.stage && (
+              <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-red-100 text-red-800 border border-red-200">
+                Stage: {error.stage}
+              </span>
+            )}
+          </div>
+          {error.exitCode !== undefined && error.exitCode !== null && (
+            <div className="text-xs font-mono text-red-800">
+              Exit Code: <strong>{error.exitCode}</strong>
+            </div>
+          )}
+          <p className="text-xs text-red-800 leading-relaxed font-medium">
+            {error.message}
+          </p>
+          {error.stderr && (
+            <pre className="mt-1 p-2.5 bg-red-950 text-red-200 rounded-lg text-xs font-mono whitespace-pre-wrap overflow-x-auto max-h-36">
+              {error.stderr}
+            </pre>
+          )}
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Column: Prompt and Code Generator */}
+        {/* Left Column: Prompt, CSV Upload & Code Generator */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm flex flex-col gap-4">
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <label htmlFor="coding-prompt" className="block text-xs font-semibold uppercase tracking-wider text-slate-600">
                 1. Coding Request (Model Router)
               </label>
-              <div className="flex items-center gap-1 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
-                <button
-                  type="button"
-                  onClick={() => setLanguage('python')}
-                  className={`px-2.5 py-0.5 text-xs font-medium rounded-md transition-colors ${
-                    language === 'python'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Python
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLanguage('javascript')}
-                  className={`px-2.5 py-0.5 text-xs font-medium rounded-md transition-colors ${
-                    language === 'javascript'
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  JavaScript
-                </button>
-              </div>
+              <span className="px-2.5 py-0.5 text-xs font-semibold rounded-md bg-blue-600 text-white shadow-xs font-mono">
+                Python
+              </span>
             </div>
             <textarea
               id="coding-prompt"
               rows={3}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder={`Describe the ${language === 'javascript' ? 'JavaScript' : 'Python'} task you want the local model to write...`}
+              placeholder="Describe the Python task or data analysis you want the local model to write..."
               disabled={isGenerating || isExecuting}
               className="w-full text-sm rounded-lg border border-slate-300 px-3 py-2.5 text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-slate-100"
             />
           </div>
 
+          {/* CSV Upload Section */}
+          <div className="border border-dashed border-slate-200 rounded-lg p-3 bg-slate-50/60 flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-700">Input Dataset (Optional CSV)</span>
+                <span className="text-[10px] text-slate-400 font-mono">→ /workspace/input/data.csv</span>
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv"
+                onChange={handleFileUpload}
+                className="hidden"
+                id="csv-file-input"
+              />
+              <label
+                htmlFor="csv-file-input"
+                className="cursor-pointer text-xs px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 transition-colors shadow-2xs font-medium"
+              >
+                {csvFile ? 'Change CSV' : 'Upload CSV'}
+              </label>
+            </div>
+
+            {csvFile ? (
+              <div className="bg-white rounded border border-emerald-300 p-2.5 flex items-center justify-between text-xs">
+                <div className="flex flex-col gap-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-800 font-mono">{csvFile.filename}</span>
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      {csvFile.rowCount} rows · {(csvFile.sizeBytes / 1024).toFixed(1)} KB
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 font-mono truncate max-w-sm">
+                    Columns: {csvFile.columns.join(', ')}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleRemoveCsv}
+                  className="text-slate-400 hover:text-red-600 text-sm font-bold px-2 py-1"
+                  title="Remove CSV"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <p className="text-[11px] text-slate-400 italic">
+                No CSV uploaded. Python code will execute without mounted data.
+              </p>
+            )}
+          </div>
+
           <div className="flex justify-between items-center">
             <span className="text-xs text-slate-400">
-              Routed to configured local coding model via MLX
+              Routed to local Qwen 2.5 Coder via MLX (:8081)
             </span>
             <Button
               onClick={handleGenerate}
@@ -241,18 +386,19 @@ export function CodingPage() {
           <div className="mt-2 flex-1 flex flex-col">
             <div className="flex items-center justify-between mb-1.5">
               <label htmlFor="code-display" className="text-xs font-semibold uppercase tracking-wider text-slate-600">
-                2. Generated Code ({language.toUpperCase()})
+                2. Generated Code (PYTHON)
               </label>
               {generationMeta && (
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">
-                  Task: {generationMeta.taskType} · Model: {generationMeta.model} · {generationMeta.language || language}
+                  Model: {generationMeta.model} · {generationMeta.language}
+                  {generationMeta.csv && ' · CSV Aware'}
                 </span>
               )}
             </div>
 
             <textarea
               id="code-display"
-              rows={10}
+              rows={11}
               value={code}
               onChange={(e) => setCode(e.target.value)}
               placeholder="# Generated Python code will appear here... You can edit or paste Python code directly."
@@ -329,13 +475,21 @@ export function CodingPage() {
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Exit Code</span>
                 <span className="font-mono font-medium text-slate-800">
-                  {executionResult.exitCode !== null ? executionResult.exitCode : 'N/A (killed)'}
+                  {executionResult.exitCode !== null ? executionResult.exitCode : 'N/A (timeout)'}
                 </span>
               </div>
               <div>
                 <span className="text-slate-400 block text-[10px] uppercase font-semibold">Duration</span>
                 <span className="font-mono font-medium text-slate-800">{executionResult.durationMs} ms</span>
               </div>
+            </div>
+          )}
+
+          {/* CSV Input Notification in Execution Panel */}
+          {executionResult?.sandbox?.csvInput && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-md px-3 py-1.5 flex items-center justify-between text-xs text-emerald-800">
+              <span>Isolated Dataset Mounted: <strong className="font-mono">{executionResult.sandbox.csvInput}</strong></span>
+              <span className="text-[10px] font-mono bg-emerald-100 px-1.5 py-0.5 rounded text-emerald-700">READ ONLY</span>
             </div>
           )}
 
@@ -348,7 +502,7 @@ export function CodingPage() {
               )}
             </div>
 
-            <pre className="flex-1 min-h-[140px] max-h-[220px] overflow-y-auto font-mono text-xs bg-slate-950 text-slate-100 rounded-lg p-3 border border-slate-800 whitespace-pre-wrap select-text">
+            <pre className="flex-1 min-h-[140px] max-h-[240px] overflow-y-auto font-mono text-xs bg-slate-950 text-slate-100 rounded-lg p-3 border border-slate-800 whitespace-pre-wrap select-text">
               {executionResult ? (
                 executionResult.stdout || <span className="text-slate-600 italic">No output produced on stdout.</span>
               ) : (
@@ -364,7 +518,7 @@ export function CodingPage() {
                     <span className="text-amber-600 text-[11px] font-mono">Truncated (max 64KB)</span>
                   )}
                 </div>
-                <pre className="min-h-[60px] max-h-[120px] overflow-y-auto font-mono text-xs bg-red-950/40 text-red-300 rounded-lg p-3 border border-red-900/50 whitespace-pre-wrap select-text">
+                <pre className="min-h-[60px] max-h-[140px] overflow-y-auto font-mono text-xs bg-red-950/40 text-red-300 rounded-lg p-3 border border-red-900/50 whitespace-pre-wrap select-text">
                   {executionResult.stderr}
                 </pre>
               </>

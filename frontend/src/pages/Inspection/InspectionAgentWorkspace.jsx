@@ -1,9 +1,9 @@
 /**
  * COMPONENT — InspectionAgentWorkspace.jsx
  *
- * Phase 7: Industrial Inspection Agent Workspace
+ * Industrial Inspection Agent Workspace
  * Multi-step, grounded, observable analysis of industrial inspection reports
- * with structured Approval Note data preview.
+ * with real-time LangGraph SSE execution and executive Approval Note DOCX deliverable.
  */
 
 import React, { useState } from 'react';
@@ -11,27 +11,47 @@ import { Button } from '../../components/ui/Button.jsx';
 import { Card } from '../../components/ui/Card.jsx';
 import { StatusBadge } from '../../components/ui/Badge.jsx';
 import { useDocuments } from '../../hooks/useDocuments.js';
-import { analyzeInspectionAgent } from '../../api/agent.api.js';
+import { useInspectionExecution, CANONICAL_STAGES } from '../../hooks/useInspectionExecution.js';
 
-const AGENT_STEPS = [
-  { id: 'READING_REPORT', label: 'Reading report', desc: 'Ingesting document and reading chunks' },
-  { id: 'EXTRACTING_FINDINGS', label: 'Extracting findings', desc: 'Parsing observations and parameter data' },
-  { id: 'SEARCHING_KNOWLEDGE', label: 'Searching knowledge', desc: 'Retrieving SOP evidence in Qdrant' },
-  { id: 'ANALYZING', label: 'Analysing findings', desc: 'Comparing findings with operating limits' },
-  { id: 'ASSESSING_RISK', label: 'Assessing risk', desc: 'Evaluating operational risk grounded in SOP' },
-  { id: 'GENERATING_RECOMMENDATION', label: 'Preparing recommendation', desc: 'Formulating maintenance recommendation' },
-  { id: 'PREPARING_APPROVAL_NOTE', label: 'Preparing approval note', desc: 'Compiling structured approval note content' },
-];
+function displayValue(value, fallback = '—') {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => displayValue(item, '')).filter(Boolean).join(', ') || fallback;
+  }
+  if (typeof value === 'object') {
+    const preferred = value.text || value.value || value.label || value.name || value.filename;
+    return preferred != null ? displayValue(preferred, fallback) : JSON.stringify(value);
+  }
+  return fallback;
+}
 
 export function InspectionAgentWorkspace() {
   const { documents, selectedDocument, selectDocument } = useDocuments({ documentType: 'inspection' });
 
+  const {
+    status,
+    stageStates,
+    currentOperation,
+    findings,
+    sopEvidence,
+    riskAssessment,
+    recommendation,
+    citations,
+    approvalNote,
+    downloadUrl,
+    error: executionError,
+    workflowOutcome,
+    isDownloading,
+    downloadError,
+    downloadApprovalNote,
+    runWorkflow,
+  } = useInspectionExecution();
+
   const [selectedDocId, setSelectedDocId] = useState('');
-  const [isRunning, setIsRunning] = useState(false);
-  const [activeStepIndex, setActiveStepIndex] = useState(-1);
-  const [completedSteps, setCompletedSteps] = useState(new Set());
-  const [runResult, setRunResult] = useState(null);
-  const [error, setError] = useState(null);
+  const [localError, setLocalError] = useState(null);
 
   const effectiveDocId =
     selectedDocId ||
@@ -46,54 +66,58 @@ export function InspectionAgentWorkspace() {
   const handleSelectChange = (e) => {
     const val = e.target.value;
     setSelectedDocId(val);
-    setError(null);
+    setLocalError(null);
     const matched = documents.find((d) => (d.documentId || d.id) === val);
     if (matched) selectDocument(matched);
   };
 
+  const isRunning = status === 'running';
+  const isInsufficientEvidence =
+    workflowOutcome === 'INSUFFICIENT_EVIDENCE' || (status === 'stopped' && findings.length === 0);
+
+  const hasSuccessfulDeliverables =
+    status === 'completed' &&
+    riskAssessment !== null &&
+    recommendation !== null &&
+    (approvalNote !== null || downloadUrl !== null);
+
+  const hasResults =
+    hasSuccessfulDeliverables ||
+    isInsufficientEvidence ||
+    findings.length > 0 ||
+    riskAssessment !== null;
+
+  const displayError = localError || executionError;
+
   const handleRunAnalysis = async () => {
     if (!effectiveDocId) {
-      setError('Please select an inspection report first.');
+      setLocalError('Please select an inspection report first.');
       return;
     }
+    setLocalError(null);
 
-    setIsRunning(true);
-    setError(null);
-    setRunResult(null);
-    setCompletedSteps(new Set());
-
-    // Step animation simulating real backend state transitions
-    let step = 0;
-    setActiveStepIndex(step);
-    const interval = setInterval(() => {
-      if (step < AGENT_STEPS.length - 1) {
-        setCompletedSteps((prev) => new Set([...prev, AGENT_STEPS[step].id]));
-        step++;
-        setActiveStepIndex(step);
-      }
-    }, 1200);
-
-    try {
-      const resp = await analyzeInspectionAgent(effectiveDocId);
-      clearInterval(interval);
-      setActiveStepIndex(-1);
-      setCompletedSteps(new Set(AGENT_STEPS.map((s) => s.id)));
-      setRunResult(resp.result || resp);
-    } catch (err) {
-      clearInterval(interval);
-      setActiveStepIndex(-1);
-      setError(err.response?.data?.message || err.message || 'Inspection analysis failed');
-    } finally {
-      setIsRunning(false);
-    }
+    runWorkflow({
+      documentId: effectiveDocId,
+      filePath: selectedDocObj?.filePath,
+      filename: selectedDocObj?.filename || selectedDocObj?.originalFilename,
+    });
   };
 
-  const findings = runResult?.inspectionFindings || runResult?.findings || [];
-  const technicalAnalysis = runResult?.technicalAnalysis || [];
-  const riskAssessment = runResult?.riskAssessment || null;
-  const recommendation = runResult?.recommendation || null;
-  const references = runResult?.references || runResult?.citations || [];
-  const approval = runResult?.approval || { status: 'Pending Approval' };
+  const handleDownload = async () => {
+    const target = downloadUrl || approvalNote?.downloadUrl || approvalNote?.filename;
+    if (!target) return;
+    await downloadApprovalNote(target);
+  };
+
+  const headerStatusLabel = isRunning
+    ? 'ANALYSING'
+    : hasSuccessfulDeliverables
+    ? 'COMPLETED'
+    : isInsufficientEvidence
+    ? 'INSUFFICIENT EVIDENCE'
+    : status === 'failed'
+    ? 'FAILED'
+    : 'IDLE';
 
   return (
     <div className="flex flex-col gap-6">
@@ -108,16 +132,20 @@ export function InspectionAgentWorkspace() {
               className={`text-xs font-mono font-bold px-2.5 py-0.5 rounded-full border ${
                 isRunning
                   ? 'bg-blue-50 text-blue-800 border-blue-300 animate-pulse'
-                  : runResult
+                  : hasSuccessfulDeliverables
                   ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                  : isInsufficientEvidence
+                  ? 'bg-amber-50 text-amber-800 border-amber-300'
+                  : status === 'failed'
+                  ? 'bg-red-50 text-red-800 border-red-300'
                   : 'bg-slate-100 text-slate-700 border-slate-300'
               }`}
             >
-              ● {isRunning ? 'ANALYSING' : runResult ? 'COMPLETED' : 'IDLE'}
+              ● {headerStatusLabel}
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Phase 7 Grounded Multi-Step Inspection Agent Workflow
+            Sovereign LangGraph Orchestration with Knowledge Base SOP Evidence Gate
           </p>
         </div>
 
@@ -128,7 +156,7 @@ export function InspectionAgentWorkspace() {
           </div>
           <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
             <span className="text-slate-400 block text-[10px] font-semibold uppercase">Knowledge Base</span>
-            <span className="font-mono font-semibold text-slate-800">Qdrant (40,036 pts)</span>
+            <span className="font-mono font-semibold text-slate-800">Qdrant Vector Store</span>
           </div>
         </div>
       </div>
@@ -172,42 +200,57 @@ export function InspectionAgentWorkspace() {
               disabled={isRunning || !effectiveDocId}
               className="w-full justify-center !py-2.5 font-bold text-xs"
             >
-              {isRunning ? 'Analyzing Inspection Report…' : 'Analyze Inspection Report'}
+              {isRunning ? 'Generating Approval Doc…' : 'Generate Approval Doc'}
             </Button>
 
-            {error && (
+            {displayError && (
               <p className="text-xs text-red-600 bg-red-50 p-2.5 rounded border border-red-200 font-medium">
-                {error}
+                {displayError}
               </p>
             )}
           </div>
 
           {/* Agent Activity Timeline */}
           <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-4">
-            <div className="border-b border-slate-100 pb-2">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                Agent Activity
-              </h3>
-              <p className="text-[11px] text-slate-400">Observable bounded state machine transitions</p>
+            <div className="border-b border-slate-100 pb-2 flex items-center justify-between">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                  Pipeline Execution
+                </h3>
+                <p className="text-[11px] text-slate-400">Grounded 8-Stage LangGraph State Machine</p>
+              </div>
+              {isRunning && (
+                <span className="text-[11px] font-mono text-blue-600 font-bold animate-pulse">
+                  {currentOperation}
+                </span>
+              )}
             </div>
 
             <div className="flex flex-col gap-2">
-              {AGENT_STEPS.map((s, idx) => {
-                const isCompleted = completedSteps.has(s.id);
-                const isActive = activeStepIndex === idx;
+              {CANONICAL_STAGES.map((s) => {
+                const stageState = stageStates[s.id] || { status: 'pending' };
+                const st = stageState.status;
 
                 let icon = '○';
                 let rowStyle = 'bg-slate-50/60 border-slate-200 text-slate-500';
                 let iconStyle = 'text-slate-400';
 
-                if (isActive) {
+                if (st === 'running') {
                   icon = '⚡';
                   rowStyle = 'bg-blue-50 border-blue-300 text-blue-900 font-semibold shadow-sm ring-1 ring-blue-300';
                   iconStyle = 'text-blue-600 animate-bounce';
-                } else if (isCompleted) {
+                } else if (st === 'completed') {
                   icon = '✓';
                   rowStyle = 'bg-emerald-50/70 border-emerald-200 text-emerald-950 font-medium';
                   iconStyle = 'text-emerald-700 font-bold';
+                } else if (st === 'skipped') {
+                  icon = '—';
+                  rowStyle = 'bg-slate-50/40 border-slate-200 text-slate-400 opacity-60';
+                  iconStyle = 'text-slate-400';
+                } else if (st === 'failed') {
+                  icon = '✕';
+                  rowStyle = 'bg-red-50 border-red-200 text-red-900 font-medium';
+                  iconStyle = 'text-red-600 font-bold';
                 }
 
                 return (
@@ -222,10 +265,10 @@ export function InspectionAgentWorkspace() {
                       <div className="flex items-center justify-between">
                         <span className="font-bold">{s.label}</span>
                         <span className="text-[10px] uppercase font-mono tracking-wider opacity-70">
-                          {isActive ? 'running' : isCompleted ? 'completed' : 'pending'}
+                          {st}
                         </span>
                       </div>
-                      <p className="text-[11px] opacity-75 truncate">{s.desc}</p>
+                      <p className="text-[11px] opacity-75 truncate">{s.description}</p>
                     </div>
                   </div>
                 );
@@ -234,13 +277,13 @@ export function InspectionAgentWorkspace() {
           </div>
         </div>
 
-        {/* Right Column: Grounded Inspection Results & Approval Note Preview */}
+        {/* Right Column: Grounded Inspection Results Hierarchy & Approval Note Deliverable */}
         <div className="lg:col-span-7 flex flex-col gap-5">
-          {!runResult && !isRunning && (
+          {!hasResults && !isRunning && (
             <div className="bg-white border border-slate-200 rounded-xl p-10 text-center flex flex-col items-center justify-center gap-2 shadow-sm">
               <span className="text-3xl">⚙</span>
               <p className="text-sm font-semibold text-slate-800">
-                Ready for Inspection Analysis
+                Ready to analyze
               </p>
               <p className="text-xs text-slate-400 max-w-sm">
                 Select an inspection report and click &ldquo;Analyze Inspection Report&rdquo; to execute the multi-step agent workflow.
@@ -248,45 +291,78 @@ export function InspectionAgentWorkspace() {
             </div>
           )}
 
-          {runResult && (
+          {isInsufficientEvidence && (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-6 shadow-sm flex flex-col gap-3 text-amber-950">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">⚠️</span>
+                <h3 className="font-bold text-sm tracking-tight uppercase">
+                  INSUFFICIENT EVIDENCE
+                </h3>
+              </div>
+              <p className="text-xs leading-relaxed">
+                Analysis halted at the Knowledge Base Evidence Gate. No sufficiently relevant SOP evidence was found in the Knowledge Base for the reported observations within approved tenant boundaries.
+              </p>
+              <p className="text-[11px] text-amber-800 font-medium">
+                Per SovereignAI safety constraints, risks and recommendations are never hallucinated from unsupported observations, and no Approval Note DOCX was generated.
+              </p>
+            </div>
+          )}
+
+          {hasResults && !isInsufficientEvidence && (
             <div className="flex flex-col gap-5">
-              {/* 1. Inspection Findings */}
+              {/* 1. INSPECTION FINDINGS */}
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    Inspection Findings ({findings.length})
+                    INSPECTION FINDINGS ({findings.length})
                   </h3>
-                  <span className="text-[11px] text-slate-500 font-medium">Grounded in verbatim report data</span>
+                  <span className="text-[11px] text-emerald-700 font-semibold bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    Validated Findings
+                  </span>
                 </div>
 
                 {findings.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic">No explicit abnormal findings reported.</p>
+                  <p className="text-xs text-slate-500 italic">No validated abnormal findings recorded.</p>
                 ) : (
                   <div className="flex flex-col gap-3">
                     {findings.map((f, idx) => (
                       <Card key={idx} className="!p-3.5 bg-slate-50/50 border-slate-200 flex flex-col gap-2 text-xs">
                         <div className="flex items-center justify-between">
-                          <span className="font-bold text-slate-900">{f.finding}</span>
-                          <StatusBadge status={f.severity || 'MEDIUM'} />
+                          <span className="font-bold text-slate-900">{displayValue(f.finding)}</span>
+                          <StatusBadge status={displayValue(f.severity, 'MEDIUM')} />
                         </div>
-                        <div className="grid grid-cols-3 gap-2 bg-white p-2 rounded border border-slate-200 text-[11px]">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 bg-white p-2.5 rounded border border-slate-200 text-[11px]">
+                          {f.equipment && (
+                            <div>
+                              <span className="text-slate-400 block text-[9px] uppercase font-semibold">Equipment</span>
+                              <span className="font-semibold text-slate-800 truncate block">{displayValue(f.equipment)}</span>
+                            </div>
+                          )}
                           <div>
                             <span className="text-slate-400 block text-[9px] uppercase font-semibold">Observed</span>
-                            <span className="font-semibold text-amber-800">{f.observedValue || '—'}</span>
+                            <span className="font-semibold text-amber-800 font-mono">{displayValue(f.observedValue)}</span>
                           </div>
                           <div>
                             <span className="text-slate-400 block text-[9px] uppercase font-semibold">Limit</span>
-                            <span className="font-semibold text-slate-700">{f.limit || '—'}</span>
+                            <span className="font-semibold text-slate-700 font-mono">{displayValue(f.limit)}</span>
                           </div>
                           <div>
-                            <span className="text-slate-400 block text-[9px] uppercase font-semibold">Source</span>
-                            <span className="text-slate-600 truncate">{f.source || 'Report'} {f.page ? `(Page ${f.page})` : ''}</span>
+                            <span className="text-slate-400 block text-[9px] uppercase font-semibold">Source / Page</span>
+                            <span className="text-slate-600 truncate block">
+                              {displayValue(f.source, 'Report')}{f.page ? ` (p. ${displayValue(f.page)})` : ''}
+                            </span>
                           </div>
                         </div>
                         {f.evidence && (
-                          <p className="text-[11px] text-slate-600 italic bg-white p-2 rounded border border-slate-100">
-                            &ldquo;{f.evidence}&rdquo;
-                          </p>
+                          <div className="bg-white p-2 rounded border border-slate-100 text-[11px] text-slate-600 italic">
+                            &ldquo;{displayValue(f.evidence)}&rdquo;
+                          </div>
+                        )}
+                        {Array.isArray(f?.sopEvidence) && f.sopEvidence[0]?.filename && (
+                          <div className="text-[10px] text-blue-700 bg-blue-50/50 p-1.5 rounded border border-blue-100 flex items-center gap-1.5">
+                            <span className="font-semibold">SOP Evidence:</span>
+                            <span>{f.sopEvidence[0].filename} (Page {f.sopEvidence[0].page ?? 1})</span>
+                          </div>
                         )}
                       </Card>
                     ))}
@@ -294,108 +370,181 @@ export function InspectionAgentWorkspace() {
                 )}
               </div>
 
-              {/* 2. Technical Analysis */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
-                <div className="border-b border-slate-100 pb-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    Technical Analysis
-                  </h3>
-                  <p className="text-[11px] text-slate-400">Calculated observations vs standard operating limits</p>
-                </div>
-
-                {Array.isArray(technicalAnalysis) ? (
-                  <div className="flex flex-col gap-2 text-xs">
-                    {technicalAnalysis.map((item, idx) => (
-                      <div key={idx} className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-slate-800 leading-relaxed">
-                        <p className="font-medium">{item.analysis || item}</p>
-                        {item.percentageDeviation != null && (
-                          <span className="inline-block mt-1 font-mono text-[11px] bg-blue-50 text-blue-700 px-2 py-0.5 rounded border border-blue-200">
-                            Deviation: {Math.abs(item.percentageDeviation).toFixed(2)}% {item.isExceeded ? 'above limit' : 'within limit'}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-700 p-3 bg-slate-50 rounded-lg border border-slate-200 leading-relaxed">
-                    {String(technicalAnalysis)}
-                  </p>
-                )}
-              </div>
-
-              {/* 3. Risk Assessment */}
+              {/* 2. TECHNICAL ANALYSIS */}
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
                 <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    Risk Assessment
+                    TECHNICAL ANALYSIS
                   </h3>
-                  <StatusBadge status={riskAssessment?.level || 'MEDIUM'} />
-                </div>
-                <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-800 leading-relaxed">
-                  <p><strong>Evaluated Risk:</strong> {riskAssessment?.reason || 'Evaluated against operational criteria.'}</p>
-                  <p className="mt-1.5 text-[11px] text-slate-500 italic">
-                    Based on the available inspection evidence. Formal sign-off requires qualified engineering authority.
-                  </p>
-                </div>
-              </div>
-
-              {/* 4. Recommendation */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
-                <div className="border-b border-slate-100 pb-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    Recommendation
-                  </h3>
-                </div>
-                <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-lg text-xs text-emerald-950 font-medium leading-relaxed">
-                  {typeof recommendation === 'string'
-                    ? recommendation
-                    : recommendation?.action || 'Review findings with maintenance supervisor.'}
-                </div>
-              </div>
-
-              {/* 5. References */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
-                <div className="border-b border-slate-100 pb-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    References ({references.length})
-                  </h3>
-                </div>
-                {references.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic">No supporting references retrieved.</p>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {references.map((r, idx) => (
-                      <div key={idx} className="flex items-center justify-between text-xs p-2.5 bg-slate-50 rounded border border-slate-200">
-                        <div className="flex items-center gap-2">
-                          <span>📄</span>
-                          <span className="font-semibold text-slate-800">{r.filename}</span>
-                          <span className="text-slate-400">· Page {r.page ?? 1}</span>
-                          {r.chunkIndex != null && <span className="text-slate-400 font-mono text-[10px]">(Chunk {r.chunkIndex})</span>}
-                        </div>
-                        {r.score != null && (
-                          <span className="text-[10px] font-mono bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">
-                            {(r.score * 100).toFixed(0)}% match
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* 6. Approval Section */}
-              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    Approval
-                  </h3>
-                  <span className="text-xs font-bold uppercase px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-300 rounded-full font-mono">
-                    {approval?.status || 'Pending Approval'}
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Operating Parameter Verification
                   </span>
                 </div>
-                <p className="text-xs text-slate-500 leading-relaxed">
-                  The structured approval note is compiled and pending plant authority signature. Final DOCX report generation is deferred to Phase 9.
-                </p>
+
+                <div className="flex flex-col gap-2.5">
+                  {findings.map((f, idx) => {
+                    const analysisText = f.analysis || f.technicalAnalysis;
+                    return (
+                      <div key={idx} className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs text-slate-800 flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-900">{displayValue(f.equipment || f.finding)}</span>
+                          {f.observedValue && f.limit && (
+                            <span className="font-mono text-[11px] font-semibold text-slate-600">
+                              {displayValue(f.observedValue)} vs. {displayValue(f.limit)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-700 leading-relaxed">
+                          {displayValue(
+                            analysisText,
+                            'Observed parameter evaluated directly against authoritative Standard Operating Procedure (SOP) operating threshold.'
+                          )}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 3. RISK ASSESSMENT */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    RISK ASSESSMENT
+                  </h3>
+                  {riskAssessment?.level && (
+                    <StatusBadge status={riskAssessment.level} />
+                  )}
+                </div>
+
+                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 text-xs flex flex-col gap-2.5">
+                  <div>
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase tracking-wider">
+                      Level:
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 tracking-tight font-mono">
+                      {riskAssessment?.level || '—'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase tracking-wider">
+                      Reason:
+                    </span>
+                    <p className="text-xs text-slate-800 leading-relaxed font-normal mt-0.5">
+                      {riskAssessment?.reason || 'Evaluated against operational criteria.'}
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-200 text-[11px] text-slate-500 italic">
+                    Grounded in validated Standard Operating Procedure limits. Requires authorized plant authority review prior to dispatch.
+                  </div>
+                </div>
+              </div>
+
+              {/* 4. RECOMMENDATION */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
+                <div className="border-b border-slate-100 pb-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    RECOMMENDATION
+                  </h3>
+                </div>
+                <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-lg text-xs text-emerald-950 font-medium leading-relaxed">
+                  {displayValue(
+                    typeof recommendation === 'string'
+                      ? recommendation
+                      : recommendation?.action || recommendation?.recommendation
+                  )}
+                </div>
+              </div>
+
+              {/* 5. REFERENCES */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                    REFERENCES ({citations.length || sopEvidence.length})
+                  </h3>
+                  <span className="text-[11px] text-slate-500 font-medium">
+                    Knowledge Base SOP Evidence
+                  </span>
+                </div>
+
+                {(citations.length === 0 && sopEvidence.length === 0) ? (
+                  <p className="text-xs text-slate-500 italic">No validated SOP citations recorded.</p>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {(citations.length > 0 ? citations : sopEvidence).map((c, idx) => (
+                      <div key={idx} className="flex flex-col gap-1 p-3 bg-slate-50 rounded border border-slate-200 text-xs">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span>📄</span>
+                            <span className="font-semibold text-slate-800 font-mono text-[11px]">{displayValue(c.filename, 'Evidence')}</span>
+                            {c.page != null && <span className="text-slate-400">· Page {displayValue(c.page)}</span>}
+                            {c.chunkIndex != null && (
+                              <span className="text-slate-400 font-mono text-[10px]">(Chunk {displayValue(c.chunkIndex)})</span>
+                            )}
+                          </div>
+                          {c.score != null && (
+                            <span className="text-[10px] font-mono bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded font-bold">
+                              {(c.score * 100).toFixed(0)}% match
+                            </span>
+                          )}
+                        </div>
+                        {c.text && (
+                          <p className="text-[11px] text-slate-600 bg-white p-2 rounded border border-slate-100 line-clamp-3">
+                            &ldquo;{displayValue(c.text)}&rdquo;
+                          </p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* 6. APPROVAL NOTE & DOWNLOAD */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm flex flex-col gap-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-slate-800">
+                      APPROVAL NOTE
+                    </h3>
+                    <p className="text-[11px] text-emerald-700 font-semibold">
+                      Generated successfully · Report saved to History
+                    </p>
+                  </div>
+                  <span className="text-xs font-bold uppercase px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-full font-mono">
+                    APPROVAL NOTE READY
+                  </span>
+                </div>
+
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 bg-emerald-50/50 border border-emerald-200 rounded-lg">
+                  <div className="flex flex-col gap-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">📄</span>
+                      <span className="text-xs font-bold text-slate-900 font-mono">
+                        {approvalNote?.filename || 'Approval_Note.docx'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-600">
+                      Executive deliverable compiled with validated observations, operating limits, risk assessment, and recommendation.
+                    </p>
+                  </div>
+
+                  <Button
+                    variant="primary"
+                    onClick={handleDownload}
+                    disabled={isDownloading || (!downloadUrl && !approvalNote?.downloadUrl && !approvalNote?.filename)}
+                    className="shrink-0 !py-2.5 !px-5 text-xs font-bold justify-center shadow-sm"
+                  >
+                    {isDownloading ? 'Downloading…' : 'Download Approval Note (.docx)'}
+                  </Button>
+                </div>
+
+                {downloadError && (
+                  <p className="text-xs text-red-600 bg-red-50 p-2 rounded border border-red-200">
+                    {downloadError}
+                  </p>
+                )}
               </div>
             </div>
           )}

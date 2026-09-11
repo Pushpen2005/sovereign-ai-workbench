@@ -117,9 +117,24 @@ export const InspectionAgentState = Annotation.Root({
         default: () => [],
     }),
 
+    validatedFindings: Annotation({
+        reducer: listReplaceReducer,
+        default: () => [],
+    }),
+
     sopEvidence: Annotation({
         reducer: listReplaceReducer,
         default: () => [],
+    }),
+
+    validatedSopEvidence: Annotation({
+        reducer: listReplaceReducer,
+        default: () => [],
+    }),
+
+    risk: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
     }),
 
     riskAssessment: Annotation({
@@ -148,6 +163,21 @@ export const InspectionAgentState = Annotation.Root({
     }),
 
     report: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
+    reportId: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
+    approvalNote: Annotation({
+        reducer: replaceReducer,
+        default: () => null,
+    }),
+
+    downloadUrl: Annotation({
         reducer: replaceReducer,
         default: () => null,
     }),

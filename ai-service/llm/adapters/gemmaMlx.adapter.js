@@ -9,10 +9,41 @@ import { BaseAdapter } from "./base.adapter.js";
 
 let gemmaQueue = Promise.resolve();
 
-function enqueueGemma(fn) {
-    const next = gemmaQueue.then(fn, fn);
-    gemmaQueue = next.catch(() => {});
-    return next;
+function enqueueGemma(fn, options = {}) {
+    const queueTimeoutMs = typeof options.queueTimeoutMs === "number"
+        ? options.queueTimeoutMs
+        : Math.max(options.timeoutMs || 180000, 180000);
+    
+    return new Promise((resolve, reject) => {
+        let isTimeout = false;
+        const timer = setTimeout(() => {
+            isTimeout = true;
+            const err = new Error(`Gemma MLX queue wait exceeded ${queueTimeoutMs}ms — server is busy with another request`);
+            err.code = "LOCAL_RUNTIME_TIMEOUT";
+            err.statusCode = 503;
+            reject(err);
+        }, queueTimeoutMs);
+
+        const next = gemmaQueue.then(async () => {
+            if (isTimeout) return;
+            clearTimeout(timer);
+            try {
+                resolve(await fn());
+            } catch (err) {
+                reject(err);
+            }
+        }, async () => {
+            if (isTimeout) return;
+            clearTimeout(timer);
+            try {
+                resolve(await fn());
+            } catch (err) {
+                reject(err);
+            }
+        });
+        
+        gemmaQueue = next.catch(() => {});
+    });
 }
 
 export class GemmaMlxAdapter extends BaseAdapter {
@@ -58,7 +89,7 @@ export class GemmaMlxAdapter extends BaseAdapter {
     }
 
     async generate(prompt, model, options = {}) {
-        return enqueueGemma(() => this._executeGenerate(prompt, model, options));
+        return enqueueGemma(() => this._executeGenerate(prompt, model, options), options);
     }
 
     async _executeGenerate(prompt, model, options = {}) {
@@ -140,7 +171,8 @@ export class GemmaMlxAdapter extends BaseAdapter {
             const decoder = new TextDecoder("utf-8");
             let buffer = "";
 
-            while (true) {
+            let isDone = false;
+            while (!isDone) {
                 const { done, value } = await reader.read();
                 if (done) break;
 
@@ -155,6 +187,7 @@ export class GemmaMlxAdapter extends BaseAdapter {
                     if (trimmed.startsWith("data: ")) {
                         const dataStr = trimmed.slice(6).trim();
                         if (dataStr === "[DONE]") {
+                            isDone = true;
                             break;
                         }
 
