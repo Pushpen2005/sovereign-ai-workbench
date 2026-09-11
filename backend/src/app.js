@@ -20,7 +20,9 @@ import visionRouter from "./routes/vision.routes.js";
 import agentRouter from "./routes/agent.routes.js";
 import knowledgeRouter from "./routes/knowledge.routes.js";
 import authRouter from "./routes/auth.routes.js";
+import riskRouter from "./routes/risk.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
+import { correlationMiddleware } from "./middleware/correlation.middleware.js";
 import { telemetryService } from "./services/telemetry.service.js";
 import { getEmbeddingMetrics } from "../../ai-service/embeddings/embedding.service.js";
 import { checkDbConnection } from "./config/db.js";
@@ -74,6 +76,8 @@ app.use(cors({
 // Hardened body parser limit (2 MB max) to prevent memory exhaustion
 app.use(express.json({ limit: "2mb" }));
 
+app.use(correlationMiddleware);
+
 // Authentication routes (public registration/login, protected /me)
 app.use("/api/v1/auth", authRouter);
 
@@ -124,12 +128,7 @@ const healthHandler = async (req, res) => {
     });
 };
 
-app.get('/api/v1/health', (req, res) => {
-    res.status(200).json({
-        status: "ok"
-    });
-});
-
+app.get('/api/v1/health', healthHandler);
 app.get('/health', healthHandler);
 
 // Private operational routes — strictly protected by authentication boundary
@@ -143,6 +142,7 @@ app.use("/api/v1/vision", requireAuth, visionRouter);
 app.use("/api/v1/agent", requireAuth, agentRouter);
 app.use("/api/v1/agents", requireAuth, agentRouter);
 app.use("/api/v1/knowledge", requireAuth, knowledgeRouter);
+app.use("/api/v1/risk", requireAuth, riskRouter);
 
 /**
  * PR #23 — Model Router Diagnostic Endpoint
@@ -529,24 +529,44 @@ app.get(['/api/v1/system/models/status', '/api/system/models/status'], async (re
     }
 });
 
+// 404 Not Found Handler
+app.use((req, res, next) => {
+    const error = new Error("Route not found");
+    error.status = 404;
+    next(error);
+});
+
 app.use((err, req, res, next) => {
+  let status = err.status || err.statusCode || 500;
+  let code = "INTERNAL_ERROR";
+  let message = err.message || "An unexpected error occurred.";
+
   if (err instanceof multer.MulterError) {
-    const status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
-    return res.status(status).json({
-      success: false,
-      message: err.message,
-    });
+    status = err.code === "LIMIT_FILE_SIZE" ? 413 : 400;
+    code = "VALIDATION_ERROR";
+  } else if (status === 404 || (err.message && err.message.toLowerCase().includes("not found"))) {
+    status = 404;
+    code = err.message && err.message.toLowerCase().includes("document") ? "DOCUMENT_NOT_FOUND" 
+           : err.message && err.message.toLowerCase().includes("agent") ? "AGENT_NOT_FOUND" 
+           : "NOT_FOUND";
+  } else if (status === 400 || (err.message && err.message.toLowerCase().includes("validation"))) {
+    status = 400;
+    code = "VALIDATION_ERROR";
+  } else if (err.message && err.message.toLowerCase().includes("qdrant")) {
+    code = "QDRANT_ERROR";
+  } else if (err.message && err.message.toLowerCase().includes("ai service")) {
+    code = "AI_SERVICE_ERROR";
+  } else if (err.message && (err.message.toLowerCase().includes("database") || err.message.toLowerCase().includes("db "))) {
+    code = "DATABASE_ERROR";
   }
 
-  if (err) {
-    const status = err.status || err.statusCode || (err.message && err.message.includes("not found") ? 404 : 400);
-    return res.status(status).json({
-      success: false,
-      message: err.message,
-    });
-  }
-
-  next();
+  return res.status(status).json({
+    success: false,
+    error: {
+      code,
+      message,
+    },
+  });
 });
 
 export default app;

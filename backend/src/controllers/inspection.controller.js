@@ -106,10 +106,11 @@ export async function analyzeInspection(req, res, next) {
     try {
         const { documentId, task } = req.body || {};
 
-        if (!documentId || typeof documentId !== "string" || !documentId.trim()) {
+        if (!documentId || typeof documentId !== "string" || !documentId.trim() || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(documentId.trim())) {
             return res.status(400).json({
                 success: false,
-                message: "documentId is required",
+                code: "VALIDATION_ERROR",
+                message: "Malformed documentId. Must be a valid UUID.",
             });
         }
 
@@ -517,6 +518,11 @@ export async function generateApprovalNoteDocx(req, res, next) {
                 filename: result.filename,
                 filePath: result.filePath,
                 fileSize: result.fileSize || fs.statSync(result.filePath).size,
+                downloadUrl,
+            },
+            artifact: {
+                id: savedReport.id,
+                filename: result.filename,
                 downloadUrl,
             },
         });
