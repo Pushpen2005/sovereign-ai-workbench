@@ -6,7 +6,7 @@
  */
 
 import React, { useRef, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button.jsx';
 import { useChat } from '../../hooks/useChat.js';
 import { useDocuments } from '../../hooks/useDocuments.js';
@@ -183,7 +183,7 @@ function SourceExcerptModal({ source, onClose }) {
 
 export function ChatPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const { documents } = useDocuments();
+  const { documents } = useDocuments({ documentType: 'other' });
   const {
     activeConversationId,
     messages,
@@ -258,25 +258,47 @@ export function ChatPage() {
               business-ready approval notes — 100% on-premises.
             </p>
 
-            {/* Example Prompts (Clickable Cards) */}
-            <div className="w-full flex flex-col gap-2.5 mb-8">
-              {PROMPT_SUGGESTIONS.map((p, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => handleSelectSuggestion(p.title)}
-                  className="w-full p-3 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-left shadow-sm transition-all group flex items-center justify-between"
+            {/* Documents Availability Check & Hero Content */}
+            {documents.length === 0 ? (
+              <div className="w-full max-w-md bg-amber-50/70 border border-amber-200/90 rounded-2xl p-6 text-center shadow-sm mb-8">
+                <div className="w-12 h-12 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center text-amber-700 text-xl mx-auto mb-3">
+                  📂
+                </div>
+                <h3 className="text-base font-bold text-slate-900 mb-1">
+                  No documents available
+                </h3>
+                <p className="text-xs text-slate-600 mb-4 leading-relaxed">
+                  Upload a document to start document-grounded AI search.
+                </p>
+                <Link
+                  to="/documents"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-semibold shadow-sm transition-colors"
                 >
-                  <div>
-                    <p className="text-xs font-semibold text-slate-800 group-hover:text-blue-600 transition-colors">
-                      &ldquo;{p.title}&rdquo;
-                    </p>
-                    <p className="text-[11px] text-slate-600 mt-0.5">{p.desc}</p>
-                  </div>
-                  <span className="text-slate-400 group-hover:text-blue-600 text-xs font-bold">→</span>
-                </button>
-              ))}
-            </div>
+                  <span>Upload Documents</span>
+                  <span>→</span>
+                </Link>
+              </div>
+            ) : (
+              /* Example Prompts (Clickable Cards) */
+              <div className="w-full flex flex-col gap-2.5 mb-8">
+                {PROMPT_SUGGESTIONS.map((p, idx) => (
+                  <button
+                    key={idx}
+                    type="button"
+                    onClick={() => handleSelectSuggestion(p.title)}
+                    className="w-full p-3 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 rounded-xl text-left shadow-sm transition-all group flex items-center justify-between"
+                  >
+                    <div>
+                      <p className="text-xs font-semibold text-slate-800 group-hover:text-blue-600 transition-colors">
+                        &ldquo;{p.title}&rdquo;
+                      </p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">{p.desc}</p>
+                    </div>
+                    <span className="text-slate-400 group-hover:text-blue-600 text-xs font-bold">→</span>
+                  </button>
+                ))}
+              </div>
+            )}
 
             {/* Compact Capabilities Row */}
             <div className="flex items-center gap-4 text-xs font-medium text-slate-500 border-t border-slate-200/80 pt-4">
@@ -358,14 +380,21 @@ export function ChatPage() {
                 <select
                   value={documentId || ''}
                   onChange={(e) => setDocumentId(e.target.value || null)}
-                  className="text-xs bg-slate-50 border border-slate-200 rounded-md py-1 px-2 text-slate-700 focus:outline-none max-w-[200px] truncate"
+                  disabled={documents.length === 0}
+                  className="text-xs bg-slate-50 border border-slate-200 rounded-md py-1 px-2 text-slate-700 focus:outline-none max-w-[200px] truncate disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  <option value="">All Documents (Full RAG)</option>
-                  {documents.map((d) => (
-                    <option key={d.id || d.documentId} value={d.id || d.documentId}>
-                      {d.originalFilename || d.filename}
-                    </option>
-                  ))}
+                  {documents.length === 0 ? (
+                    <option value="">No documents available</option>
+                  ) : (
+                    <>
+                      <option value="">All Documents (Full RAG)</option>
+                      {documents.map((d) => (
+                        <option key={d.id || d.documentId} value={d.id || d.documentId}>
+                          {d.originalFilename || d.filename}
+                        </option>
+                      ))}
+                    </>
+                  )}
                 </select>
               </div>
 

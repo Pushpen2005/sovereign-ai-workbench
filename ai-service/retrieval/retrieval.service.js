@@ -63,6 +63,7 @@ export async function searchSimilarChunks(
     // Validate documentId
     if (
         documentId !== undefined &&
+        documentId !== null &&
         (
             typeof documentId !== "string" ||
             documentId.trim().length === 0
@@ -140,10 +141,14 @@ export async function searchSimilarChunks(
 
         // Filter by documentId when provided
         if (documentId !== undefined && documentId !== null) {
+            const cleanDocId = documentId.trim();
+            if (allowedDocumentIds && !allowedDocumentIds.has(cleanDocId)) {
+                return [];
+            }
             must.push({
                 key: "documentId",
                 match: {
-                    value: documentId.trim(),
+                    value: cleanDocId,
                 },
             });
         } else if (allowedDocumentIds && allowedDocumentIds.size > 0) {

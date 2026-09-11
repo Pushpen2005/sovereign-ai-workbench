@@ -93,6 +93,19 @@ function documentReducer(state, action) {
         ],
       };
     }
+    case 'REMOVE_DOCUMENT': {
+      const docId = action.payload;
+      return {
+        ...state,
+        documents: (state.documents || []).filter(
+          (d) => d.id !== docId && d.documentId !== docId
+        ),
+        selectedDocument:
+          state.selectedDocument?.id === docId || state.selectedDocument?.documentId === docId
+            ? null
+            : state.selectedDocument,
+      };
+    }
     case 'UPLOAD_ERROR':
       return { ...state, uploadState: 'error', uploadError: action.payload };
     case 'UPLOAD_RESET':
@@ -141,6 +154,7 @@ export function useDocumentActions() {
       setDocuments: (docs) => dispatch({ type: 'SET_DOCUMENTS', payload: docs }),
       selectDocument: (doc) => dispatch({ type: 'SELECT_DOCUMENT', payload: doc }),
       clearSelection: () => dispatch({ type: 'CLEAR_SELECTION' }),
+      removeDocument: (id) => dispatch({ type: 'REMOVE_DOCUMENT', payload: id }),
       uploadStart: (pendingFile) => dispatch({ type: 'UPLOAD_START', payload: pendingFile }),
       uploadIndexing: () => dispatch({ type: 'UPLOAD_INDEXING' }),
       uploadSuccess: (doc) => dispatch({ type: 'UPLOAD_SUCCESS', payload: doc }),

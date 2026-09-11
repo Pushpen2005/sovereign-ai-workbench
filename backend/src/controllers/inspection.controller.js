@@ -83,6 +83,7 @@ export async function ingestInspection(req, res, next) {
                 originalFilename: req.file?.originalname || result.filename || "Inspection Report",
                 status: "Indexed",
                 chunksStored: result.chunksStored || 0,
+                documentType: "inspection",
             });
         }
 
@@ -105,18 +106,19 @@ export async function analyzeInspection(req, res, next) {
     try {
         const { documentId, task } = req.body || {};
 
-        if (!documentId || typeof documentId !== "string" || !documentId.trim()) {
+        if (!documentId || typeof documentId !== "string" || !documentId.trim() || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(documentId.trim())) {
             return res.status(400).json({
                 success: false,
-                message: "documentId is required",
+                code: "VALIDATION_ERROR",
+                message: "Malformed documentId. Must be a valid UUID.",
             });
         }
 
         const organizationId = resolveAuthenticatedOrganization(req);
 
-        // Enforce document ownership
+        // Enforce document ownership and type isolation
         const docCheck = await query(
-            "SELECT id, organization_id FROM documents WHERE id = $1",
+            "SELECT id, organization_id, document_type FROM documents WHERE id = $1",
             [documentId.trim()]
         );
         if (docCheck.rows.length === 0) {
@@ -129,6 +131,12 @@ export async function analyzeInspection(req, res, next) {
             return res.status(403).json({
                 success: false,
                 message: "Forbidden: document belongs to another organization.",
+            });
+        }
+        if (docCheck.rows[0].document_type !== "inspection") {
+            return res.status(400).json({
+                success: false,
+                message: "INVALID_DOCUMENT_TYPE",
             });
         }
 
@@ -304,7 +312,14 @@ export async function assessRisk(req, res, next) {
             documentId: documentId || null,
             riskAssessment: result.riskAssessment || null,
             recommendation: result.recommendation || null,
-            citations: result.citations || [],
+            citations: (result.citations && result.citations.length > 0)
+                ? result.citations
+                : validChunks.map(c => ({
+                    documentId: c.documentId,
+                    filename: c.filename,
+                    page: c.page,
+                    chunkIndex: c.chunkIndex,
+                })),
         });
     } catch (error) {
         next(error);
@@ -463,21 +478,28 @@ export async function generateApprovalNoteDocx(req, res, next) {
         });
 
         // Bind generated report to authenticated organization in reports repository
+        let artifactId = "unknown";
         try {
-            await createReportRecord({
+            const report = await createReportRecord({
                 organizationId,
                 title: data.subject || "Approval Note",
                 filename: result.filename,
                 status: "GENERATED",
             });
+            if (report && report.id) {
+                artifactId = report.id;
+            }
         } catch (repErr) {
             console.warn("[InspectionController] Warning: Could not persist report record:", repErr.message);
         }
 
         return res.status(200).json({
             success: true,
-            filename: result.filename,
-            downloadUrl: `/api/v1/inspection/download/${result.filename}`,
+            artifact: {
+                id: artifactId,
+                filename: result.filename,
+                downloadUrl: `/api/v1/inspection/download/${result.filename}`
+            }
         });
     } catch (error) {
         next(error);
@@ -608,14 +630,22 @@ export async function runWorkflow(req, res, next) {
         // Step 5: Document Authorization & Organization Validation
         if (req.body && req.body.documentId) {
             const docCheck = await query(
-                "SELECT id, organization_id FROM documents WHERE id = $1",
+                "SELECT id, organization_id, document_type FROM documents WHERE id = $1",
                 [req.body.documentId.trim()]
             );
-            if (docCheck.rows.length > 0 && docCheck.rows[0].organization_id !== organizationId) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Forbidden: document belongs to another organization.",
-                });
+            if (docCheck.rows.length > 0) {
+                if (docCheck.rows[0].organization_id !== organizationId) {
+                    return res.status(403).json({
+                        success: false,
+                        message: "Forbidden: document belongs to another organization.",
+                    });
+                }
+                if (docCheck.rows[0].document_type !== "inspection") {
+                    return res.status(400).json({
+                        success: false,
+                        message: "INVALID_DOCUMENT_TYPE",
+                    });
+                }
             }
         }
 
@@ -640,6 +670,7 @@ export async function runWorkflow(req, res, next) {
                     originalFilename: workflowResult.filename || "Inspection Report",
                     status: "Indexed",
                     chunksStored: workflowResult.chunksStored || 0,
+                    documentType: "inspection",
                 });
             }
         }

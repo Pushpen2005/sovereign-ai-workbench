@@ -8,6 +8,7 @@ import {
 
 const router = express.Router();
 
+router.post("/", askQuestion);
 router.post("/ask", askQuestion);
 router.get("/history", getHistory);
 router.get("/conversations/:id/messages", getConversationMessages);

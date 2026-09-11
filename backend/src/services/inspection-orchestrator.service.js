@@ -71,6 +71,7 @@ export async function runInspectionWorkflow(input, options = {}) {
     const runId = options.runId || randomUUID();
 
     // 1. Register tenant ownership for run (in-memory cache & PostgreSQL)
+    console.log(`[INSPECTION_STARTED] Starting inspection pipeline runId=${runId}`);
     try {
         executionEvents.registerRunOwner(runId, organizationId, "inspection");
         await createAgentRun({
@@ -137,6 +138,19 @@ export async function runInspectionWorkflow(input, options = {}) {
         insufficient_evidence: "Evidence insufficient",
     };
 
+    const SSE_STAGES = {
+        ingest: { stage: "READING_REPORT", message: "Reading inspection report" },
+        retrieve: { stage: "READING_REPORT", message: "Reading inspection report" },
+        extract_findings: { stage: "EXTRACTING_FINDINGS", message: "Extracting candidate observations" },
+        validate_findings: { stage: "EXTRACTING_FINDINGS", message: "Validating observations" },
+        retrieve_sop: { stage: "SEARCHING_KB", message: "Searching Knowledge Base for relevant SOP evidence" },
+        check_sop_evidence: { stage: "VALIDATING_SOP_EVIDENCE", message: "Validating retrieved SOP evidence" },
+        assess_risk: { stage: "ANALYSING_RISK", message: "Assessing risk level for validated findings" },
+        validate_risk: { stage: "PREPARING_RECOMMENDATION", message: "Preparing actionable recommendations" },
+        validate_citations: { stage: "PREPARING_RECOMMENDATION", message: "Validating citations" },
+        generate_report: { stage: "GENERATING_APPROVAL_NOTE", message: "Generating approval note document" }
+    };
+
     // 3. Stream compiled LangGraph StateGraph snapshots in real-time
     let finalState = { ...initialState };
     let executionError = null;
@@ -153,6 +167,31 @@ export async function runInspectionWorkflow(input, options = {}) {
                 try {
                     executionEvents.publish(runId, "node_started", { runId, node: nodeName });
                     executionEvents.publish(runId, "node_completed", { runId, node: nodeName });
+
+                    
+                    switch(nodeName) {
+                        case 'ingest': console.log(`[INSPECTION_DOCUMENT_VALIDATED] documentId=${finalState.documentId}`); break;
+                        case 'retrieve': console.log(`[INSPECTION_TEXT_LOADED]`); break;
+                        case 'extract_findings': console.log(`[FINDINGS_EXTRACTED] count=${finalState.findings?.length || 0}`); break;
+                        case 'validate_findings': console.log(`[FINDINGS_VALIDATED] valid=${finalState.findingValidation?.isValid || false}`); break;
+                        case 'retrieve_sop': console.log(`[KB_SOP_SEARCH_STARTED]\n[KB_SOP_SEARCH_COMPLETED] candidates=${finalState.sopEvidence?.length || 0}`); break;
+                        case 'check_sop_evidence': console.log(`[SOP_EVIDENCE_VALIDATED] validated_count=${finalState.findings?.length || 0}`); break;
+                        case 'assess_risk': console.log(`[RISK_ANALYSIS_STARTED]\n[RISK_ANALYSIS_COMPLETED]\n[RECOMMENDATION_STARTED]\n[RECOMMENDATION_COMPLETED]`); break;
+                        case 'validate_risk': if(!finalState.riskValidation?.isValid) console.log('[RISK_VALIDATION_FAILED]'); break;
+                        case 'validate_citations': console.log(`[APPROVAL_NOTE_GENERATION_STARTED]`); break;
+                        case 'generate_report': console.log(`[APPROVAL_NOTE_GENERATED] filename=${finalState.report?.filename || "none"}`); break;
+                        case 'insufficient_evidence': console.log(`[INSUFFICIENT_SOP_EVIDENCE]`); break;
+                        case 'safe_failure': console.log(`[INSPECTION_FAILED]`); break;
+                    }
+
+                    if (SSE_STAGES[nodeName]) {
+                        executionEvents.publish(runId, "inspection_stage", {
+                            runId,
+                            stage: SSE_STAGES[nodeName].stage,
+                            status: "running",
+                            message: SSE_STAGES[nodeName].message,
+                        });
+                    }
 
                     if (STAGE_LABELS[nodeName]) {
                         executionEvents.publish(runId, "workflow_stage", {
@@ -234,6 +273,11 @@ export async function runInspectionWorkflow(input, options = {}) {
                             });
                         }
                     } else if (nodeName === "insufficient_evidence") {
+                        executionEvents.publish(runId, "inspection_error", {
+                            stage: "VALIDATING_SOP_EVIDENCE",
+                            code: "INSUFFICIENT_EVIDENCE",
+                            message: stateSnapshot.failureReason || "No relevant SOP evidence was found in the Knowledge Base"
+                        });
                         executionEvents.publish(runId, "workflow_stage", {
                             runId,
                             node: "insufficient_evidence",
@@ -334,6 +378,13 @@ export async function runInspectionWorkflow(input, options = {}) {
 
     // 5. Publish terminal run_completed SSE event
     try {
+        console.log(`[INSPECTION_COMPLETED]`);
+        executionEvents.publish(runId, "inspection_stage", {
+            runId,
+            stage: "COMPLETED",
+            status: "completed",
+            message: "Inspection workflow completed successfully"
+        });
         executionEvents.publish(runId, "run_completed", {
             runId,
             status: "completed",

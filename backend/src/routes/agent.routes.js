@@ -34,5 +34,6 @@ router.get("/runs", getAgentRuns);
 router.get("/runs/:runId", getAgentRun);
 router.get("/runs/:runId/steps", getAgentRunSteps);
 router.get("/runs/:runId/stream", streamAgentRun);
+router.get("/runs/:runId/events", streamAgentRun);
 
 export default router;

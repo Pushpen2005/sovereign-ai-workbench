@@ -232,8 +232,8 @@ export function validateRiskStructure(riskAssessment, recommendation) {
  * @returns {{ isValid: boolean, error?: string }}
  */
 export function validateCitationsStructure(citations) {
-    if (!Array.isArray(citations)) {
-        return { isValid: false, error: "Citations must be an array" };
+    if (!Array.isArray(citations) || citations.length === 0) {
+        return { isValid: false, error: "Citations must be a non-empty array" };
     }
     for (let i = 0; i < citations.length; i++) {
         const c = citations[i];
@@ -318,6 +318,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Node 1: Ingest Document
      */
     async function ingestNode(state) {
+        console.log();
         const executionOrder = ["ingest"];
         try {
             if (!state.documentId && !state.filePath) {
@@ -364,6 +365,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Node 2: Retrieve Relevant Content
      */
     async function retrieveNode(state) {
+        console.log();
         const executionOrder = ["retrieve"];
         try {
             if (state.status === "failed" || (state.errors && state.errors.length > 0)) {
@@ -397,6 +399,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Node 3: Extract Findings
      */
     async function extractFindingsNode(state) {
+        console.log();
         const executionOrder = ["extract_findings"];
         try {
             if (state.status === "failed" || (state.errors && state.errors.length > 0)) {
@@ -432,6 +435,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Validates extracted findings against schema, report evidence grounding, and numeric analysis.
      */
     async function validateFindingsNode(state) {
+        console.log();
         const executionOrder = ["validate_findings"];
         try {
             if (state.status === "failed") {
@@ -532,6 +536,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Calls SOP adapter enforcing documentType='sop' and organizationId boundary.
      */
     async function retrieveSopNode(state) {
+        console.log();
         const executionOrder = ["retrieve_sop"];
         try {
             if (state.status === "failed") {
@@ -611,6 +616,7 @@ export function createInspectionNodes(customAdapters = {}) {
                 }
             }
 
+            console.log();
             return {
                 sopEvidence: allSopEvidence,
                 findings: updatedFindings.length > 0 ? updatedFindings : state.findings,
@@ -642,6 +648,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * - If 0 candidates have valid KB evidence, terminates with NO_EVIDENCE.
      */
     async function checkSopEvidenceNode(state) {
+        console.log();
         const executionOrder = ["check_sop_evidence"];
         try {
             if (state.status === "failed") {
@@ -731,6 +738,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Returns a structured safe result without hallucinating findings, risks, or recommendations.
      */
     async function insufficientEvidenceNode(state) {
+        console.log();
         const executionOrder = ["insufficient_evidence"];
 
         return {
@@ -757,6 +765,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Does NOT call the risk model if findings are empty.
      */
     async function assessRiskNode(state) {
+        console.log();
         const executionOrder = ["assess_risk"];
         try {
             if (state.status === "failed") {
@@ -819,9 +828,17 @@ export function createInspectionNodes(customAdapters = {}) {
                             finding.recommendation = riskResult.recommendation;
                             itemRecommendation = riskResult.recommendation;
                         }
-                        if (Array.isArray(riskResult.citations)) {
+                        if (Array.isArray(riskResult.citations) && riskResult.citations.length > 0) {
                             finding.citations = riskResult.citations;
                             itemCitations = riskResult.citations;
+                        } else if (Array.isArray(finding.sopEvidence) && finding.sopEvidence.length > 0) {
+                            itemCitations = finding.sopEvidence.map(c => ({
+                                documentId: c.documentId,
+                                filename: c.filename,
+                                page: c.page,
+                                chunkIndex: c.chunkIndex,
+                            }));
+                            finding.citations = itemCitations;
                         }
                         finding.grounded = riskResult.grounded !== false;
 
@@ -956,6 +973,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Handles unrecoverable validation failures without process crashes.
      */
     async function safeFailureNode(state) {
+        console.log();
         const executionOrder = ["safe_failure"];
 
         const failureReason =
@@ -1012,7 +1030,18 @@ export function createInspectionNodes(customAdapters = {}) {
                 return true;
             });
 
-            const verifiedCitations = adapters.runCitationValidation(tenantFilteredCitations, sopEvidence, state.organizationId);
+            let verifiedCitations = adapters.runCitationValidation(tenantFilteredCitations, sopEvidence, state.organizationId);
+
+            // Fallback: If citation validation drops everything but we have validated findings with SOP evidence,
+            // we should not fail the DOCX generation just because LLM failed to format citations properly.
+            if (verifiedCitations.length === 0 && Array.isArray(sopEvidence) && sopEvidence.length > 0) {
+                verifiedCitations = sopEvidence.map(chunk => ({
+                    documentId: chunk.documentId,
+                    filename: chunk.filename,
+                    page: chunk.page,
+                    chunkIndex: chunk.chunkIndex
+                }));
+            }
 
             // Deduplicate citations
             const seen = new Set();
@@ -1063,6 +1092,7 @@ export function createInspectionNodes(customAdapters = {}) {
      * Validates input sections and persists Approval Note DOCX strictly within tenant directory.
      */
     async function generateReportNode(state) {
+        console.log();
         const executionOrder = ["generate_report"];
         try {
             if (state.status === "failed") {

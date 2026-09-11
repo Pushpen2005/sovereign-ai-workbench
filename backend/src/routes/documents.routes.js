@@ -26,6 +26,9 @@ router.get("/:id", getDocument);
 // POST /api/v1/documents - Upload and ingest document with PostgreSQL tracking
 router.post("/", upload.single("document"), uploadDocument);
 
+// POST /api/v1/documents/upload - Alias for upload
+router.post("/upload", upload.single("document"), uploadDocument);
+
 // DELETE /api/v1/documents/:id - Delete document (physical file, vectors, and DB record)
 router.delete("/:id", deleteDocument);
 

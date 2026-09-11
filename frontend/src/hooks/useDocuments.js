@@ -28,6 +28,7 @@ export function useDocuments(options = {}) {
   const actions = useDocumentActions();
   const {
     setDocuments,
+    removeDocument,
     uploadStart,
     uploadSuccess,
     uploadError,
@@ -119,13 +120,16 @@ export function useDocuments(options = {}) {
       if (!documentId) return;
       try {
         await deleteDocumentApi(documentId);
+        // Immediately remove from local state for instant UI responsiveness
+        removeDocument(documentId);
+        // Refresh to guarantee PostgreSQL synchronization
         await loadDocuments();
       } catch (err) {
         setActionError(err?.message || 'Unable to delete document.');
         throw err;
       }
     },
-    [loadDocuments],
+    [removeDocument, loadDocuments],
   );
 
   const clearError = useCallback(() => {
