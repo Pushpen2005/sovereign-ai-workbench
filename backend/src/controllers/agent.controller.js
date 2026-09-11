@@ -23,20 +23,43 @@ import { executionEvents } from "../services/execution-events.service.js";
  */
 export async function runAgent(req, res, next) {
     try {
-        const { goal, maxSteps, timeoutMs } = req.body || {};
+        const { goal, task, maxSteps, timeoutMs, documentId } = req.body || {};
+        
+        const finalGoal = goal || task;
 
-        if (!goal || typeof goal !== "string" || !goal.trim()) {
+        if (!finalGoal || typeof finalGoal !== "string" || !finalGoal.trim()) {
             return res.status(400).json({
                 success: false,
-                message: "A non-empty 'goal' string is required.",
+                message: "A non-empty 'goal' or 'task' string is required.",
             });
         }
 
         const organizationId = resolveAuthenticatedOrganization(req);
         const userId = req.user?.id || req.user?.userId || null;
 
+        if (documentId) {
+            if (typeof documentId !== "string" || !documentId.trim() || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(documentId.trim())) {
+                return res.status(400).json({
+                    success: false,
+                    code: "VALIDATION_ERROR",
+                    message: "Malformed documentId. Must be a valid UUID.",
+                });
+            }
+
+            const { runInspectionAgent } = await import("../services/inspection-agent.service.js");
+            const result = await runInspectionAgent({
+                documentId: documentId.trim(),
+                goal: finalGoal.trim(),
+                maxSteps: Number.isInteger(maxSteps) ? maxSteps : undefined,
+                timeoutMs: Number.isInteger(timeoutMs) ? timeoutMs : undefined,
+                organizationId,
+                userId,
+            });
+            return res.status(200).json(result);
+        }
+
         const result = await runAgentLoop({
-            goal: goal.trim(),
+            goal: finalGoal.trim(),
             maxSteps: Number.isInteger(maxSteps) ? maxSteps : undefined,
             timeoutMs: Number.isInteger(timeoutMs) ? timeoutMs : undefined,
             organizationId,
@@ -104,7 +127,12 @@ export async function getAgentRun(req, res, next) {
 
         return res.status(200).json({
             success: true,
-            data: run,
+            run: {
+                id: run.runId || run.id,
+                task: run.goal,
+                status: run.status?.toUpperCase() || "RUNNING",
+                currentStep: run.currentStep || "idle"
+            }
         });
     } catch (error) {
         next(error);

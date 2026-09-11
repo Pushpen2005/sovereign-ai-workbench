@@ -106,10 +106,11 @@ export async function analyzeInspection(req, res, next) {
     try {
         const { documentId, task } = req.body || {};
 
-        if (!documentId || typeof documentId !== "string" || !documentId.trim()) {
+        if (!documentId || typeof documentId !== "string" || !documentId.trim() || !/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(documentId.trim())) {
             return res.status(400).json({
                 success: false,
-                message: "documentId is required",
+                code: "VALIDATION_ERROR",
+                message: "Malformed documentId. Must be a valid UUID.",
             });
         }
 
@@ -477,21 +478,28 @@ export async function generateApprovalNoteDocx(req, res, next) {
         });
 
         // Bind generated report to authenticated organization in reports repository
+        let artifactId = "unknown";
         try {
-            await createReportRecord({
+            const report = await createReportRecord({
                 organizationId,
                 title: data.subject || "Approval Note",
                 filename: result.filename,
                 status: "GENERATED",
             });
+            if (report && report.id) {
+                artifactId = report.id;
+            }
         } catch (repErr) {
             console.warn("[InspectionController] Warning: Could not persist report record:", repErr.message);
         }
 
         return res.status(200).json({
             success: true,
-            filename: result.filename,
-            downloadUrl: `/api/v1/inspection/download/${result.filename}`,
+            artifact: {
+                id: artifactId,
+                filename: result.filename,
+                downloadUrl: `/api/v1/inspection/download/${result.filename}`
+            }
         });
     } catch (error) {
         next(error);
