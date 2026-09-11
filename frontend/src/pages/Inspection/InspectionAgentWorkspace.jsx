@@ -24,7 +24,7 @@ const AGENT_STEPS = [
 ];
 
 export function InspectionAgentWorkspace() {
-  const { documents, selectedDocument, selectDocument } = useDocuments();
+  const { documents, selectedDocument, selectDocument } = useDocuments({ documentType: 'inspection' });
 
   const [selectedDocId, setSelectedDocId] = useState('');
   const [isRunning, setIsRunning] = useState(false);

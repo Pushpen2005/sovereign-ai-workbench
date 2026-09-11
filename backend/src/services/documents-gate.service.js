@@ -59,7 +59,7 @@ export async function checkDocumentsGate(organizationId, documentId = null) {
       const docRes = await query(
         `SELECT id, organization_id, filename, original_filename, status, chunks_stored, document_type
          FROM documents
-         WHERE id = $1`,
+         WHERE id = $1 AND document_type = 'other'`,
         [cleanDocId]
       );
 
@@ -124,7 +124,8 @@ export async function checkDocumentsGate(organizationId, documentId = null) {
        FROM documents
        WHERE organization_id = $1
          AND status = 'Indexed'
-         AND chunks_stored > 0`,
+         AND chunks_stored > 0
+         AND document_type = 'other'`,
       [cleanOrgId]
     );
 

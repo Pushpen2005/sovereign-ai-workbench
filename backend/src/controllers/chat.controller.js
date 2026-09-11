@@ -23,7 +23,7 @@ import { telemetryService } from "../services/telemetry.service.js";
  */
 export async function askQuestion(req, res, next) {
   try {
-    const { question, documentId, conversationId, model } = req.body || {};
+    const { question, documentId, conversationId, model, mode } = req.body || {};
 
     if (typeof question !== "string" || !question.trim()) {
       return res.status(400).json({
@@ -272,6 +272,7 @@ Answer:`;
           model: routing.selectedModel,
           onChunk,
           stream: true,
+          documentType: "other",
         });
       }
 
@@ -354,6 +355,7 @@ Answer:`;
         allowedDocumentIds,
         organizationId,
         model: routing.selectedModel,
+        documentType: "other",
       });
     }
 

@@ -63,6 +63,7 @@ export async function searchSimilarChunks(
     // Validate documentId
     if (
         documentId !== undefined &&
+        documentId !== null &&
         (
             typeof documentId !== "string" ||
             documentId.trim().length === 0

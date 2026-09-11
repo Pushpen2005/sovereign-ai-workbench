@@ -99,7 +99,7 @@ export function DocumentsPage() {
     deleteDocument,
     selectDocument,
     resetUpload,
-  } = useDocuments();
+  } = useDocuments({ documentType: 'other' });
 
   const [activeFilter, setActiveFilter] = useState('All');
   const [explicitUploadType, setExplicitUploadType] = useState('inspection');

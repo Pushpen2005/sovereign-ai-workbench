@@ -83,6 +83,7 @@ export async function ingestInspection(req, res, next) {
                 originalFilename: req.file?.originalname || result.filename || "Inspection Report",
                 status: "Indexed",
                 chunksStored: result.chunksStored || 0,
+                documentType: "inspection",
             });
         }
 
@@ -114,9 +115,9 @@ export async function analyzeInspection(req, res, next) {
 
         const organizationId = resolveAuthenticatedOrganization(req);
 
-        // Enforce document ownership
+        // Enforce document ownership and type isolation
         const docCheck = await query(
-            "SELECT id, organization_id FROM documents WHERE id = $1",
+            "SELECT id, organization_id, document_type FROM documents WHERE id = $1",
             [documentId.trim()]
         );
         if (docCheck.rows.length === 0) {
@@ -129,6 +130,12 @@ export async function analyzeInspection(req, res, next) {
             return res.status(403).json({
                 success: false,
                 message: "Forbidden: document belongs to another organization.",
+            });
+        }
+        if (docCheck.rows[0].document_type !== "inspection") {
+            return res.status(400).json({
+                success: false,
+                message: "INVALID_DOCUMENT_TYPE",
             });
         }
 
@@ -615,14 +622,22 @@ export async function runWorkflow(req, res, next) {
         // Step 5: Document Authorization & Organization Validation
         if (req.body && req.body.documentId) {
             const docCheck = await query(
-                "SELECT id, organization_id FROM documents WHERE id = $1",
+                "SELECT id, organization_id, document_type FROM documents WHERE id = $1",
                 [req.body.documentId.trim()]
             );
-            if (docCheck.rows.length > 0 && docCheck.rows[0].organization_id !== organizationId) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Forbidden: document belongs to another organization.",
-                });
+            if (docCheck.rows.length > 0) {
+                if (docCheck.rows[0].organization_id !== organizationId) {
+                    return res.status(403).json({
+                        success: false,
+                        message: "Forbidden: document belongs to another organization.",
+                    });
+                }
+                if (docCheck.rows[0].document_type !== "inspection") {
+                    return res.status(400).json({
+                        success: false,
+                        message: "INVALID_DOCUMENT_TYPE",
+                    });
+                }
             }
         }
 
@@ -647,6 +662,7 @@ export async function runWorkflow(req, res, next) {
                     originalFilename: workflowResult.filename || "Inspection Report",
                     status: "Indexed",
                     chunksStored: workflowResult.chunksStored || 0,
+                    documentType: "inspection",
                 });
             }
         }
