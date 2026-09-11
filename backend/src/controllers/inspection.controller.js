@@ -304,7 +304,14 @@ export async function assessRisk(req, res, next) {
             documentId: documentId || null,
             riskAssessment: result.riskAssessment || null,
             recommendation: result.recommendation || null,
-            citations: result.citations || [],
+            citations: (result.citations && result.citations.length > 0)
+                ? result.citations
+                : validChunks.map(c => ({
+                    documentId: c.documentId,
+                    filename: c.filename,
+                    page: c.page,
+                    chunkIndex: c.chunkIndex,
+                })),
         });
     } catch (error) {
         next(error);

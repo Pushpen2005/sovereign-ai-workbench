@@ -9,6 +9,7 @@ import {
   getConversationWithMessages,
   getChatStats,
 } from "../services/chat.service.js";
+import { checkDocumentsGate } from "../services/documents-gate.service.js";
 import { routeTask, RouterError, isModelAllowed } from "../../../ai-service/router/modelRouter.js";
 import { telemetryService } from "../services/telemetry.service.js";
 
@@ -54,33 +55,125 @@ export async function askQuestion(req, res, next) {
 
     const organizationId = resolveAuthenticatedOrganization(req);
 
-    // Document Authorization & Scoping
+    // ── Authoritative Documents Gate & Scoping ───────────────────────────
+    const isGeneralChatMode = (mode === "GENERAL_CHAT" || mode === "general");
     let allowedDocumentIds = undefined;
-    if (documentId) {
-      const docCheck = await query(
-        "SELECT id, organization_id FROM documents WHERE id = $1",
-        [documentId.trim()]
-      );
-      if (docCheck.rows.length === 0) {
-        return res.status(404).json({
-          success: false,
-          message: `Document '${documentId}' not found`,
-        });
-      }
-      if (docCheck.rows[0].organization_id !== organizationId) {
+
+    if (!isGeneralChatMode) {
+      const gate = await checkDocumentsGate(organizationId, documentId);
+
+      if (gate.forbidden) {
         return res.status(403).json({
           success: false,
           message: "Forbidden: document belongs to another organization",
         });
       }
-      allowedDocumentIds = [documentId.trim()];
-    } else {
-      // General RAG search across caller's organization
-      const orgDocs = await query(
-        "SELECT id FROM documents WHERE organization_id = $1",
-        [organizationId]
-      );
-      allowedDocumentIds = orgDocs.rows.map((row) => row.id);
+
+      if (!gate.available) {
+        const NO_DOC_ANSWER = "No uploaded document is currently available for this AI Search query.";
+
+        // Resolve or create persistent conversation
+        const conversation = await getOrCreateConversation({
+          conversationId: conversationId?.trim() || null,
+          organizationId,
+          question: question.trim(),
+        });
+
+        const exchange = await saveChatExchange({
+          conversationId: conversation.id,
+          organizationId,
+          question: question.trim(),
+          answer: NO_DOC_ANSWER,
+          sources: [],
+          documentId: documentId?.trim() || null,
+        });
+
+        telemetryService.recordAiExecution({
+          runId: conversation.id,
+          organizationId,
+          taskType: "DOCUMENT_ANALYSIS",
+          selectedModel: "gemma-2-2b-it-4bit",
+          local: true,
+          status: "completed",
+          totalLatencyMs: 0,
+          modelLatencyMs: 0,
+          retrievalLatencyMs: 0,
+        });
+
+        const isStream = Boolean(
+          req.query.stream === "true" ||
+          req.body?.stream === true ||
+          req.headers.accept === "text/event-stream"
+        );
+
+        if (isStream) {
+          res.writeHead(200, {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+          });
+          res.flushHeaders?.();
+
+          res.write(`event: metadata\ndata: ${JSON.stringify({
+            taskType: "DOCUMENT_ANALYSIS",
+            selectedModel: "gemma-2-2b-it-4bit",
+            provider: "MLX",
+            runtime: "MLX :8080",
+            local: true,
+            isFallback: false,
+          })}\n\n`);
+
+          res.write(`event: token\ndata: ${JSON.stringify({ token: NO_DOC_ANSWER })}\n\n`);
+
+          res.write(`event: completed\ndata: ${JSON.stringify({
+            success: true,
+            grounded: false,
+            conversationId: conversation.id,
+            messageId: exchange.assistantMessage.id,
+            answer: NO_DOC_ANSWER,
+            reason: "no_documents_available",
+            sources: [],
+            citations: [],
+            citationIntegrity: null,
+            claimGrounding: null,
+            taskType: "DOCUMENT_ANALYSIS",
+            selectedModel: "gemma-2-2b-it-4bit",
+            provider: "MLX",
+            runtime: "MLX :8080",
+            local: true,
+            isFallback: false,
+            timings: { totalMs: 0 },
+          })}\n\n`);
+
+          return res.end();
+        }
+
+        return res.status(200).json({
+          success: true,
+          grounded: false,
+          answer: NO_DOC_ANSWER,
+          citations: [],
+          reason: "no_documents_available",
+          conversationId: conversation.id,
+          question: question.trim(),
+          documentId: documentId?.trim() || null,
+          sources: [],
+          citationIntegrity: null,
+          claimGrounding: null,
+          messageId: exchange.assistantMessage.id,
+          taskType: "DOCUMENT_ANALYSIS",
+          selectedModel: "gemma-2-2b-it-4bit",
+          provider: "MLX",
+          runtime: "MLX :8080",
+          routingReason: "No active documents available in library",
+          local: true,
+          isFallback: false,
+          timings: { totalMs: 0 },
+        });
+      }
+
+      allowedDocumentIds = gate.allowedDocumentIds;
     }
 
     // ── PR #23: Route the question to the appropriate local model ────────────
@@ -143,7 +236,7 @@ export async function askQuestion(req, res, next) {
       };
 
       let result;
-      if (routing.taskType === "CODING" && !documentId) {
+      if (routing.taskType === "CODING" && !documentId && isGeneralChatMode) {
         const codingPrompt = `You are a skilled software engineering assistant.
 Provide clean, idiomatic, well-commented code that directly addresses the following user request.
 Do not require external documents or reference context.
@@ -157,7 +250,7 @@ ${question.trim()}`;
           sources: [],
           grounded: true,
         };
-      } else if (routing.taskType === "GENERAL_CHAT" && !documentId && (!allowedDocumentIds || allowedDocumentIds.length === 0)) {
+      } else if (isGeneralChatMode) {
         const generalPrompt = `You are SovereignAI, a helpful, precise, and sovereign AI assistant.
 Answer the user's question clearly and concisely.
 
@@ -226,7 +319,7 @@ Answer:`;
     }
 
     let result;
-    if (routing.taskType === "CODING" && !documentId) {
+    if (routing.taskType === "CODING" && !documentId && isGeneralChatMode) {
       // Direct code generation using the routed coding model (no document retrieval required)
       const codingPrompt = `You are a skilled software engineering assistant.
 Provide clean, idiomatic, well-commented code that directly addresses the following user request.
@@ -240,7 +333,7 @@ ${question.trim()}`;
         answer: codeAnswer,
         sources: [],
       };
-    } else if (routing.taskType === "GENERAL_CHAT" && !documentId && (!allowedDocumentIds || allowedDocumentIds.length === 0)) {
+    } else if (isGeneralChatMode) {
       const generalPrompt = `You are SovereignAI, a helpful, precise, and sovereign AI assistant.
 Answer the user's question clearly and concisely.
 

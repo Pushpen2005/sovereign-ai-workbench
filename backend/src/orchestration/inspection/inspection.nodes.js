@@ -819,9 +819,17 @@ export function createInspectionNodes(customAdapters = {}) {
                             finding.recommendation = riskResult.recommendation;
                             itemRecommendation = riskResult.recommendation;
                         }
-                        if (Array.isArray(riskResult.citations)) {
+                        if (Array.isArray(riskResult.citations) && riskResult.citations.length > 0) {
                             finding.citations = riskResult.citations;
                             itemCitations = riskResult.citations;
+                        } else if (Array.isArray(finding.sopEvidence) && finding.sopEvidence.length > 0) {
+                            itemCitations = finding.sopEvidence.map(c => ({
+                                documentId: c.documentId,
+                                filename: c.filename,
+                                page: c.page,
+                                chunkIndex: c.chunkIndex,
+                            }));
+                            finding.citations = itemCitations;
                         }
                         finding.grounded = riskResult.grounded !== false;
 

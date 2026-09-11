@@ -6,7 +6,7 @@
  */
 
 import React, { useRef, useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button.jsx';
 import { useChat } from '../../hooks/useChat.js';
 import { useDocuments } from '../../hooks/useDocuments.js';

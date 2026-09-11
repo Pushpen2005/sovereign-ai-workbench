@@ -477,9 +477,9 @@ export async function deleteDocumentById(documentId, organizationId) {
 
   const cleanOrgId = organizationId.trim();
 
-  // 1. Verify ownership in PostgreSQL
+  // 1. Verify ownership and identify document lifecycle attributes in PostgreSQL
   const docCheck = await query(
-    "SELECT id, organization_id, filename FROM documents WHERE id = $1 AND organization_id = $2",
+    "SELECT id, organization_id, filename, original_filename, status, chunks_stored, document_type FROM documents WHERE id = $1 AND organization_id = $2",
     [cleanDocId, cleanOrgId]
   );
 
@@ -502,6 +502,9 @@ export async function deleteDocumentById(documentId, organizationId) {
   }
 
   const doc = docCheck.rows[0];
+  console.log(
+    `[DocumentDelete] IDENTIFIED document id=${doc.id} org=${doc.organization_id} filename=${doc.filename} status=${doc.status} chunks=${doc.chunks_stored} type=${doc.document_type || 'normal'}`
+  );
 
   // 2. Safely unlink physical file from tenant directory
   try {
@@ -515,12 +518,14 @@ export async function deleteDocumentById(documentId, organizationId) {
   // 3. Delete Qdrant vectors strictly scoped to (documentId, organizationId)
   try {
     await deleteChunksByDocumentId(cleanDocId, cleanOrgId);
+    console.log(`[DocumentDelete] Qdrant vectors deleted for documentId=${cleanDocId} organizationId=${cleanOrgId}`);
   } catch (vecErr) {
     console.warn(`[DocumentsService] Warning during vector deletion: ${vecErr.message}`);
   }
 
-  // 4. Delete PostgreSQL record
+  // 4. Delete PostgreSQL record strictly scoped to (documentId, organizationId)
   await deleteDocumentRecord(cleanDocId, cleanOrgId);
+  console.log(`[DocumentDelete] PostgreSQL record deleted for documentId=${cleanDocId}`);
 
   return true;
 }

@@ -295,10 +295,23 @@ export async function answerQuestion(question, options = {}) {
     if (!options.documentId && allowedDocumentIds && allowedDocumentIds.length === 0) {
         timings.totalMs = Date.now() - tStart;
         return {
-            answer: NO_CONTEXT_MESSAGE,
+            answer: "No uploaded document is currently available for this AI Search query.",
             grounded: false,
             sources: [],
-            reason: "insufficient_retrieval_evidence",
+            citations: [],
+            reason: "no_documents_available",
+            timings,
+        };
+    }
+
+    if (options.documentId && allowedDocumentIds && !allowedDocumentIds.includes(options.documentId.trim())) {
+        timings.totalMs = Date.now() - tStart;
+        return {
+            answer: "No uploaded document is currently available for this AI Search query.",
+            grounded: false,
+            sources: [],
+            citations: [],
+            reason: "no_documents_available",
             timings,
         };
     }
@@ -336,6 +349,7 @@ export async function answerQuestion(question, options = {}) {
             answer: NO_CONTEXT_MESSAGE,
             grounded: false,
             sources: [],
+            citations: [],
             reason: "insufficient_retrieval_evidence",
             timings,
         };
@@ -367,6 +381,7 @@ export async function answerQuestion(question, options = {}) {
             answer: NO_CONTEXT_MESSAGE,
             grounded: false,
             sources: [],
+            citations: [],
             reason: "insufficient_retrieval_evidence",
             timings,
         };
