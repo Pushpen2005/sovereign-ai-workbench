@@ -5,10 +5,11 @@
  * Local Multimodal Vision Workspace for industrial equipment images & engineering drawings.
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { PageHeader } from '../../components/layout/PageHeader.jsx';
 import { Button } from '../../components/ui/Button.jsx';
 import { analyzeImage } from '../../api/vision.api.js';
+import { getAiHealth } from '../../api/ai.api.js';
 
 const PROMPT_PRESETS = [
   {
@@ -32,8 +33,33 @@ export function VisionPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [aiHealth, setAiHealth] = useState(null);
 
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchHealth = async () => {
+      try {
+        const health = await getAiHealth();
+        if (mounted && health) {
+          setAiHealth(health);
+        }
+      } catch (err) {
+        if (mounted) {
+          setAiHealth({
+            vision: { reachable: false, status: 'unavailable', model: 'qwen2.5-vl:3b-4bit', runtime: 'mlx_vlm' }
+          });
+        }
+      }
+    };
+    fetchHealth();
+    const interval = setInterval(fetchHealth, 30000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -195,16 +221,39 @@ export function VisionPage() {
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 text-[11px] font-mono">
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            Task: <strong className="text-blue-400">Vision Analysis</strong>
-          </span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            Model: <strong className="text-emerald-400">qwen2.5-vl:3b-4bit</strong>
-          </span>
-          <span className="px-2.5 py-1 rounded bg-slate-800 text-slate-300 border border-slate-700">
-            Runtime: <strong className="text-emerald-400">Local MLX</strong>
-          </span>
+        {/* Live Runtime Status */}
+        <div className="flex items-center gap-3 bg-slate-800/90 border border-slate-700 px-3.5 py-2 rounded-lg">
+          <div className="text-left">
+            <div className="text-[11px] font-semibold text-slate-300 uppercase tracking-wide">Vision</div>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span
+                className={`inline-block w-2 h-2 rounded-full ${
+                  aiHealth?.vision?.reachable && aiHealth?.vision?.status === 'ready'
+                    ? 'bg-emerald-400'
+                    : 'bg-red-500'
+                }`}
+              />
+              <span
+                className={`text-xs font-bold ${
+                  aiHealth?.vision?.reachable && aiHealth?.vision?.status === 'ready'
+                    ? 'text-emerald-400'
+                    : 'text-red-400'
+                }`}
+              >
+                {aiHealth?.vision?.reachable && aiHealth?.vision?.status === 'ready'
+                  ? 'Ready'
+                  : 'Offline'}
+              </span>
+            </div>
+          </div>
+          <div className="border-l border-slate-700 pl-3 text-[11px] font-mono">
+            <div className="text-slate-200 font-medium">
+              {aiHealth?.vision?.model || 'Qwen VL 3B'}
+            </div>
+            <div className="text-[10px] text-slate-400 uppercase">
+              {aiHealth?.vision?.runtime || 'MLX'}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -396,6 +445,35 @@ export function VisionPage() {
                   </ul>
                 </div>
               </>
+            ) : error ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-red-300 bg-red-50/40 rounded-xl gap-4">
+                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center text-red-600 text-xl font-bold">
+                  ✕
+                </div>
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                    VISION ANALYSIS
+                  </h4>
+                  <div className="inline-block px-3 py-1 rounded-full text-xs font-bold bg-red-100 text-red-800 border border-red-200">
+                    Status: Failed
+                  </div>
+                </div>
+                <div className="max-w-md bg-white p-3.5 rounded-lg border border-red-200 text-left w-full shadow-sm">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                    Reason:
+                  </span>
+                  <p className="text-xs font-mono text-red-600 break-words font-medium">
+                    {error}
+                  </p>
+                </div>
+                <Button
+                  variant="primary"
+                  onClick={handleAnalyze}
+                  disabled={!selectedFile || loading}
+                >
+                  Retry Analysis
+                </Button>
+              </div>
             ) : (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-8 text-slate-400 gap-2">
                 <div className="text-3xl">🔍</div>

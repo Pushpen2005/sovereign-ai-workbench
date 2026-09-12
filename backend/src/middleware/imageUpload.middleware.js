@@ -12,11 +12,12 @@
 
 import multer from "multer";
 import path from "path";
-import { loadImage } from "canvas";
+import { createCanvas, loadImage } from "canvas";
 
 export const MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 export const MIN_IMAGE_DIMENSION = 10;                // 10 pixels
 export const MAX_IMAGE_DIMENSION = 4096;              // 4096 pixels
+export const MAX_PROCESS_DIMENSION = 1024;            // 1024px maximum dimension for optimal MLX-VLM token efficiency
 
 export const VISION_ERROR_CODES = Object.freeze({
     INVALID_IMAGE: "INVALID_IMAGE",
@@ -165,6 +166,61 @@ export async function validateImageDecodeAndDimensions(buffer) {
     return {
         width: imgWidth,
         height: imgHeight,
+    };
+}
+
+/**
+ * Preprocesses and downscales image buffer to safe dimensions (max 1024px)
+ * while preserving aspect ratio and fine industrial details.
+ * Prevents excessive prompt token expansion on Apple Silicon M4.
+ *
+ * @param {Buffer} buffer - Raw image buffer
+ * @param {object} [options]
+ * @param {number} [options.maxDimension=1024]
+ * @returns {Promise<{ buffer: Buffer, width: number, height: number, wasResized: boolean, originalWidth: number, originalHeight: number, resizeLatencyMs: number }>}
+ */
+export async function preprocessAndResizeImage(buffer, options = {}) {
+    const t0 = Date.now();
+    const maxDim = options.maxDimension || MAX_PROCESS_DIMENSION;
+    const dims = await validateImageDecodeAndDimensions(buffer);
+
+    // If both dimensions are already within safe operational bounds, avoid re-encoding
+    if (dims.width <= maxDim && dims.height <= maxDim) {
+        return {
+            buffer,
+            width: dims.width,
+            height: dims.height,
+            wasResized: false,
+            originalWidth: dims.width,
+            originalHeight: dims.height,
+            resizeLatencyMs: Date.now() - t0,
+        };
+    }
+
+    // Aspect ratio preserved scaling
+    const scale = Math.min(maxDim / dims.width, maxDim / dims.height);
+    const targetWidth = Math.max(1, Math.round(dims.width * scale));
+    const targetHeight = Math.max(1, Math.round(dims.height * scale));
+
+    const img = await loadImage(buffer);
+    const canvas = createCanvas(targetWidth, targetHeight);
+    const ctx = canvas.getContext("2d");
+
+    ctx.patternQuality = "best";
+    ctx.quality = "best";
+    ctx.drawImage(img, 0, 0, targetWidth, targetHeight);
+
+    // Encode to high-quality JPEG (quality: 0.90) to maintain crisp edges and defect visibility
+    const resizedBuffer = canvas.toBuffer("image/jpeg", { quality: 0.90 });
+
+    return {
+        buffer: resizedBuffer,
+        width: targetWidth,
+        height: targetHeight,
+        wasResized: true,
+        originalWidth: dims.width,
+        originalHeight: dims.height,
+        resizeLatencyMs: Date.now() - t0,
     };
 }
 

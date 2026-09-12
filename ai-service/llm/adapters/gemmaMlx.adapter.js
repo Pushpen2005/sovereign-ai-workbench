@@ -6,20 +6,22 @@
  */
 
 import { BaseAdapter } from "./base.adapter.js";
+import { MODEL_RUNTIME_CONFIG } from "../../config/modelRuntime.config.js";
+import { logModelInference } from "../../utils/modelObservability.js";
 
 let gemmaQueue = Promise.resolve();
 
 function enqueueGemma(fn, options = {}) {
     const queueTimeoutMs = typeof options.queueTimeoutMs === "number"
         ? options.queueTimeoutMs
-        : Math.max(options.timeoutMs || 180000, 180000);
+        : Math.max(options.timeoutMs || MODEL_RUNTIME_CONFIG.INSPECTION.timeoutMs, 180000);
     
     return new Promise((resolve, reject) => {
         let isTimeout = false;
         const timer = setTimeout(() => {
             isTimeout = true;
             const err = new Error(`Gemma MLX queue wait exceeded ${queueTimeoutMs}ms — server is busy with another request`);
-            err.code = "LOCAL_RUNTIME_TIMEOUT";
+            err.code = "TIMEOUT";
             err.statusCode = 503;
             reject(err);
         }, queueTimeoutMs);
@@ -49,12 +51,12 @@ function enqueueGemma(fn, options = {}) {
 export class GemmaMlxAdapter extends BaseAdapter {
     constructor(options = {}) {
         super("gemma_mlx");
-        this.baseUrl = options.baseUrl || process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://host.docker.internal:8080";
-        this.defaultModel = options.defaultModel || process.env.GEMMA_MLX_MODEL || process.env.MLX_MODEL || "gemma-2-2b-it-4bit";
+        this.baseUrl = options.baseUrl || MODEL_RUNTIME_CONFIG.INSPECTION.url;
+        this.defaultModel = options.defaultModel || MODEL_RUNTIME_CONFIG.INSPECTION.model;
     }
 
     getBaseUrl() {
-        const url = process.env.GEMMA_MLX_URL || process.env.MLX_URL || this.baseUrl || "http://host.docker.internal:8080";
+        const url = this.baseUrl || MODEL_RUNTIME_CONFIG.INSPECTION.url;
         return url.trim().replace(/\/$/, "");
     }
 
@@ -74,15 +76,23 @@ export class GemmaMlxAdapter extends BaseAdapter {
                 }
             }
 
-            if (err.name === "TimeoutError" || err.name === "AbortError") {
+            const isTimeout =
+                err.name === "TimeoutError" ||
+                err.name === "AbortError" ||
+                err.cause?.name === "TimeoutError" ||
+                err.cause?.name === "AbortError" ||
+                err.message?.includes("timed out") ||
+                err.message?.includes("aborted");
+
+            if (isTimeout) {
                 const timeoutErr = new Error(`Gemma MLX request timed out: ${err.message}`);
-                timeoutErr.code = "LOCAL_RUNTIME_TIMEOUT";
+                timeoutErr.code = "TIMEOUT";
                 timeoutErr.statusCode = 504;
                 throw timeoutErr;
             }
 
             const unavailErr = new Error(`Local Gemma MLX runtime unavailable at ${baseUrl}: ${err.message}`);
-            unavailErr.code = "LOCAL_RUNTIME_UNAVAILABLE";
+            unavailErr.code = "RUNTIME_UNAVAILABLE";
             unavailErr.statusCode = 503;
             throw unavailErr;
         }
@@ -143,7 +153,7 @@ export class GemmaMlxAdapter extends BaseAdapter {
 
         const timeoutMs = typeof options.timeoutMs === "number"
             ? options.timeoutMs
-            : Number(process.env.GEMMA_MLX_TIMEOUT_MS || 120000);
+            : MODEL_RUNTIME_CONFIG.INSPECTION.timeoutMs;
         const abortSignal = options.signal || AbortSignal.timeout(timeoutMs);
 
         const response = await this._fetch("/v1/chat/completions", {
@@ -157,11 +167,22 @@ export class GemmaMlxAdapter extends BaseAdapter {
 
         if (!response.ok) {
             const responseText = await response.text().catch(() => "");
+            const isNotFound = response.status === 404;
             const err = new Error(
                 `Gemma MLX host runtime returned HTTP ${response.status}${responseText ? `: ${responseText.slice(0, 240)}` : ""}`
             );
-            err.code = "LOCAL_RUNTIME_UNAVAILABLE";
+            err.code = isNotFound ? "MODEL_NOT_FOUND" : "RUNTIME_UNAVAILABLE";
             err.statusCode = response.status >= 500 || response.status === 404 ? 503 : response.status;
+            logModelInference({
+                requestId: options.requestId,
+                task: taskName,
+                model: model || this.defaultModel,
+                runtime: "mlx",
+                startedAt: new Date(startTime).toISOString(),
+                durationMs: Date.now() - startTime,
+                status: "FAILED",
+                errorCode: err.code,
+            });
             throw err;
         }
 
@@ -270,6 +291,16 @@ export class GemmaMlxAdapter extends BaseAdapter {
             `input_chars=${inputChars} output_chars=${outputChars} ` +
             `prompt_tokens=${promptTokens} eval_tokens=${evalTokens} duration_ms=${durationMs}`
         );
+
+        logModelInference({
+            requestId: options.requestId,
+            task: taskName,
+            model: model || this.defaultModel,
+            runtime: "mlx",
+            startedAt: new Date(startTime).toISOString(),
+            durationMs,
+            status: "SUCCESS",
+        });
 
         let finalAnswer = content.trim();
         if (primaryDoc && finalAnswer.includes("Document_Name.pdf")) {

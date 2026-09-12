@@ -7,6 +7,7 @@
 
 import path from "path";
 import { fileURLToPath } from "url";
+import { MODEL_RUNTIME_CONFIG } from "../../config/modelRuntime.config.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,13 +26,13 @@ export const DEFAULT_MLX_RUNTIME_DIR = path.resolve(__dirname, "../../mlx-runtim
 export const MODEL_RUNTIME_REGISTRY = Object.freeze({
     gemma: Object.freeze({
         id: "gemma",
-        logicalModel: "gemma-2-2b-it-4bit",
+        logicalModel: MODEL_RUNTIME_CONFIG.INSPECTION.model,
         provider: "gemma_mlx",
-        runtime: "mlx_lm",
+        runtime: MODEL_RUNTIME_CONFIG.INSPECTION.runtime,
         port: 8080,
         host: "127.0.0.1",
         get healthUrl() {
-            const base = (process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://host.docker.internal:8080").replace(/\/$/, "");
+            const base = MODEL_RUNTIME_CONFIG.INSPECTION.url.replace(/\/$/, "");
             return `${base}/health`;
         },
         modelRelPath: "models/gemma-2-2b-it-4bit",
@@ -49,13 +50,13 @@ export const MODEL_RUNTIME_REGISTRY = Object.freeze({
 
     qwen_coder: Object.freeze({
         id: "qwen_coder",
-        logicalModel: "qwen2.5-coder:3b-4bit",
+        logicalModel: MODEL_RUNTIME_CONFIG.CODING.model,
         provider: "qwen_coder_mlx",
-        runtime: "mlx_lm",
+        runtime: MODEL_RUNTIME_CONFIG.CODING.runtime,
         port: 8081,
         host: "127.0.0.1",
         get healthUrl() {
-            const base = (process.env.QWEN_CODER_MLX_URL || "http://host.docker.internal:8081").replace(/\/$/, "");
+            const base = MODEL_RUNTIME_CONFIG.CODING.url.replace(/\/$/, "");
             return `${base}/health`;
         },
         modelRelPath: "models/qwen2.5-coder-3b-4bit",
@@ -73,13 +74,13 @@ export const MODEL_RUNTIME_REGISTRY = Object.freeze({
 
     qwen_vl: Object.freeze({
         id: "qwen_vl",
-        logicalModel: "qwen2.5-vl:3b-4bit",
+        logicalModel: MODEL_RUNTIME_CONFIG.VISION.model,
         provider: "qwen_vl_mlx",
-        runtime: "mlx_vlm",
+        runtime: MODEL_RUNTIME_CONFIG.VISION.runtime,
         port: 8082,
         host: "127.0.0.1",
         get healthUrl() {
-            const base = (process.env.QWEN_VL_MLX_URL || "http://host.docker.internal:8082").replace(/\/$/, "");
+            const base = MODEL_RUNTIME_CONFIG.VISION.url.replace(/\/$/, "");
             return `${base}/health`;
         },
         modelRelPath: "models/qwen2.5-vl-3b-4bit",

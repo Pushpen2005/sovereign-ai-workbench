@@ -6,28 +6,20 @@
  */
 
 import { BaseAdapter } from "./base.adapter.js";
+import { MODEL_RUNTIME_CONFIG } from "../../config/modelRuntime.config.js";
+import { logModelInference } from "../../utils/modelObservability.js";
 
 export class QwenCoderMlxAdapter extends BaseAdapter {
     constructor(options = {}) {
         super("qwen_coder_mlx");
-        this.baseUrl =
-            options.baseUrl ||
-            process.env.QWEN_CODER_MLX_URL ||
-            process.env.MLX_CODER_URL ||
-            "http://127.0.0.1:8081";
-        this.defaultModel =
-            options.defaultModel ||
-            process.env.QWEN_CODER_MODEL ||
-            "qwen2.5-coder:3b-4bit";
+        this.baseUrl = options.baseUrl || MODEL_RUNTIME_CONFIG.CODING.url;
+        this.defaultModel = options.defaultModel || MODEL_RUNTIME_CONFIG.CODING.model;
+        this.serverModel = options.serverModel || MODEL_RUNTIME_CONFIG.CODING.serverModel;
     }
 
     getBaseUrl() {
-        return (
-            this.baseUrl ||
-            process.env.QWEN_CODER_MLX_URL ||
-            process.env.MLX_CODER_URL ||
-            "http://127.0.0.1:8081"
-        );
+        const url = this.baseUrl || MODEL_RUNTIME_CONFIG.CODING.url;
+        return url.trim().replace(/\/$/, "");
     }
 
     async _fetchWithDockerFallback(endpoint, init) {
@@ -36,10 +28,33 @@ export class QwenCoderMlxAdapter extends BaseAdapter {
             return await fetch(`${primaryUrl}${endpoint}`, init);
         } catch (err) {
             if (primaryUrl.includes("host.docker.internal")) {
-                const fallbackUrl = primaryUrl.replace("host.docker.internal", "127.0.0.1");
-                return await fetch(`${fallbackUrl}${endpoint}`, init);
+                try {
+                    const fallbackUrl = primaryUrl.replace("host.docker.internal", "127.0.0.1");
+                    return await fetch(`${fallbackUrl}${endpoint}`, init);
+                } catch {
+                    // fall through to primary error handling
+                }
             }
-            throw err;
+
+            const isTimeout =
+                err.name === "TimeoutError" ||
+                err.name === "AbortError" ||
+                err.cause?.name === "TimeoutError" ||
+                err.cause?.name === "AbortError" ||
+                err.message?.includes("timed out") ||
+                err.message?.includes("aborted");
+
+            if (isTimeout) {
+                const timeoutErr = new Error(`Qwen Coder MLX request timed out: ${err.message}`);
+                timeoutErr.code = "TIMEOUT";
+                timeoutErr.statusCode = 504;
+                throw timeoutErr;
+            }
+
+            const unavailErr = new Error(`Local Qwen Coder MLX runtime unavailable at ${primaryUrl}: ${err.message}`);
+            unavailErr.code = "RUNTIME_UNAVAILABLE";
+            unavailErr.statusCode = 503;
+            throw unavailErr;
         }
     }
 
@@ -65,8 +80,8 @@ export class QwenCoderMlxAdapter extends BaseAdapter {
 
         const topP = typeof options.top_p === "number" ? options.top_p : 0.95;
 
-        // mlx_lm.server binds the locally loaded model to 'default_model' or its local path
-        const serverModel = model?.startsWith("/") ? model : "default_model";
+        // mlx_lm.server binds locally loaded model to 'default_model' or model path
+        const serverModel = model?.startsWith("/") ? model : (this.serverModel || "default_model");
 
         const requestBody = {
             model: serverModel,
@@ -85,7 +100,7 @@ export class QwenCoderMlxAdapter extends BaseAdapter {
         const timeoutMs =
             typeof options.timeoutMs === "number"
                 ? options.timeoutMs
-                : Number(process.env.QWEN_TIMEOUT_MS || process.env.MLX_TIMEOUT_MS || 120000);
+                : MODEL_RUNTIME_CONFIG.CODING.timeoutMs;
         const abortSignal = options.signal || AbortSignal.timeout(timeoutMs);
 
         const response = await this._fetchWithDockerFallback("/v1/chat/completions", {
@@ -98,12 +113,24 @@ export class QwenCoderMlxAdapter extends BaseAdapter {
         });
 
         if (!response.ok) {
+            const isNotFound = response.status === 404;
             const err = new Error(
-                response.status === 404
+                isNotFound
                     ? "Model unavailable on Qwen MLX server"
                     : `Qwen MLX inference generation failed with status ${response.status}`
             );
+            err.code = isNotFound ? "MODEL_NOT_FOUND" : "RUNTIME_UNAVAILABLE";
             err.statusCode = response.status;
+            logModelInference({
+                requestId: options.requestId,
+                task: taskName,
+                model: model || this.defaultModel,
+                runtime: "mlx",
+                startedAt: new Date(startTime).toISOString(),
+                durationMs: Date.now() - startTime,
+                status: "FAILED",
+                errorCode: err.code,
+            });
             throw err;
         }
 
@@ -186,11 +213,15 @@ export class QwenCoderMlxAdapter extends BaseAdapter {
         const promptTokens = data?.usage?.prompt_tokens ?? "N/A";
         const evalTokens = data?.usage?.completion_tokens ?? "N/A";
 
-        console.log(
-            `[LLM:QwenCoderMLX] task=${taskName} model=${model} status=success ` +
-            `input_chars=${inputChars} output_chars=${outputChars} ` +
-            `prompt_tokens=${promptTokens} eval_tokens=${evalTokens} duration_ms=${durationMs}`
-        );
+        logModelInference({
+            requestId: options.requestId,
+            task: taskName,
+            model: model || this.defaultModel,
+            runtime: "mlx",
+            startedAt: new Date(startTime).toISOString(),
+            durationMs,
+            status: "SUCCESS",
+        });
 
         return content.trim();
     }

@@ -19,12 +19,38 @@ import {
     InspectionValidationError,
 } from "./inspection.schema.js";
 
-export class InspectionExtractionError extends Error {
+export const INSPECTION_ERROR_CODES = Object.freeze({
+    RUNTIME_UNAVAILABLE: "RUNTIME_UNAVAILABLE",
+    CONNECTION_ERROR: "CONNECTION_ERROR",
+    TIMEOUT: "TIMEOUT",
+    MODEL_NOT_FOUND: "MODEL_NOT_FOUND",
+    INVALID_REQUEST: "INVALID_REQUEST",
+    MALFORMED_OUTPUT: "MALFORMED_OUTPUT",
+    SCHEMA_VALIDATION_FAILED: "SCHEMA_VALIDATION_FAILED",
+    INSUFFICIENT_EVIDENCE: "INSUFFICIENT_EVIDENCE",
+});
+
+export class InspectionServiceError extends Error {
+    constructor(message, code = INSPECTION_ERROR_CODES.MALFORMED_OUTPUT, options = {}) {
+        super(message, options);
+        this.name = "InspectionServiceError";
+        this.code = code;
+        this.statusCode = options.statusCode || (
+            code === INSPECTION_ERROR_CODES.RUNTIME_UNAVAILABLE || code === INSPECTION_ERROR_CODES.CONNECTION_ERROR ? 503 :
+            code === INSPECTION_ERROR_CODES.TIMEOUT ? 504 :
+            code === INSPECTION_ERROR_CODES.MODEL_NOT_FOUND ? 404 :
+            code === INSPECTION_ERROR_CODES.INVALID_REQUEST ? 400 : 422
+        );
+    }
+}
+
+export class InspectionExtractionError extends InspectionServiceError {
     constructor(
         message = "Inspection finding extraction failed because the local model did not return the required structured format.",
         options = {}
     ) {
-        super(message, options);
+        const code = options.code || INSPECTION_ERROR_CODES.MALFORMED_OUTPUT;
+        super(message, code, options);
         this.name = "InspectionExtractionError";
     }
 }
@@ -229,38 +255,111 @@ export async function analyzeInspectionReport(input, options = {}) {
 
     const selectedModel = options.model || process.env.INSPECTION_MODEL || process.env.MODEL_INSPECTION;
 
+    function classifyRuntimeError(err) {
+        if (!err) return null;
+        if (
+            err.code === "TIMEOUT" ||
+            err.code === "LOCAL_RUNTIME_TIMEOUT" ||
+            err.name === "TimeoutError" ||
+            err.name === "AbortError" ||
+            err.message?.includes("timed out")
+        ) {
+            return new InspectionServiceError(
+                err.message || "Local Gemma inference timed out",
+                INSPECTION_ERROR_CODES.TIMEOUT,
+                { cause: err, statusCode: 504 }
+            );
+        }
+        if (err.code === "MODEL_NOT_FOUND" || err.statusCode === 404) {
+            return new InspectionServiceError(
+                err.message || "Local Gemma model not found on runtime server",
+                INSPECTION_ERROR_CODES.MODEL_NOT_FOUND,
+                { cause: err, statusCode: 404 }
+            );
+        }
+        if (
+            err.code === "CONNECTION_ERROR" ||
+            err instanceof TypeError ||
+            err.code === "ECONNREFUSED" ||
+            err.message?.includes("fetch failed")
+        ) {
+            return new InspectionServiceError(
+                `Local Gemma runtime connection failed: ${err.message}`,
+                INSPECTION_ERROR_CODES.CONNECTION_ERROR,
+                { cause: err, statusCode: 503 }
+            );
+        }
+        if (
+            err.code === "RUNTIME_UNAVAILABLE" ||
+            err.code === "LOCAL_RUNTIME_UNAVAILABLE" ||
+            err.statusCode === 503 ||
+            err.message?.includes("unavailable")
+        ) {
+            return new InspectionServiceError(
+                err.message || "Local Gemma MLX runtime is unavailable.",
+                INSPECTION_ERROR_CODES.RUNTIME_UNAVAILABLE,
+                { cause: err, statusCode: 503 }
+            );
+        }
+        return null;
+    }
+
     // Attempt 1: Standard structured extraction with format: "json"
+    let rawResponse;
     try {
-        const rawResponse = await generateAnswerFn(prompt, selectedModel, {
+        rawResponse = await generateAnswerFn(prompt, selectedModel, {
             format: "json",
             task: "inspection_finding",
             temperature: 0.1,
             num_predict: Number(process.env.INSPECTION_NUM_PREDICT || 768),
         });
+    } catch (err) {
+        const runtimeErr = classifyRuntimeError(err);
+        if (runtimeErr) {
+            throw runtimeErr;
+        }
+        throw err;
+    }
+
+    try {
         parsedResponse = parseInspectionLlmResponse(rawResponse);
     } catch (err) {
         lastError = err;
         console.warn(`[Inspection] Structured extraction attempt 1 failed validation: ${err.message}`);
     }
 
-    // Attempt 2: Strict retry prompt if attempt 1 failed
+    // Attempt 2: Strict retry prompt if attempt 1 failed schema/JSON parsing
     if (!parsedResponse) {
         console.log("[Inspection] Retrying structured extraction (attempt 2 of 2)...");
+        let retryRawResponse;
         try {
             const retryPrompt = buildInspectionRetryPrompt(task, context, lastError?.message);
-            const retryRawResponse = await generateAnswerFn(retryPrompt, selectedModel, {
+            retryRawResponse = await generateAnswerFn(retryPrompt, selectedModel, {
                 format: "json",
                 task: "inspection_finding_retry",
                 temperature: 0.1,
                 num_predict: Number(process.env.INSPECTION_NUM_PREDICT || 768),
             });
+        } catch (retryFetchErr) {
+            const runtimeErr = classifyRuntimeError(retryFetchErr);
+            if (runtimeErr) {
+                throw runtimeErr;
+            }
+            throw retryFetchErr;
+        }
+
+        try {
             parsedResponse = parseInspectionLlmResponse(retryRawResponse);
             console.log("[Inspection] Structured extraction succeeded on attempt 2");
         } catch (retryErr) {
             console.error(`[Inspection] Structured extraction attempt 2 failed validation: ${retryErr.message}`);
+            const isJsonSyntax = retryErr.message?.toLowerCase().includes("json");
+            const errorCode = isJsonSyntax
+                ? INSPECTION_ERROR_CODES.MALFORMED_OUTPUT
+                : INSPECTION_ERROR_CODES.SCHEMA_VALIDATION_FAILED;
             throw new InspectionExtractionError(
-                "Inspection finding extraction failed because the local model did not return the required structured format.",
-                { cause: retryErr }
+                `Inspection finding extraction failed: ${retryErr.message}`,
+                { cause: retryErr, code: errorCode }
             );
         }
     }

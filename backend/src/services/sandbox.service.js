@@ -16,8 +16,8 @@ export const SUPPORTED_LANGUAGE = "python";
 
 const MAX_CODE_SIZE_BYTES = 64 * 1024;     // 64 KB
 const MAX_OUTPUT_BYTES    = 64 * 1024;     // 64 KB
-const DEFAULT_TIMEOUT_MS  = 5000;          // 5 seconds default
-const MAX_TIMEOUT_MS      = 10000;         // 10 seconds max
+const DEFAULT_TIMEOUT_MS  = 15000;         // 15 seconds default
+const MAX_TIMEOUT_MS      = 30000;         // 30 seconds max
 
 export class SandboxValidationError extends Error {
     constructor(message, details = {}) {

@@ -21,6 +21,7 @@ import agentRouter from "./routes/agent.routes.js";
 import knowledgeRouter from "./routes/knowledge.routes.js";
 import authRouter from "./routes/auth.routes.js";
 import riskRouter from "./routes/risk.routes.js";
+import aiRouter from "./routes/ai.routes.js";
 import { requireAuth } from "./middleware/auth.middleware.js";
 import { correlationMiddleware } from "./middleware/correlation.middleware.js";
 import { telemetryService } from "./services/telemetry.service.js";
@@ -143,6 +144,7 @@ app.use("/api/v1/agent", requireAuth, agentRouter);
 app.use("/api/v1/agents", requireAuth, agentRouter);
 app.use("/api/v1/knowledge", requireAuth, knowledgeRouter);
 app.use("/api/v1/risk", requireAuth, riskRouter);
+app.use("/api/v1/ai", aiRouter);
 
 /**
  * PR #23 — Model Router Diagnostic Endpoint

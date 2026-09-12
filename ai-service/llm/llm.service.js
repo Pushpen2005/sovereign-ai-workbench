@@ -182,10 +182,13 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
 
         if (
             error.name === "TimeoutError" ||
+            error.name === "AbortError" ||
+            error.code === "TIMEOUT" ||
+            error.code === "LOCAL_RUNTIME_TIMEOUT" ||
             error.message?.includes("timed out") ||
             error.message?.includes("The operation was aborted")
         ) {
-            throw new LLMError("Inference timed out", {
+            throw new LLMError(`Local inference timed out for model '${selectedModel}'`, {
                 cause: error,
                 code: "TIMEOUT",
                 statusCode: 408,
@@ -193,10 +196,24 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
             });
         }
 
-        if (error.code === "LOCAL_RUNTIME_UNAVAILABLE" || error.statusCode === 503) {
-            throw new LLMError("Local Gemma MLX runtime is unavailable.", {
+        if (error.code === "MODEL_NOT_FOUND" || error.statusCode === 404) {
+            throw new LLMError(`Local model '${selectedModel}' was not found on the runtime server.`, {
                 cause: error,
-                code: "LOCAL_RUNTIME_UNAVAILABLE",
+                code: "MODEL_NOT_FOUND",
+                statusCode: 404,
+                model: selectedModel,
+            });
+        }
+
+        if (
+            error.code === "RUNTIME_UNAVAILABLE" ||
+            error.code === "LOCAL_RUNTIME_UNAVAILABLE" ||
+            error.statusCode === 503
+        ) {
+            const runtimeName = String(selectedModel).includes("vl") ? "Qwen VL MLX" : (String(selectedModel).includes("coder") ? "Qwen Coder MLX" : "Gemma MLX");
+            throw new LLMError(`Local ${runtimeName} runtime is unavailable.`, {
+                cause: error,
+                code: "RUNTIME_UNAVAILABLE",
                 statusCode: 503,
                 model: selectedModel,
             });
@@ -205,7 +222,7 @@ async function generateAnswer(prompt, modelOrOptions, maybeOptions = {}) {
         if (error instanceof TypeError || error.code === "ECONNREFUSED" || error.message?.includes("fetch failed")) {
             throw new LLMError(`Local MLX runtime connection failed: ${error.message}`, {
                 cause: error,
-                code: "LOCAL_RUNTIME_UNAVAILABLE",
+                code: "CONNECTION_ERROR",
                 statusCode: 503,
                 model: selectedModel,
             });
