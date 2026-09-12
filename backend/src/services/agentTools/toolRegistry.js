@@ -8,6 +8,8 @@
  *   - Input arguments are validated before execution.
  */
 
+import fs from "fs";
+import path from "path";
 import { executeCalculator } from "./calculator.tool.js";
 import { executeDocumentSearch } from "./documentSearch.tool.js";
 import { executeFileRead } from "./fileRead.tool.js";
@@ -21,6 +23,53 @@ export class ToolRegistryError extends Error {
         super(message);
         this.name = "ToolRegistryError";
     }
+}
+
+/**
+ * Tool: vision_analyze
+ */
+async function executeVisionAnalyze(args, context = {}) {
+    if (!args || typeof args !== "object") {
+        throw new Error("Arguments must be an object with 'image'");
+    }
+    const { image, prompt = "Analyze this industrial image." } = args;
+    if (!image || typeof image !== "string") {
+        throw new Error("image must be a non-empty string");
+    }
+
+    if (image.includes("..") || path.isAbsolute(image)) {
+        throw new Error("Access Denied: Path traversal detected");
+    }
+
+    const orgId = context.organizationId || "default";
+    const candidatePaths = [
+        path.resolve(process.cwd(), "backend/src/uploads", orgId, image),
+        path.resolve(process.cwd(), "src/uploads", orgId, image),
+        path.resolve(process.cwd(), "uploads", orgId, image),
+    ];
+
+    const imagePath = candidatePaths.find((p) => fs.existsSync(p));
+    if (!imagePath) {
+        throw new Error(`Image file could not be found: ${image}`);
+    }
+
+    const buffer = await fs.promises.readFile(imagePath);
+    if (buffer.length < 8) {
+        throw new Error("Invalid image format or magic bytes");
+    }
+    const isPng = buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47;
+    const isJpeg = buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+    if (!isPng && !isJpeg) {
+        throw new Error("Unsupported image format or invalid magic bytes");
+    }
+
+    const base64 = buffer.toString("base64");
+    const routing = await routeTask(prompt, { hasImage: true });
+    const answer = await generateVisionAnswer(prompt, base64, routing.selectedModel);
+    return {
+        model: routing,
+        analysis: answer,
+    };
 }
 
 /**
@@ -140,6 +189,43 @@ export const TOOL_REGISTRY = {
             required: ["imageBase64"],
         },
         execute: executeAnalyzeImage,
+    },
+
+    vision_analyze: {
+        name: "vision_analyze",
+        description: "Perform on-premise multimodal visual inspection of an uploaded industrial image file.",
+        parameters: {
+            type: "object",
+            properties: {
+                image: { type: "string", description: "Filename of uploaded image" },
+                prompt: { type: "string", description: "Inspection prompt" },
+            },
+            required: ["image"],
+        },
+        execute: executeVisionAnalyze,
+    },
+
+    inspection_workflow: {
+        name: "inspection_workflow",
+        description: "Run the complete autonomous inspection workflow for an uploaded inspection report document.",
+        parameters: {
+            type: "object",
+            properties: {
+                documentId: { type: "string", description: "Inspection document ID" },
+            },
+            required: ["documentId"],
+        },
+        execute: async (args, context = {}) => {
+            if (!context || !context.organizationId) {
+                throw new Error("organizationId context is required");
+            }
+            const { documentId } = args || {};
+            if (!documentId) {
+                throw new Error("documentId is required");
+            }
+            const { runFullInspectionWorkflow } = await import("../../../../ai-service/inspection/inspection.service.js");
+            return runFullInspectionWorkflow(documentId, context.organizationId);
+        },
     },
 };
 

@@ -15,6 +15,8 @@
  * external model invocation.
  */
 
+import { MODEL_RUNTIME_CONFIG } from "../config/modelRuntime.config.js";
+
 // ─── Task Types ───────────────────────────────────────────────────────────────
 
 export const TASK_TYPE = Object.freeze({
@@ -233,9 +235,9 @@ export function classifyTask(questionOrInput, options = {}) {
  * Gemma workloads have a fixed provider route and never fail over to another model.
  */
 export function getModelRegistry() {
-    const gemmaModel = process.env.GEMMA_MLX_MODEL || "gemma-2-2b-it-4bit";
-    const qwenCoderModel = process.env.QWEN_CODER_MODEL || "qwen2.5-coder:3b-4bit";
-    const qwenVlModel = process.env.QWEN_VL_MODEL || "qwen2.5-vl:3b-4bit";
+    const gemmaModel = MODEL_RUNTIME_CONFIG.INSPECTION.model;
+    const qwenCoderModel = MODEL_RUNTIME_CONFIG.CODING.model;
+    const qwenVlModel = MODEL_RUNTIME_CONFIG.VISION.model;
 
     return {
         [TASK_TYPE.DOCUMENT_ANALYSIS]: gemmaModel,
@@ -327,10 +329,7 @@ export async function checkModelAvailability(modelName) {
 
     // Check MLX runtime for Qwen VL models (Port :8082)
     if (lower.includes("vl") || lower.includes("qwen2.5-vl") || lower.includes("vision-mlx")) {
-        const qwenVlUrl =
-            process.env.QWEN_VL_MLX_URL ||
-            process.env.MLX_VISION_URL ||
-            "http://127.0.0.1:8082";
+        const qwenVlUrl = MODEL_RUNTIME_CONFIG.VISION.url;
         if (!qwenVlUrl) return false;
         try {
             const res = await fetch(`${qwenVlUrl}/health`, { signal: AbortSignal.timeout(2000) });
@@ -351,10 +350,7 @@ export async function checkModelAvailability(modelName) {
 
     // Check MLX runtime for Qwen Coder models (Port :8081)
     if (lower.startsWith("qwen") || lower.includes("qwen2.5-coder") || lower.includes("coder-mlx")) {
-        const qwenUrl =
-            process.env.QWEN_CODER_MLX_URL ||
-            process.env.MLX_CODER_URL ||
-            "http://127.0.0.1:8081";
+        const qwenUrl = MODEL_RUNTIME_CONFIG.CODING.url;
         if (!qwenUrl) return false;
         try {
             const res = await fetch(`${qwenUrl}/health`, { signal: AbortSignal.timeout(2000) });
@@ -374,7 +370,7 @@ export async function checkModelAvailability(modelName) {
     }
 
     // Check the configured host-native Gemma MLX runtime (Port :8080).
-    const mlxUrl = process.env.GEMMA_MLX_URL || process.env.MLX_URL || "http://host.docker.internal:8080";
+    const mlxUrl = MODEL_RUNTIME_CONFIG.INSPECTION.url;
     try {
         const res = await fetch(`${mlxUrl}/health`, { signal: AbortSignal.timeout(2000) });
         if (res.ok) return true;

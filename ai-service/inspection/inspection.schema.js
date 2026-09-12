@@ -123,68 +123,102 @@ export function parseInspectionLlmResponse(rawResponse) {
     };
 }
 
+function stripPunctuation(text) {
+    return String(text || "")
+        .toLowerCase()
+        .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()'"?]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function extractKeyNumbers(text) {
+    const matches = String(text || "").match(/\b\d+(?:\.\d+)?\b/g);
+    return matches ? new Set(matches) : new Set();
+}
+
 function findEvidenceSources(evidence, chunks) {
-    const normalizedEvidence = normalizeText(evidence);
+    if (!evidence || typeof evidence !== "string" || !Array.isArray(chunks) || chunks.length === 0) {
+        return [];
+    }
 
-    let matchingSources = chunks
-        .filter((chunk) => typeof chunk.text === "string" && chunk.text.trim().length > 0)
-        .filter((chunk) => {
-            const normalizedChunk = normalizeText(chunk.text);
+    const cleanEvidence = evidence.trim();
+    const normalizedEvidence = normalizeText(cleanEvidence);
+    const strippedEvidence = stripPunctuation(cleanEvidence);
+    const evidenceNumbers = extractKeyNumbers(cleanEvidence);
 
+    // ─── TIER 1: Exact Substring Match ─────────────────────────────────────────
+    let matchedChunks = chunks.filter(
+        (chunk) => typeof chunk.text === "string" && chunk.text.includes(cleanEvidence)
+    );
+
+    // ─── TIER 2: Normalized Exact Match (ignoring punctuation and casing) ───────
+    if (matchedChunks.length === 0 && strippedEvidence.length > 5) {
+        matchedChunks = chunks.filter((chunk) => {
+            if (typeof chunk.text !== "string") return false;
+            const strippedChunk = stripPunctuation(chunk.text);
             return (
-                normalizedChunk.includes(normalizedEvidence) ||
-                normalizedEvidence.includes(normalizedChunk)
+                strippedChunk.includes(strippedEvidence) ||
+                (strippedEvidence.length > 30 && strippedEvidence.includes(strippedChunk))
             );
-        })
-        .map((chunk) => ({
-            documentId: chunk.documentId,
-            filename: chunk.filename,
-            page: chunk.page,
-            chunkIndex: chunk.chunkIndex,
-            score: chunk.score,
-        }))
-        .sort((a, b) => b.score - a.score);
+        });
+    }
 
-    // Fallback: If no direct substring match, check if evidence explicitly references "SOURCE X"
-    if (matchingSources.length === 0) {
-        const sourceMatch = evidence.match(/SOURCE\s*(\d+)/i);
+    // ─── TIER 3: Explicit Source Tag Match ("SOURCE 1", "SOURCE 2") ───────────
+    if (matchedChunks.length === 0) {
+        const sourceMatch = cleanEvidence.match(/SOURCE\s*(\d+)/i);
         if (sourceMatch) {
             const sourceIndex = parseInt(sourceMatch[1], 10) - 1;
             if (sourceIndex >= 0 && sourceIndex < chunks.length) {
                 const targetChunk = chunks[sourceIndex];
                 if (targetChunk && typeof targetChunk.text === "string") {
-                    matchingSources.push({
-                        documentId: targetChunk.documentId,
-                        filename: targetChunk.filename,
-                        page: targetChunk.page,
-                        chunkIndex: targetChunk.chunkIndex,
-                        score: targetChunk.score,
-                    });
+                    matchedChunks = [targetChunk];
                 }
             }
         }
     }
 
-    // Fallback: Check if evidence has >= 70% word overlap with a candidate chunk
-    if (matchingSources.length === 0 && normalizedEvidence.length > 20) {
-        const words = normalizedEvidence.split(/\s+/).filter((w) => w.length > 3);
+    // ─── TIER 4: Normalized Word Overlap with Strict Numeric Gate ─────────────
+    if (matchedChunks.length === 0 && strippedEvidence.length >= 15) {
+        const words = strippedEvidence.split(/\s+/).filter((w) => w.length >= 3);
         if (words.length >= 3) {
+            const candidates = [];
             for (const chunk of chunks) {
-                const normalizedChunk = normalizeText(chunk.text || "");
-                const matchedWords = words.filter((w) => normalizedChunk.includes(w));
-                if (matchedWords.length / words.length >= 0.7) {
-                    matchingSources.push({
-                        documentId: chunk.documentId,
-                        filename: chunk.filename,
-                        page: chunk.page,
-                        chunkIndex: chunk.chunkIndex,
-                        score: chunk.score,
-                    });
-                    break;
+                if (typeof chunk.text !== "string") continue;
+                const strippedChunk = stripPunctuation(chunk.text);
+                const matchedWordCount = words.filter((w) => strippedChunk.includes(w)).length;
+                const overlapRatio = matchedWordCount / words.length;
+
+                // If evidence contains measurements/numbers, chunk MUST contain those numbers
+                let numbersSatisfied = true;
+                if (evidenceNumbers.size > 0) {
+                    const chunkNumbers = extractKeyNumbers(chunk.text);
+                    for (const num of evidenceNumbers) {
+                        if (!chunkNumbers.has(num)) {
+                            numbersSatisfied = false;
+                            break;
+                        }
+                    }
                 }
+
+                if (overlapRatio >= 0.65 && numbersSatisfied) {
+                    candidates.push({ chunk, overlapRatio });
+                }
+            }
+
+            if (candidates.length > 0) {
+                candidates.sort((a, b) => b.overlapRatio - a.overlapRatio);
+                matchedChunks = candidates.map((c) => c.chunk);
             }
         }
     }
+
+    const matchingSources = matchedChunks.map((chunk) => ({
+        documentId: chunk.documentId,
+        filename: chunk.filename,
+        page: chunk.page,
+        chunkIndex: chunk.chunkIndex,
+        score: chunk.score,
+    })).sort((a, b) => (b.score || 0) - (a.score || 0));
 
     return dedupeSources(matchingSources);
 }

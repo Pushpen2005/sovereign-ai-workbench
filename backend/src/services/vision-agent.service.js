@@ -31,10 +31,13 @@ import {
     isModelAllowed,
 } from "../../../ai-service/router/modelRouter.js";
 import {
+    preprocessAndResizeImage,
     validateImageDecodeAndDimensions,
     VISION_ERROR_CODES,
     VisionValidationError,
 } from "../middleware/imageUpload.middleware.js";
+import { MODEL_RUNTIME_CONFIG } from "../config/modelRuntime.config.js";
+import { logModelInference } from "../utils/modelObservability.js";
 import { executionEvents } from "./execution-events.service.js";
 import { createAgentRun, updateAgentRun } from "../repositories/agent.repository.js";
 import { telemetryService } from "./telemetry.service.js";
@@ -342,28 +345,32 @@ export async function runVisionWorkflow({
         stageLatencies.routingMs = Date.now() - tRoute0;
 
         // ─────────────────────────────────────────────────────────────
-        // STAGE 3: validate_image
+        // STAGE 3: validate_image & safe preprocessing (aspect-ratio preserved downscaling)
         // ─────────────────────────────────────────────────────────────
         const tVal0 = Date.now();
         emitProgress("validating_image", { originalName, mimeType });
-        const dimensions = await validateImageDecodeAndDimensions(imageBuffer);
+        const preprocessed = await preprocessAndResizeImage(imageBuffer);
+        const dimensions = { width: preprocessed.width, height: preprocessed.height };
+        const activeImageBuffer = preprocessed.buffer;
         stageLatencies.validationMs = Date.now() - tVal0;
+        stageLatencies.preprocessingMs = preprocessed.resizeLatencyMs;
 
         // ─────────────────────────────────────────────────────────────
         // STAGE 4: store_tenant_temp_image (ephemeral staging)
         // ─────────────────────────────────────────────────────────────
         fs.mkdirSync(tempDir, { recursive: true });
-        fs.writeFileSync(tempFilePath, imageBuffer);
+        fs.writeFileSync(tempFilePath, activeImageBuffer);
 
         // ─────────────────────────────────────────────────────────────
         // STAGE 5: analyse_image (Local Vision Inference via MLX)
         // ─────────────────────────────────────────────────────────────
         emitProgress("analysing_image", { model: routing.selectedModel });
         const tInfer0 = Date.now();
-        const base64Image = imageBuffer.toString("base64");
+        const base64Image = activeImageBuffer.toString("base64");
 
         const fullPrompt = `${CONSTRAINED_INDUSTRIAL_PROMPT}\n\nUSER SPECIFIC QUESTION:\n${cleanPrompt}`;
 
+        const timeoutMs = MODEL_RUNTIME_CONFIG.VISION.timeoutMs;
         let rawModelOutput;
         try {
             rawModelOutput = await generateVisionAnswer(
@@ -371,23 +378,40 @@ export async function runVisionWorkflow({
                 base64Image,
                 routing.selectedModel,
                 {
+                    requestId: runId,
                     maxTokens: 512,
-                    timeoutMs: 45000,
+                    timeoutMs,
                 }
             );
         } catch (err) {
-            if (err instanceof LLMError) {
-                const code = err.code === "TIMEOUT"
-                    ? VISION_ERROR_CODES.TIMEOUT
-                    : VISION_ERROR_CODES.MODEL_UNAVAILABLE;
-                throw new VisionValidationError(
-                    `Local vision model '${routing.selectedModel}' failed during inference: ${err.message}`,
-                    code
-                );
-            }
-            throw err;
+            const code = (err.code === "TIMEOUT" || err.message?.includes("timed out"))
+                ? VISION_ERROR_CODES.TIMEOUT
+                : VISION_ERROR_CODES.MODEL_UNAVAILABLE;
+            logModelInference({
+                requestId: runId,
+                task: "vision",
+                model: routing.selectedModel,
+                runtime: "mlx_vlm",
+                startedAt: new Date(tInfer0).toISOString(),
+                durationMs: Date.now() - tInfer0,
+                status: "FAILED",
+                errorCode: code,
+            });
+            throw new VisionValidationError(
+                `Local vision model '${routing.selectedModel}' failed during inference: ${err.message}`,
+                code
+            );
         }
         stageLatencies.inferenceMs = Date.now() - tInfer0;
+        logModelInference({
+            requestId: runId,
+            task: "vision",
+            model: routing.selectedModel,
+            runtime: "mlx_vlm",
+            startedAt: new Date(tInfer0).toISOString(),
+            durationMs: stageLatencies.inferenceMs,
+            status: "SUCCESS",
+        });
 
         // ─────────────────────────────────────────────────────────────
         // STAGE 6: validate_result & Structured Parsing
@@ -452,9 +476,12 @@ export async function runVisionWorkflow({
                 image: {
                     originalName,
                     mimeType,
-                    sizeBytes: imageBuffer.length,
+                    sizeBytes: activeImageBuffer.length,
                     width: dimensions.width,
                     height: dimensions.height,
+                    wasResized: preprocessed.wasResized,
+                    originalWidth: preprocessed.originalWidth,
+                    originalHeight: preprocessed.originalHeight,
                 },
             },
         };
